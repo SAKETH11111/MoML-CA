@@ -1,0 +1,32 @@
+# Training Configuration for MoML-CA_PFAS Project
+
+# General training settings
+training:
+  epochs: 100
+  batch_size: 32
+  learning_rate: 0.001
+  optimizer: "Adam"
+  early_stopping: true
+  patience: 10
+  validation_split: 0.2
+
+# MGNN specific settings
+mgnn:
+  hidden_channels: 128
+  num_layers: 3
+  dropout: 0.2
+  readout: "mean"
+  jk_mode: "cat"  # For JK-Nets
+
+# LSTM specific settings
+lstm:
+  hidden_size: 64
+  num_layers: 2
+  bidirectional: false
+  dropout: 0.1
+  sequence_length: 50
+
+# Logging and checkpoints
+logging:
+  log_interval: 10
+  checkpoint_interval: 5 

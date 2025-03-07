@@ -1,0 +1,39 @@
+{
+  "simulation": {
+    "engine": "OpenMM",
+    "timestep": 2.0,
+    "timestep_units": "fs",
+    "total_steps": 5000000,
+    "temperature": 300.0,
+    "temperature_units": "K",
+    "pressure": 1.0,
+    "pressure_units": "atm",
+    "ensemble": "NPT",
+    "periodic_boundary": true,
+    "cutoff_distance": 1.0,
+    "cutoff_units": "nm"
+  },
+  "solvent": {
+    "model": "TIP3P",
+    "box_padding": 1.0,
+    "box_padding_units": "nm",
+    "neutralize": true,
+    "salt_concentration": 0.15,
+    "salt_concentration_units": "mol/L"
+  },
+  "force_field": {
+    "protein": "amber14-all.xml",
+    "water": "amber14/tip3p.xml",
+    "small_molecule": "GAFF2"
+  },
+  "output": {
+    "trajectory_interval": 10000,
+    "energy_interval": 1000,
+    "checkpoint_interval": 100000
+  },
+  "hardware": {
+    "platform": "CUDA",
+    "precision": "mixed",
+    "device_index": 0
+  }
+} 
