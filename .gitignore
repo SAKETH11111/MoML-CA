@@ -90,3 +90,19 @@ logs/
 *.svg
 !data/processed/visualizations/pfas20_compounds_grid.png
 !data/processed/visualizations/individual/*.png
+
+# ORCA calculation files
+*.gbw
+*.opt
+*.densities
+*.densitiesinfo
+*.engrad
+*.property.txt
+*.out
+*.trj.xyz
+*_trj.xyz
+*.inp
+*_results.json
+*_optimized.mol
+*.bibtex
+
