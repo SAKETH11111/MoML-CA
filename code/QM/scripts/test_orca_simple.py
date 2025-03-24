@@ -125,7 +125,7 @@ def main():
         "python", str(wrapper_path),
         "--input_csv", str(genx_only_path),
         "--output_dir", str(output_dir),
-        "--functional", "B3LYP",
+        "--functional", "B3LYP",  # Will use B3LYP-D3BJ for improved noncovalent interactions
         "--basis_set", "STO-3G",  # Use a smaller basis set for faster testing
         "--num_procs", "1",
         "--memory", "2000",

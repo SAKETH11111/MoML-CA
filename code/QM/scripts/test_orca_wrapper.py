@@ -57,7 +57,7 @@ def main():
         "python", os.path.join(CURRENT_DIR, "orca_pfas_wrapper.py"),
         "--input_csv", SAMPLE_DATA,
         "--output_dir", OUTPUT_DIR,
-        "--functional", "B3LYP",
+        "--functional", "B3LYP",  # Will use B3LYP-D3BJ for improved noncovalent interactions
         "--basis_set", "6-31G*",
         "--num_procs", "1",
         "--memory", "2000",
