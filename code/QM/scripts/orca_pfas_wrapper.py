@@ -177,7 +177,8 @@ def create_orca_input(
         mol: RDKit molecule with 3D coordinates
         molecule_id: Identifier for the molecule
         output_dir: Directory to write input files
-        functional: DFT functional (B3LYP or wB97X-D)
+        functional: DFT functional (B3LYP or wB97X-D). B3LYP will use D3BJ dispersion correction
+                   for improved treatment of noncovalent interactions.
         basis_set: Basis set for calculation
         num_procs: Number of processors to use
         memory: Memory in MB
@@ -189,10 +190,12 @@ def create_orca_input(
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        # Fix functional name for ORCA (wB97X-D -> wB97X-D3)
+        # Fix functional name for ORCA (wB97X-D -> wB97X-D3, add D3BJ for B3LYP)
         orca_functional = functional
         if functional == "wB97X-D":
             orca_functional = "wB97X-D3"
+        elif functional == "B3LYP":
+            orca_functional = "B3LYP D3BJ"  # Add D3BJ dispersion correction for noncovalent interactions
         
         # Create input file path
         input_file = os.path.join(output_dir, f"{molecule_id}.inp")
