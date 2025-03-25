@@ -10,11 +10,9 @@ This directory contains the data processing pipeline for the MoML-CA PFAS projec
 data_pipeline/
 ├── chemical_list/                      # PFAS Chemical List processing
 │   ├── process_chemical_data.py        # Data cleaning and feature engineering
-│   └── README.md                       # Documentation
 │
 ├── treatment_data/                     # PFAS Treatment Data processing
 │   ├── process_treatment_data.py       # Data cleaning and feature engineering
-│   └── README.md                       # Documentation
 │
 ├── analyze_pfas_data.py                # Cross-dataset analysis and alignment
 └── README.md                           # This file
