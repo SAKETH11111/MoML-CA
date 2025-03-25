@@ -44,32 +44,13 @@ def analyze_chemical_data(df):
     os.makedirs(VISUALIZATION_DIR, exist_ok=True)
     
     # Plot molecular weight distribution
-    plt.figure(figsize=(10, 6))
-    sns.histplot(df['Average_Mass'], bins=30, kde=True)
-    plt.title('Distribution of Molecular Weights')
-    plt.xlabel('Molecular Weight')
-    plt.ylabel('Count')
-    plt.savefig(VISUALIZATION_DIR / 'molecular_weight_distribution.png')
-    plt.close()
+    plot_distribution(df, 'Average_Mass', 'Molecular Weight', 'molecular_weight_distribution.png')
     
     # Plot fluorine count distribution
-    plt.figure(figsize=(10, 6))
-    sns.histplot(df['F_Count'], bins=30, kde=True)
-    plt.title('Distribution of Fluorine Counts')
-    plt.xlabel('Number of Fluorine Atoms')
-    plt.ylabel('Count')
-    plt.savefig(VISUALIZATION_DIR / 'fluorine_count_distribution.png')
-    plt.close()
+    plot_distribution(df, 'F_Count', 'Number of Fluorine Atoms', 'fluorine_count_distribution.png')
     
     # Plot PFAS type distribution
-    plt.figure(figsize=(12, 8))
-    top_types = df['PFAS_Type'].value_counts().head(10)
-    sns.barplot(x=top_types.values, y=top_types.index)
-    plt.title('Top 10 PFAS Types')
-    plt.xlabel('Count')
-    plt.tight_layout()
-    plt.savefig(VISUALIZATION_DIR / 'top_pfas_types.png')
-    plt.close()
+    plot_top_types(df, 'PFAS_Type', 'Top 10 PFAS Types', 'top_pfas_types.png')
     
     print("Chemical data visualizations created")
 
@@ -83,60 +64,22 @@ def analyze_treatment_data(df):
     print(f"Number of treatment processes: {df['Treatment_Process'].nunique()}")
     
     # Plot temperature distribution
-    plt.figure(figsize=(10, 6))
-    sns.histplot(df['Treatment_Temp_C'].dropna(), bins=30, kde=True)
-    plt.title('Distribution of Treatment Temperatures')
-    plt.xlabel('Temperature (°C)')
-    plt.ylabel('Count')
-    plt.savefig(VISUALIZATION_DIR / 'temperature_distribution.png')
-    plt.close()
+    plot_distribution(df, 'Treatment_Temp_C', 'Temperature (°C)', 'temperature_distribution.png')
     
     # Plot treatment time distribution (log scale)
-    plt.figure(figsize=(10, 6))
-    sns.histplot(df['Treatment_Time_Minutes'].dropna(), bins=30, kde=True, log_scale=True)
-    plt.title('Distribution of Treatment Times (Log Scale)')
-    plt.xlabel('Time (minutes, log scale)')
-    plt.ylabel('Count')
-    plt.savefig(VISUALIZATION_DIR / 'treatment_time_distribution.png')
-    plt.close()
+    plot_distribution(df, 'Treatment_Time_Minutes', 'Time (minutes, log scale)', 'treatment_time_distribution.png', log_scale=True)
     
     # Plot effectiveness distribution
-    plt.figure(figsize=(10, 6))
-    sns.histplot(df['Effectiveness_Percent_Numeric'].dropna(), bins=30, kde=True)
-    plt.title('Distribution of Treatment Effectiveness')
-    plt.xlabel('Effectiveness (%)')
-    plt.ylabel('Count')
-    plt.savefig(VISUALIZATION_DIR / 'effectiveness_distribution.png')
-    plt.close()
+    plot_distribution(df, 'Effectiveness_Percent_Numeric', 'Effectiveness (%)', 'effectiveness_distribution.png')
     
     # Plot treatment success rate
-    plt.figure(figsize=(8, 6))
-    success_counts = df['Treatment_Success'].value_counts()
-    labels = ['Unsuccessful (<80%)', 'Successful (≥80%)']
-    plt.pie(success_counts, labels=labels, autopct='%1.1f%%', colors=['#ff9999','#66b3ff'])
-    plt.title('Treatment Success Rate')
-    plt.savefig(VISUALIZATION_DIR / 'treatment_success_rate.png')
-    plt.close()
+    plot_pie_chart(df, 'Treatment_Success', ['Unsuccessful (<80%)', 'Successful (≥80%)'], 'treatment_success_rate.png')
     
     # Plot top treatment processes
-    plt.figure(figsize=(12, 8))
-    top_processes = df['Treatment_Process'].value_counts().head(10)
-    sns.barplot(x=top_processes.values, y=top_processes.index)
-    plt.title('Top 10 Treatment Processes')
-    plt.xlabel('Count')
-    plt.tight_layout()
-    plt.savefig(VISUALIZATION_DIR / 'top_treatment_processes.png')
-    plt.close()
+    plot_top_types(df, 'Treatment_Process', 'Top 10 Treatment Processes', 'top_treatment_processes.png')
     
     # Plot treatment success by process
-    plt.figure(figsize=(12, 8))
-    process_success = df.groupby('Treatment_Process')['Treatment_Success'].mean().sort_values(ascending=False).head(10)
-    sns.barplot(x=process_success.values * 100, y=process_success.index)
-    plt.title('Treatment Success Rate by Process (Top 10)')
-    plt.xlabel('Success Rate (%)')
-    plt.tight_layout()
-    plt.savefig(VISUALIZATION_DIR / 'success_by_process.png')
-    plt.close()
+    plot_success_by_process(df, 'Treatment_Process', 'success_by_process.png')
     
     print("Treatment data visualizations created")
 
@@ -163,39 +106,16 @@ def create_correlation_analysis(chem_df, treat_df):
     corr_matrix = merged_df[corr_cols].corr()
     
     # Plot correlation heatmap
-    plt.figure(figsize=(12, 10))
-    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
-    plt.title('Correlation Matrix: Chemical Properties vs Treatment Parameters')
-    plt.tight_layout()
-    plt.savefig(VISUALIZATION_DIR / 'chemical_treatment_correlation.png')
-    plt.close()
+    plot_heatmap(corr_matrix, 'Correlation Matrix: Chemical Properties vs Treatment Parameters', 'chemical_treatment_correlation.png')
     
     # Plot effectiveness vs fluorine content
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=merged_df, x='F_Count', y='Effectiveness_Percent_Numeric', alpha=0.6)
-    plt.title('Treatment Effectiveness vs Fluorine Count')
-    plt.xlabel('Number of Fluorine Atoms')
-    plt.ylabel('Effectiveness (%)')
-    plt.savefig(VISUALIZATION_DIR / 'effectiveness_vs_fluorine.png')
-    plt.close()
+    plot_scatter(merged_df, 'F_Count', 'Effectiveness_Percent_Numeric', 'Number of Fluorine Atoms', 'Effectiveness (%)', 'effectiveness_vs_fluorine.png')
     
     # Plot effectiveness vs molecular weight
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=merged_df, x='Average_Mass', y='Effectiveness_Percent_Numeric', alpha=0.6)
-    plt.title('Treatment Effectiveness vs Molecular Weight')
-    plt.xlabel('Molecular Weight')
-    plt.ylabel('Effectiveness (%)')
-    plt.savefig(VISUALIZATION_DIR / 'effectiveness_vs_molecular_weight.png')
-    plt.close()
+    plot_scatter(merged_df, 'Average_Mass', 'Effectiveness_Percent_Numeric', 'Molecular Weight', 'Effectiveness (%)', 'effectiveness_vs_molecular_weight.png')
     
     # Plot temperature vs molecular weight, colored by success
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=merged_df, x='Average_Mass', y='Treatment_Temp_C', hue='Treatment_Success', alpha=0.6)
-    plt.title('Treatment Temperature vs Molecular Weight')
-    plt.xlabel('Molecular Weight')
-    plt.ylabel('Temperature (°C)')
-    plt.savefig(VISUALIZATION_DIR / 'temperature_vs_molecular_weight.png')
-    plt.close()
+    plot_scatter(merged_df, 'Average_Mass', 'Treatment_Temp_C', 'Molecular Weight', 'Temperature (°C)', 'temperature_vs_molecular_weight.png', hue='Treatment_Success')
     
     print("Correlation analysis visualizations created")
     
@@ -256,14 +176,7 @@ def check_class_imbalance(df):
     print(f"Success ratio: {success_ratio:.2f}")
     
     # Plot class distribution
-    plt.figure(figsize=(8, 6))
-    sns.countplot(x='Treatment_Success', data=df)
-    plt.title('Treatment Success Distribution')
-    plt.xlabel('Treatment Success (>80% Effectiveness)')
-    plt.ylabel('Count')
-    plt.xticks([0, 1], ['False', 'True'])
-    plt.savefig(VISUALIZATION_DIR / 'class_imbalance.png')
-    plt.close()
+    plot_count(df, 'Treatment_Success', 'Treatment Success (>80% Effectiveness)', 'class_imbalance.png')
     
     # Create class distribution by chemical type
     if 'PFAS_Type' in df.columns:
@@ -274,18 +187,93 @@ def check_class_imbalance(df):
         filtered_df = df[df['PFAS_Type'].isin(top_types)]
         
         # Plot success rate by PFAS type
-        plt.figure(figsize=(12, 8))
-        sns.countplot(x='PFAS_Type', hue='Treatment_Success', data=filtered_df)
-        plt.title('Treatment Success by PFAS Type')
-        plt.xlabel('PFAS Type')
-        plt.ylabel('Count')
-        plt.xticks(rotation=45, ha='right')
-        plt.legend(title='Success')
-        plt.tight_layout()
-        plt.savefig(VISUALIZATION_DIR / 'success_by_pfas_type.png')
-        plt.close()
+        plot_success_by_type(filtered_df, 'PFAS_Type', 'success_by_pfas_type.png')
     
     print("Class imbalance visualizations created")
+
+def plot_distribution(df, column, xlabel, filename, log_scale=False):
+    """Plot distribution of a given column."""
+    plt.figure(figsize=(10, 6))
+    sns.histplot(df[column].dropna(), bins=30, kde=True, log_scale=log_scale)
+    plt.title(f'Distribution of {xlabel}')
+    plt.xlabel(xlabel)
+    plt.ylabel('Count')
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
+
+def plot_top_types(df, column, title, filename):
+    """Plot top types of a given column."""
+    plt.figure(figsize=(12, 8))
+    top_types = df[column].value_counts().head(10)
+    sns.barplot(x=top_types.values, y=top_types.index)
+    plt.title(title)
+    plt.xlabel('Count')
+    plt.tight_layout()
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
+
+def plot_pie_chart(df, column, labels, filename):
+    """Plot pie chart of a given column."""
+    plt.figure(figsize=(8, 6))
+    counts = df[column].value_counts()
+    plt.pie(counts, labels=labels, autopct='%1.1f%%', colors=['#ff9999','#66b3ff'])
+    plt.title(f'{column} Distribution')
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
+
+def plot_success_by_process(df, column, filename):
+    """Plot treatment success by process."""
+    plt.figure(figsize=(12, 8))
+    process_success = df.groupby(column)['Treatment_Success'].mean().sort_values(ascending=False).head(10)
+    sns.barplot(x=process_success.values * 100, y=process_success.index)
+    plt.title('Treatment Success Rate by Process (Top 10)')
+    plt.xlabel('Success Rate (%)')
+    plt.tight_layout()
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
+
+def plot_heatmap(corr_matrix, title, filename):
+    """Plot heatmap of correlation matrix."""
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
+
+def plot_scatter(df, x, y, xlabel, ylabel, filename, hue=None):
+    """Plot scatter plot of two columns."""
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(data=df, x=x, y=y, hue=hue, alpha=0.6)
+    plt.title(f'{ylabel} vs {xlabel}')
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
+
+def plot_count(df, column, xlabel, filename):
+    """Plot count of a given column."""
+    plt.figure(figsize=(8, 6))
+    sns.countplot(x=column, data=df)
+    plt.title(f'{xlabel} Distribution')
+    plt.xlabel(xlabel)
+    plt.ylabel('Count')
+    plt.xticks([0, 1], ['False', 'True'])
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
+
+def plot_success_by_type(df, column, filename):
+    """Plot success rate by type."""
+    plt.figure(figsize=(12, 8))
+    sns.countplot(x=column, hue='Treatment_Success', data=df)
+    plt.title('Treatment Success by PFAS Type')
+    plt.xlabel('PFAS Type')
+    plt.ylabel('Count')
+    plt.xticks(rotation=45, ha='right')
+    plt.legend(title='Success')
+    plt.tight_layout()
+    plt.savefig(VISUALIZATION_DIR / filename)
+    plt.close()
 
 def main():
     """Main function to execute the data analysis and alignment."""
