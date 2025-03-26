@@ -1,18 +1,22 @@
 """
-Graph Coarsening Utilities for PFAS Compounds
+Graph Coarsening Utilities for PFAS Molecular Structures
 
-This module provides utility functions for creating and saving hierarchical
-graph representations of PFAS molecules at different levels of coarseness.
+This module provides utility functions for creating hierarchical graph representations
+of PFAS molecules at different levels of coarseness:
+1. Atom level (original graph)
+2. Functional group level (intermediate coarseness)
+3. Structural motif level (highest coarseness)
 """
 
 import os
 import torch
-from typing import Dict, List, Optional, Tuple
+import numpy as np
+from typing import Dict, List, Optional, Union
 from rdkit import Chem
-from torch_geometric.data import Data
 
 from code.MGNN.architectures.graph_coarsening import GraphCoarsener
-from code.MGNN.utils.mol_graph_generator import create_graph_from_orca_data
+from code.MGNN.utils.unified_graph_generator import create_graph_from_orca
+from code.utils.quantum.orca_parser import parse_orca_output
 
 
 def create_hierarchical_graphs_from_orca(
@@ -25,74 +29,75 @@ def create_hierarchical_graphs_from_orca(
     use_3d_coords: bool = True
 ) -> Dict[str, str]:
     """
-    Create hierarchical graph representations from molecule file and ORCA output.
+    Create hierarchical graph representations from a molecule file and ORCA output.
     
     Args:
-        mol_file: Path to the molecule file (SDF, MOL)
+        mol_file: Path to the molecule file (MOL/SDF)
         orca_output: Path to the ORCA output file
-        output_dir: Directory to save graph files (default is directory of mol_file)
-        charge_type: Type of charges to extract ('mulliken' or 'loewdin')
+        output_dir: Directory to save graph files (default: same directory as mol_file)
+        charge_type: Type of partial charges to use ('mulliken' or 'loewdin')
         use_pfas_features: Whether to include PFAS-specific features
         use_quantum_properties: Whether to include quantum properties from ORCA
-        use_3d_coords: Whether to include 3D coordinates in the graphs
+        use_3d_coords: Whether to use 3D coordinates
     
     Returns:
-        Dictionary mapping hierarchy level to output file path
+        Dictionary mapping level names to paths of saved graph files
     """
-    # Create base atom-level graph first
-    base_output_file = None
-    if output_dir is not None:
-        base_name = os.path.splitext(os.path.basename(mol_file))[0]
-        base_output_file = os.path.join(output_dir, f"{base_name}_atom_graph.pt")
+    # Set default output directory if not provided
+    if output_dir is None:
+        output_dir = os.path.dirname(mol_file)
     
-    # Create the atom-level graph
-    atom_graph_path = create_graph_from_orca_data(
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # Load molecule
+    mol = Chem.MolFromMolFile(mol_file, removeHs=False)
+    if mol is None:
+        raise ValueError(f"Failed to load molecule from {mol_file}")
+    
+    # Parse ORCA output for quantum data
+    qm_data = None
+    if use_quantum_properties and os.path.exists(orca_output):
+        qm_data = parse_orca_output(orca_output)
+    
+    # Create base atom-level graph
+    base_name = os.path.splitext(os.path.basename(mol_file))[0]
+    atom_graph_path = os.path.join(output_dir, f"{base_name}_atom_graph.pt")
+    
+    # Use unified graph generator to create atom-level graph
+    atom_graph_data = create_graph_from_orca(
         mol_file=mol_file,
-        orca_output=orca_output,
-        output_file=base_output_file,
+        orca_file=orca_output if use_quantum_properties else None,
+        output_file=atom_graph_path,
         charge_type=charge_type,
         use_pfas_features=use_pfas_features,
         use_quantum_properties=use_quantum_properties
     )
     
-    # Set up output directory if not provided
-    if output_dir is None:
-        output_dir = os.path.dirname(atom_graph_path)
+    # Load the saved graph if it was saved, otherwise use returned data
+    if os.path.exists(atom_graph_path):
+        atom_graph_data = torch.load(atom_graph_path)
     
-    # Load the atom-level graph
-    atom_graph = torch.load(atom_graph_path)
-    
-    # Load the molecule
-    mol = Chem.MolFromMolFile(mol_file, removeHs=False)
-    if mol is None:
-        raise ValueError(f"Failed to read molecule from {mol_file}")
-    
-    # Initialize graph coarsener
+    # Create graph coarsener
     coarsener = GraphCoarsener(use_3d_coords=use_3d_coords)
     
-    # Create hierarchical graphs
-    hierarchical_graphs = coarsener.create_hierarchical_graphs(atom_graph, mol)
+    # Generate hierarchical graphs
+    hierarchical_graphs = coarsener.create_hierarchical_graphs(atom_graph_data, mol)
     
-    # Save the coarsened graphs
-    output_paths = {
-        'atom': atom_graph_path
-    }
+    # Save each level of graph
+    graph_paths = {}
+    graph_paths['atom'] = atom_graph_path
     
-    base_name = os.path.splitext(os.path.basename(atom_graph_path))[0].replace("_atom_graph", "")
+    for level, graph in hierarchical_graphs.items():
+        if level == 'atom':
+            continue  # Already saved
+        
+        # Save this level
+        graph_path = os.path.join(output_dir, f"{base_name}_{level}_graph.pt")
+        torch.save(graph, graph_path)
+        graph_paths[level] = graph_path
     
-    # Save functional group level graph
-    fg_output_path = os.path.join(output_dir, f"{base_name}_functional_group_graph.pt")
-    torch.save(hierarchical_graphs['functional_group'], fg_output_path)
-    output_paths['functional_group'] = fg_output_path
-    print(f"Functional group graph saved to {fg_output_path}")
-    
-    # Save structural motif level graph
-    sm_output_path = os.path.join(output_dir, f"{base_name}_structural_motif_graph.pt")
-    torch.save(hierarchical_graphs['structural_motif'], sm_output_path)
-    output_paths['structural_motif'] = sm_output_path
-    print(f"Structural motif graph saved to {sm_output_path}")
-    
-    return output_paths
+    return graph_paths
 
 
 def batch_create_hierarchical_graphs(
@@ -101,32 +106,26 @@ def batch_create_hierarchical_graphs(
     output_dir: str,
     charge_type: str = 'mulliken',
     use_pfas_features: bool = True,
-    use_quantum_properties: bool = True,
-    use_3d_coords: bool = True
-) -> Dict[str, List[str]]:
+    use_quantum_properties: bool = True
+) -> Dict[str, Dict[str, str]]:
     """
-    Batch create hierarchical graphs for multiple PFAS molecules.
+    Batch process multiple molecules to create hierarchical graph representations.
     
     Args:
         mol_dir: Directory containing molecule files
         orca_dir: Directory containing ORCA output files
         output_dir: Directory to save graph files
-        charge_type: Type of charges to extract ('mulliken' or 'loewdin')
+        charge_type: Type of partial charges to use ('mulliken' or 'loewdin')
         use_pfas_features: Whether to include PFAS-specific features
         use_quantum_properties: Whether to include quantum properties from ORCA
-        use_3d_coords: Whether to include 3D coordinates in the graphs
     
     Returns:
-        Dictionary mapping hierarchy level to list of output file paths
+        Dictionary mapping molecule names to dictionaries of graph paths
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    output_paths = {
-        'atom': [],
-        'functional_group': [],
-        'structural_motif': []
-    }
+    all_graph_paths = {}
     
     # Find all molecule files
     mol_files = {}
@@ -142,161 +141,80 @@ def batch_create_hierarchical_graphs(
             base_name = os.path.splitext(filename)[0]
             orca_files[base_name] = os.path.join(orca_dir, filename)
     
-    # Process each matched pair of molecule and ORCA output files
+    # Process each molecule with matching ORCA output
     for base_name, mol_file in mol_files.items():
-        # Look for exact match
+        mol_output_dir = os.path.join(output_dir, base_name)
+        
+        # Find matching ORCA output
+        orca_file = None
         if base_name in orca_files:
             orca_file = orca_files[base_name]
-            
-            try:
-                # Create hierarchical graphs
-                paths = create_hierarchical_graphs_from_orca(
-                    mol_file=mol_file,
-                    orca_output=orca_file,
-                    output_dir=output_dir,
-                    charge_type=charge_type,
-                    use_pfas_features=use_pfas_features,
-                    use_quantum_properties=use_quantum_properties,
-                    use_3d_coords=use_3d_coords
-                )
-                
-                # Store output paths
-                for level, path in paths.items():
-                    output_paths[level].append(path)
-                
-                print(f"Created hierarchical graphs for {base_name}")
-            except Exception as e:
-                print(f"Error creating hierarchical graphs for {base_name}: {e}")
         else:
-            # Try to find similar names
-            found = False
-            for orca_name, orca_file in orca_files.items():
+            # Look for similar names
+            for orca_name, orca_path in orca_files.items():
                 if base_name in orca_name or orca_name in base_name:
-                    try:
-                        # Create hierarchical graphs
-                        paths = create_hierarchical_graphs_from_orca(
-                            mol_file=mol_file,
-                            orca_output=orca_file,
-                            output_dir=output_dir,
-                            charge_type=charge_type,
-                            use_pfas_features=use_pfas_features,
-                            use_quantum_properties=use_quantum_properties,
-                            use_3d_coords=use_3d_coords
-                        )
-                        
-                        # Store output paths
-                        for level, path in paths.items():
-                            output_paths[level].append(path)
-                        
-                        print(f"Created hierarchical graphs for {base_name} using {orca_name} ORCA output")
-                        found = True
-                        break
-                    except Exception as e:
-                        print(f"Error creating hierarchical graphs for {base_name} using {orca_name} ORCA output: {e}")
+                    orca_file = orca_path
+                    break
+        
+        if orca_file is None:
+            print(f"No matching ORCA output found for {base_name}, skipping")
+            continue
+        
+        try:
+            # Create hierarchical graphs
+            graph_paths = create_hierarchical_graphs_from_orca(
+                mol_file=mol_file,
+                orca_output=orca_file,
+                output_dir=mol_output_dir,
+                charge_type=charge_type,
+                use_pfas_features=use_pfas_features,
+                use_quantum_properties=use_quantum_properties
+            )
             
-            if not found:
-                print(f"No matching ORCA output found for {base_name}")
+            all_graph_paths[base_name] = graph_paths
+            print(f"Created hierarchical graphs for {base_name}")
+            
+        except Exception as e:
+            print(f"Error creating hierarchical graphs for {base_name}: {e}")
     
-    return output_paths
+    return all_graph_paths
 
 
-def visualize_hierarchical_graphs(
+def visualize_graph_hierarchy(
     graph_paths: Dict[str, str],
     output_dir: Optional[str] = None,
-    highlight_feature: str = 'functional_group'
-) -> Dict[str, str]:
+    highlight_features: List[str] = ['fluorine', 'functional_group']
+):
     """
-    Visualize hierarchical graphs at different levels of coarseness.
+    Visualize a set of hierarchical graphs with different highlighting options.
     
     Args:
-        graph_paths: Dictionary mapping hierarchy level to graph file path
-        output_dir: Directory to save visualization files (default is same as graph files)
-        highlight_feature: Feature to highlight in visualization
-        
-    Returns:
-        Dictionary mapping hierarchy level to visualization file path
+        graph_paths: Dictionary mapping level names to graph file paths
+        output_dir: Directory to save visualizations
+        highlight_features: List of features to highlight in separate visualizations
     """
-    try:
-        import matplotlib.pyplot as plt
-        import networkx as nx
-        from torch_geometric.utils import to_networkx
-    except ImportError:
-        print("Visualization requires matplotlib, networkx, and PyTorch Geometric. Please install these packages.")
-        return {}
+    from code.MGNN.utils.visualization import visualize_molecular_graph, visualize_hierarchical_graphs
     
-    visualization_paths = {}
-    
-    for level, graph_path in graph_paths.items():
-        # Load the graph
-        graph = torch.load(graph_path)
+    # Use hierarchical visualization if available
+    if visualize_hierarchical_graphs is not None:
+        visualize_hierarchical_graphs(graph_paths, output_dir)
+    else:
+        # Fallback to individual visualizations
+        if output_dir is not None and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         
-        # Convert to NetworkX graph
-        G = to_networkx(graph, to_undirected=True)
-        
-        # Create figure
-        plt.figure(figsize=(12, 10))
-        
-        # Get node positions from the graph if available
-        if graph.pos is not None:
-            pos = {i: (graph.pos[i][0].item(), graph.pos[i][1].item()) for i in range(graph.num_nodes)}
-        else:
-            # Use spring layout if 3D positions not available
-            pos = nx.spring_layout(G, seed=42)
-        
-        # Define node colors based on hierarchy level
-        if level == 'atom':
-            # Color atoms by type for atom-level graph
-            node_colors = []
-            for i in range(graph.num_nodes):
-                # Check if atom is F, C, or other
-                is_f = graph.x[i][8].item() > 0.5  # Index 8 is the fluorine flag
-                is_cf = graph.x[i][9].item() > 0.5  # Index 9 is the carbon-fluorine flag
+        for level, graph_path in graph_paths.items():
+            try:
+                graph = torch.load(graph_path)
                 
-                if is_f:
-                    node_colors.append('green')  # Fluorine atoms
-                elif is_cf:
-                    node_colors.append('orange')  # Carbon atoms bonded to fluorine
-                else:
-                    node_colors.append('lightblue')  # Other atoms
-        
-        elif level == 'functional_group':
-            # Color functional groups
-            node_colors = ['purple' if i < 10 else 'red' for i in range(graph.num_nodes)]
-        
-        elif level == 'structural_motif':
-            # For structural motifs, use different colors for head and tail
-            node_colors = ['blue' if i == 0 else 'yellow' for i in range(graph.num_nodes)]
-        
-        # Draw the graph
-        nx.draw(G, pos, 
-                node_color=node_colors,
-                node_size=600,
-                width=2.0,
-                with_labels=True,
-                font_size=12,
-                font_weight='bold')
-        
-        # Add title
-        plt.title(f'{level.replace("_", " ").title()} Level Graph', fontsize=16)
-        
-        # Save or show the figure
-        if output_dir is not None:
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-            
-            base_name = os.path.splitext(os.path.basename(graph_path))[0]
-            viz_path = os.path.join(output_dir, f"{base_name}_visualization.png")
-            plt.savefig(viz_path, bbox_inches='tight', dpi=300)
-            visualization_paths[level] = viz_path
-            print(f"{level.title()} visualization saved to {viz_path}")
-        else:
-            # Save in the same directory as the graph file
-            base_name = os.path.splitext(graph_path)[0]
-            viz_path = f"{base_name}_visualization.png"
-            plt.savefig(viz_path, bbox_inches='tight', dpi=300)
-            visualization_paths[level] = viz_path
-            print(f"{level.title()} visualization saved to {viz_path}")
-        
-        plt.close()
-    
-    return visualization_paths 
+                for feature in highlight_features:
+                    if output_dir:
+                        base_name = os.path.splitext(os.path.basename(graph_path))[0]
+                        viz_path = os.path.join(output_dir, f"{base_name}_{feature}.png")
+                    else:
+                        viz_path = None
+                    
+                    visualize_molecular_graph(graph, viz_path, highlight_feature=feature)
+                    
+            except Exception as e:
+                print(f"Error visualizing {level} graph: {e}") 
