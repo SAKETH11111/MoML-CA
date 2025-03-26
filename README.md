@@ -31,6 +31,11 @@ cd MoML-CA_PFAS
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
+# Create a conda environment (recommended)
+conda create -n envname python # change name
+conda activate envname
+
+
 # Install the package
 pip install -e .
 ```
