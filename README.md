@@ -27,7 +27,7 @@ MoML-CA integrates multiple computational techniques:
 git clone https://github.com/saketh/MoML-CA_PFAS.git
 cd MoML-CA_PFAS
 
-# Create a virtual environment (recommended)
+# Create a virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
