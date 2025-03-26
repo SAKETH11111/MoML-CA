@@ -106,3 +106,5 @@ logs/
 *_optimized.mol
 *.bibtex
 
+config/pipeline_config.json
+
