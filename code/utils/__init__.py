@@ -19,6 +19,17 @@ from code.utils.plotting.molecules.molecule_visualization import (
     load_molecules_from_pickle
 )
 
+from code.utils.quantum.orca_parser import (
+    parse_orca_output,
+    extract_partial_charges_from_orca,
+    extract_orbital_contributions_from_orca,
+    process_molecule,
+    batch_process_molecules
+)
+
+from code.utils.graph.molecular_graph_generator import batch_create_graphs_from_molecules
+from code.utils.graph.qm_graph_generator import batch_create_graphs_from_orca
+
 __all__ = [
     # Molecule processing
     'validate_smiles',
@@ -32,5 +43,16 @@ __all__ = [
     'save_molecule_image',
     'save_molecule_grid',
     'visualize_dataset',
-    'load_molecules_from_pickle'
+    'load_molecules_from_pickle',
+    
+    # Quantum chemistry
+    'parse_orca_output',
+    'extract_partial_charges_from_orca',
+    'extract_orbital_contributions_from_orca',
+    'process_molecule',
+    'batch_process_molecules',
+    
+    # Molecular graphs
+    'batch_create_graphs_from_molecules',
+    'batch_create_graphs_from_orca'
 ] 

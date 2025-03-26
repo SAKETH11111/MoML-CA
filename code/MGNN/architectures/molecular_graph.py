@@ -569,89 +569,71 @@ def mol_file_to_graph(mol_file_path: str,
                      charges_file_path: Optional[str] = None, 
                      use_3d: bool = True) -> Data:
     """
-    Convert a molecule file (e.g., SDF, MOL) to a molecular graph.
+    Create a graph representation from a molecule file and optional charges file.
     
     Args:
-        mol_file_path: Path to the molecule file
+        mol_file_path: Path to molecule file (MOL/SDF format)
         charges_file_path: Optional path to file with partial charges
-        use_3d: Whether to use 3D coordinates in the graph
+        use_3d: Whether to use 3D coordinates
         
     Returns:
-        PyTorch Geometric Data object representing the molecular graph
+        PyTorch Geometric Data object
     """
+    # Check if file exists
+    if not os.path.exists(mol_file_path):
+        raise FileNotFoundError(f"Molecule file not found: {mol_file_path}")
+    
     # Read molecule from file
     mol = Chem.MolFromMolFile(mol_file_path, removeHs=False)
     if mol is None:
         raise ValueError(f"Failed to read molecule from {mol_file_path}")
     
-    # Read partial charges if file is provided
+    # Read charges if provided
     partial_charges = None
     if charges_file_path and os.path.exists(charges_file_path):
-        try:
-            # Assuming charges are stored as a simple list, one per line
-            with open(charges_file_path, 'r') as f:
-                partial_charges = [float(line.strip()) for line in f if line.strip()]
-                
-            # Check that number of charges matches number of atoms
-            if len(partial_charges) != mol.GetNumAtoms():
-                print(f"Warning: Number of charges ({len(partial_charges)}) does not match "
-                      f"number of atoms ({mol.GetNumAtoms()}). Charges will not be used.")
-                partial_charges = None
-        except Exception as e:
-            print(f"Error reading charges file: {e}")
-            partial_charges = None
+        with open(charges_file_path, 'r') as f:
+            partial_charges = [float(line.strip()) for line in f if line.strip()]
     
-    # Create and return the graph
-    builder = MolecularGraphBuilder(use_partial_charges=charges_file_path is not None, 
-                                    use_3d_coords=use_3d)
+    # Create builder
+    builder = MolecularGraphBuilder(
+        use_partial_charges=(partial_charges is not None),
+        use_3d_coords=use_3d
+    )
+    
+    # Generate graph
     return builder.mol_to_graph(mol, partial_charges)
-
-
-def orca_output_to_graph(mol_file_path: str, orca_output_path: str) -> Data:
-    """
-    Create a molecular graph from a molecule file and ORCA output file.
-    
-    Args:
-        mol_file_path: Path to the molecule file (e.g., SDF, MOL)
-        orca_output_path: Path to the ORCA output file containing partial charges
-        
-    Returns:
-        PyTorch Geometric Data object representing the molecular graph
-    """
-    # This function will need to be implemented based on how you extract 
-    # partial charges from ORCA output files
-    # For now, it's a placeholder
-    raise NotImplementedError("Extracting partial charges from ORCA output is not yet implemented")
 
 
 def batch_create_graphs(molecule_dir: str, output_dir: str) -> None:
     """
-    Process a directory of molecules to create graph representations.
+    Batch process molecule files to create graph representations.
     
     Args:
         molecule_dir: Directory containing molecule files
-        output_dir: Directory to save graph representations
+        output_dir: Directory to save the graph files
     """
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
     
+    # Find all molecule files
     for filename in os.listdir(molecule_dir):
         if filename.endswith('.mol') or filename.endswith('.sdf'):
             mol_path = os.path.join(molecule_dir, filename)
-            
-            # Try to find a corresponding charges file
             base_name = os.path.splitext(filename)[0]
-            charges_path = os.path.join(molecule_dir, f"{base_name}_charges.txt")
-            if not os.path.exists(charges_path):
-                charges_path = None
             
+            # Look for charges file with the same base name
+            charges_path = None
+            for ext in ['.charges', '.chg', '_charges.txt']:
+                possible_path = os.path.join(molecule_dir, f"{base_name}{ext}")
+                if os.path.exists(possible_path):
+                    charges_path = possible_path
+                    break
+            
+            # Create graph
+            output_path = os.path.join(output_dir, f"{base_name}_graph.pt")
             try:
-                # Create graph representation
                 graph = mol_file_to_graph(mol_path, charges_path)
-                
-                # Save graph representation
-                output_path = os.path.join(output_dir, f"{base_name}_graph.pt")
                 torch.save(graph, output_path)
-                print(f"Processed {filename} -> {output_path}")
+                print(f"Created graph for {base_name}")
             except Exception as e:
-                print(f"Error processing {filename}: {e}") 
+                print(f"Error creating graph for {base_name}: {e}") 

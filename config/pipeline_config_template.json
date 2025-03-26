@@ -1,0 +1,26 @@
+{
+  "data_dir": "/path/to/project/data",
+  "output_dir": "/path/to/project/output",
+  "working_dir": "/path/to/project/working",
+  "parallel": {
+    "enabled": true,
+    "max_workers": 4
+  },
+  "qm": {
+    "functional": "B3LYP",
+    "basis_set": "6-31G*",
+    "num_procs": 2,
+    "memory": 4000
+  },
+  "graph": {
+    "charge_type": "mulliken",
+    "use_pfas_features": true,
+    "use_quantum_properties": true
+  },
+  "execution": {
+    "skip_qm": false,
+    "skip_graph_generation": false,
+    "force_rerun": false,
+    "cache_intermediates": true
+  }
+} 

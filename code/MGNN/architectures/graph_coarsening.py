@@ -6,6 +6,15 @@ of PFAS molecules at different levels of coarseness:
 1. Atom level (original graph)
 2. Functional group level (intermediate coarseness)
 3. Structural motif level (highest coarseness)
+
+Theory:
+Graph coarsening reduces the size and complexity of molecular graphs by aggregating 
+nodes (atoms) into super-nodes (functional groups) based on chemical meaning. 
+This creates a hierarchical representation that:
+- Captures long-range interactions more effectively
+- Reduces computational complexity for large molecules
+- Provides chemically meaningful abstractions for interpretation
+- Enables multi-scale feature learning in graph neural networks
 """
 
 import torch
@@ -194,6 +203,25 @@ class FunctionalGroupIdentifier:
 class GraphCoarsener:
     """
     Creates hierarchical graph representations of PFAS molecules.
+    
+    Graph coarsening theory:
+    The coarsening process aggregates atoms into meaningful chemical groups, creating a
+    multi-resolution representation of the molecular structure. This follows principles from
+    algebraic multigrid theory, where:
+    
+    1. Restriction: Fine-grained information is mapped to coarser representations
+    2. Prolongation: Coarse-grained information is mapped back to fine-grained representations
+    3. Clustering: Similar nodes are grouped based on chemical meaning
+    
+    Benefits:
+    - Reduced computational complexity: O(n) → O(n/c) where c is the coarsening factor
+    - Enhanced receptive field: Captures long-range interactions without deep architectures
+    - Chemical interpretability: Graph nodes represent meaningful chemical functional groups
+    - Multi-scale learning: Different chemical properties are evident at different scales
+    
+    The coarsening is performed in a chemically-guided manner rather than using generic
+    graph algorithms, ensuring that the resulting super-nodes have chemical meaning
+    (e.g., CF3 groups, carboxylic acid groups) specific to PFAS structures.
     """
     
     def __init__(self, use_3d_coords: bool = True):
