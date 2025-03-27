@@ -1,15 +1,14 @@
 # MoML-CA: Molecular Modeling & Machine Learning for Contaminant Analysis
 
-This repository contains a hybrid computational framework for analyzing PFAS (Per- and Polyfluoroalkyl Substances) contaminants by combining molecular modeling with with graph neural networks. The framework enables the prediction of PFAS properties and behaviour in activated carbon, oxidation processes and water treatment systems based on molecular structure.
+This repository contains a hybrid computational framework for analyzing PFAS (Per- and Polyfluoroalkyl Substances) contaminants by combining molecular modeling with graph neural networks. The framework enables the prediction of PFAS properties and behavior in activated carbon, oxidation processes, and IX resin water treatment systems based on molecular structure.
 
 ## Overview
 
-MoML-CA integrates multiple computational techniques:
+MoML-CA integrates:
 
-1. **Molecular Processing**: Validation of SMILES strings and calculation of basic molecular descriptors
-2. **Quantum Mechanical Calculations**: Using ORCA to obtain electronic properties
-3. **Molecular Graph Generation**: Creating graph representations of molecules with quantum-enriched features
-4. **Machine Learning**: Training and applying Graph Neural Networks for property prediction
+1. **Multi-Scale Graph Neural Networks**: A neural network for predicting quantum mechanical properties and molecular properties.
+2. **Molecular Modeling**: Modeling PFAS behavior in various water treatment systems based on custom-built force fields.
+3. **LSTM Neural Networks**: Predict time-series information of PFAS based on trajectories generated from MM.
 
 ## Installation
 
