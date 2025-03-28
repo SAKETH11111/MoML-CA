@@ -517,10 +517,10 @@ class MolecularGraphBuilder:
         # Create additional global features for the molecule
         global_features = [
             Descriptors.ExactMolWt(mol),              # Molecular weight
-            Descriptors.TPSA(mol),                    # Topological polar surface area
+            Descriptors.TPSA(mol),                    # Topological polar surface area, this is also wrong. not actual method
             Lipinski.NumHDonors(mol),                 # Number of H-bond donors
             Lipinski.NumHAcceptors(mol),              # Number of H-bond acceptors
-            Descriptors.MolLogP(mol),                 # Octanol-water partition coefficient
+            Descriptors.MolLogP(mol),                 # Octanol-water partition coefficient, this is wrong. not actual method
             mol.GetNumAtoms(),                        # Total number of atoms
             len([a for a in mol.GetAtoms() if a.GetAtomicNum() == 9])  # Count of fluorine atoms (PFAS specific)
         ]
