@@ -8,6 +8,7 @@ scikit-learn>=1.0.0
 
 # Deep Learning
 torch>=1.10.0
+torch-geometric>=2.0.0
 
 # Molecular Dynamics
 openmm>=7.5.0
