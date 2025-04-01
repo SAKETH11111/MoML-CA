@@ -1,272 +1,114 @@
-# MoML-CA: Molecular Modeling & Machine Learning for Contaminant Analysis
+# MoML-CA: Molecular Machine Learning for Chemical Applications
 
-This repository contains a hybrid computational framework for analyzing PFAS (Per- and Polyfluoroalkyl Substances) contaminants by combining molecular modeling with graph neural networks. The framework enables the prediction of PFAS properties and behavior in activated carbon, oxidation processes, and IX resin water treatment systems based on molecular structure.
+MoML-CA is a Python package for molecular representation learning and property prediction using Graph Neural Networks. The package provides a comprehensive set of tools for converting molecular structures to graph representations, training GNN models, and predicting molecular properties.
 
-## Overview
+## Features
 
-MoML-CA integrates:
-
-1. **Multi-Scale Graph Neural Networks**: A neural network for predicting quantum mechanical properties and molecular properties.
-2. **Molecular Modeling**: Modeling PFAS behavior in various water treatment systems based on custom-built force fields.
-3. **LSTM Neural Networks**: Predict time-series information of PFAS based on trajectories generated from MM.
+- **Molecular Graph Creation**: Convert SMILES and RDKit molecules to graph representations with extensive feature extraction
+- **Hierarchical Graph Representations**: Create multi-level graph representations for improved model performance
+- **Modular Model Architecture**: Flexible and extensible GNN architectures with easy configuration
+- **Training Utilities**: Comprehensive training pipelines with callbacks and monitoring
+- **Evaluation Tools**: Metrics calculation and visualization of predictions
+- **Example Scripts**: Ready-to-use examples for common molecular machine learning tasks
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.8 or higher
-- RDKit
-- PyTorch 1.12 or higher
-- ORCA 5.0 or higher (optional, for quantum calculations)
-
-### Basic Installation
-
 ```bash
 # Clone the repository
-git clone https://github.com/saketh/MoML-CA_PFAS.git
-cd MoML-CA_PFAS
+git clone https://github.com/yourusername/MoML-CA.git
+cd MoML-CA
 
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Install dependencies
+pip install -r requirements.txt
 
-# Create a conda environment (recommended)
-conda create -n envname python # change name
-conda activate envname
-
-
-# Install the package
+# Install the package in development mode
 pip install -e .
 ```
 
-### Installing with Additional Dependencies
-
-```bash
-# For development
-pip install -e ".[dev]"
-
-# For graph neural networks
-pip install -e ".[mgnn]"
-
-# For documentation
-pip install -e ".[docs]"
-```
-
-### ORCA Installation (Optional)
-
-To use quantum mechanical calculations, you need to install ORCA:
-
-1. Download ORCA from [the official website](https://orcaforum.kofo.mpg.de)
-2. Extract the files to a directory of your choice
-3. Add the ORCA directory to your PATH
-4. Set the `orca_path` parameter in the pipeline configuration
-
-## Usage
-
-### Quick Start
-
-```bash
-# Run the complete pipeline on a dataset
-moml-ca --config config/pipeline_config.json --input data/raw/pfas_dataset.csv --stage all
-
-# Run specific stages
-moml-ca --stage preprocess --input data/raw/pfas_dataset.csv
-moml-ca --stage orca --input data/processed/pfas_processed.csv
-moml-ca --stage graphs
-
-# Skip quantum mechanical calculations (faster execution)
-moml-ca --config config/pipeline_config.json --skip-qm
-
-# Skip both QM calculations and graph generation
-moml-ca --config config/pipeline_config.json --skip-qm --skip-graphs
-
-# Resume from the last successful stage
-moml-ca --config config/pipeline_config.json --resume
-```
-
-### Pipeline Configuration
-
-The pipeline uses a JSON configuration file to customize its behavior. 
-
-1. Copy the template configuration file:
-```bash
-cp config/pipeline_config_template.json config/pipeline_config.json
-```
-
-2. Edit the configuration file to match your environment:
-```json
-{
-  "data_dir": "/path/to/data",
-  "output_dir": "/path/to/output",
-  "working_dir": "/path/to/working",
-  "orca_path": "/path/to/orca",
-  "parallel": {
-    "enabled": true,
-    "max_workers": 4
-  },
-  "qm": {
-    "functional": "B3LYP",
-    "basis_set": "6-31G*",
-    "num_procs": 4,
-    "memory": 4000
-  },
-  "graph": {
-    "charge_type": "mulliken",
-    "use_pfas_features": true,
-    "use_quantum_properties": true
-  },
-  "execution": {
-    "skip_qm": false,
-    "skip_graph_generation": false,
-    "force_rerun": false,
-    "cache_intermediates": true
-  }
-}
-```
-
-Note: The actual configuration file (`config/pipeline_config.json`) is excluded from version control to avoid committing personal paths and settings.
-
-### Python API
-
-You can also use the pipeline programmatically:
+## Quick Start
 
 ```python
-from code.integration.orchestration.pfas_pipeline_orchestrator import PFASPipelineOrchestrator
-
-# Initialize the orchestrator
-orchestrator = PFASPipelineOrchestrator(
-    config_file="config/pipeline_config.json",
-    cache_intermediates=True
+import torch
+from rdkit import Chem
+from code.MGNN import (
+    create_graph_processor,
+    initialize_model,
+    create_trainer,
+    create_predictor,
+    MGNNConfig
 )
 
-# Run the full pipeline
-results = orchestrator.run_full_pipeline("data/raw/pfas_dataset.csv")
+# Create molecular graph
+processor = create_graph_processor({'use_partial_charges': True})
+smiles = "C(C(F)(F)F)(C(F)(F)F)(F)F"  # Perfluorobutane
+graph = processor.smiles_to_graph(smiles)
 
-# Or run individual stages
-df = orchestrator.preprocess_data("data/raw/pfas_dataset.csv")
-orca_results = orchestrator.run_orca_calculations(df)
-graph_files = orchestrator.generate_molecular_graphs()
+# Initialize model with configuration
+config = MGNNConfig({
+    'model_type': 'multi_task_djmgnn',
+    'hidden_dim': 64,
+    'n_blocks': 3
+})
+model = initialize_model(config, graph.x.shape[1], graph.edge_attr.shape[1])
 
-# Resume a previously interrupted pipeline
-orchestrator.resume_pipeline("data/raw/pfas_dataset.csv")
+# Train model with dataloaders
+trainer = create_trainer(model, config, train_loader, val_loader)
+history = trainer.train(epochs=50)
+
+# Make predictions
+predictor = create_predictor(model)
+predictions = predictor.predict([graph])
 ```
 
-## Pipeline Stages
+See the [examples directory](code/MGNN/examples) for more comprehensive examples.
 
-### 1. Data Preprocessing
-
-- Validates SMILES strings
-- Calculates basic molecular descriptors
-- Creates 3D structures
-- Outputs a processed dataset
-
-### 2. Quantum Mechanical Calculations
-
-- Performs quantum mechanical calculations using ORCA
-- Extracts partial charges, orbital energies, and other electronic properties
-- Provides quantum-enriched molecular representations
-
-### 3. Molecular Graph Generation
-
-- Creates graph representations of molecules
-- Incorporates quantum mechanical data as node and edge features
-- Generates PyTorch Geometric compatible graph objects
-- Supports hierarchical graph coarsening for PFAS analysis
-
-### 4. Machine Learning (MGNN)
-
-- Trains Graph Neural Networks on the generated molecular graphs
-- Predicts PFAS properties and environmental behavior
-- Provides interpretable insights into structure-property relationships
-
-## Directory Structure
+## Project Structure
 
 ```
-MoML-CA_PFAS/
+MoML-CA/
 ├── code/
-│   ├── integration/
-│   │   ├── orchestration/      # Pipeline orchestration
-│   │   └── data_pipeline/      # Data processing pipeline
-│   ├── MGNN/                   # Molecular Graph Neural Networks
-│   │   ├── architectures/      # GNN model architectures
-│   │   ├── utils/              # Graph generation utilities
-│   │   └── tests/              # MGNN tests
-│   ├── tests/                  # General tests
-│   └── utils/
-│       ├── helper_functions/   # Molecular processing functions
-│       └── quantum/            # Quantum calculation utilities
-├── config/                     # Configuration files
-├── data/
-│   ├── raw/                    # Raw input data
-│   └── processed/              # Processed datasets
-├── output/                     # Output files
-└── working/                    # Temporary working files
+│   └── MGNN/                      # Main package directory
+│       ├── architectures/         # Model architectures and components
+│       │   ├── graph_coarsening.py     # Graph coarsening algorithms
+│       │   └── molecular_graph.py      # Molecular graph representation
+│       ├── models/                # Model implementations
+│       │   ├── base.py                 # Base model class
+│       │   └── multi_task_djmgnn.py    # Multi-task DJMGNN implementation
+│       ├── training/              # Training utilities
+│       │   ├── callbacks.py            # Training callbacks
+│       │   └── trainer.py              # Model trainer
+│       ├── evaluation/            # Evaluation utilities
+│       │   ├── metrics.py              # Metrics calculation
+│       │   └── visualization.py        # Visualization tools
+│       ├── data/                  # Data handling utilities
+│       │   ├── dataset.py              # Dataset implementations
+│       │   └── transforms.py           # Data transforms
+│       ├── utils/                 # Utility functions
+│       │   ├── config.py               # Configuration handling
+│       │   └── functional.py           # Functional utilities
+│       ├── examples/              # Example scripts
+│       │   ├── README.md               # Examples documentation
+│       │   └── quickstart.py           # Quickstart example
+│       └── __init__.py            # Package initialization
+└── tests/                        # Test directory
 ```
 
-## Performance Optimization
+## Recent Improvements
 
-This implementation includes several optimizations:
+- **Modular API**: Simplified API with factory functions for common operations
+- **Improved Model Architecture**: Enhanced model architectures with hierarchical graph representations
+- **Enhanced Training Pipeline**: Flexible training utilities with callbacks and monitoring
+- **Comprehensive Examples**: Ready-to-use examples for common tasks
+- **Better Documentation**: Improved documentation and code comments
 
-- **Memory Efficiency**: Optimized ORCA parsing to handle large output files
-- **Parallel Processing**: Batch processing of molecules with configurable parallelism
-- **Checkpointing**: Save and resume pipeline states to recover from failures
-- **Caching**: Intermediate results caching to avoid redundant calculations
-- **Modularity**: Independently enable/disable pipeline stages
-- **Skip Options**: Skip compute-intensive steps like quantum mechanical calculations or graph generation
+## Documentation
 
-## Development
-
-### Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run specific test modules
-pytest code/tests/test_smiles_validation.py
-pytest code/MGNN/tests/test_graph_coarsening.py
-```
-
-### Code Formatting
-
-```bash
-# Format code with Black
-black code/
-
-# Sort imports
-isort code/
-
-# Run linter
-flake8 code/
-```
+See the [docs](docs/) directory for comprehensive documentation.
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```
-@software{MoML-CA2025,
-  author = {Saketh Baddam & Daniel Umemezie},
-  title = {MoML-CA: Molecular Modeling \& Machine Learning for Contaminant Analysis},
-  year = {2025},
-  url = {https://github.com/saketh/MoML-CA_PFAS}
-}
-```
-
-## Acknowledgments
-
-This project builds upon several open-source libraries, including RDKit, ORCA, PyTorch, and PyTorch Geometric.
