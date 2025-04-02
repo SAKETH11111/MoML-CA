@@ -272,7 +272,7 @@ class TestGraphCoarsener:
         # The number of nodes should be less than or equal to the atom graph
         assert functional_group_graph.num_nodes <= mock_atom_graph.num_nodes
     
-    @patch('code.MGNN.utils.molecular_descriptors.MolecularFeatureExtractor.calculate_distance_features')
+    @patch('moml.core.molecular_descriptors.MolecularFeatureExtractor.calculate_distance_features')
     def test_create_structural_motif_graph(self, mock_calc_dist, mock_functional_group_graph, test_molecule):
         """Test creation of structural motif level graph.
         
@@ -307,9 +307,9 @@ class TestGraphCoarsener:
         # Should have exactly 2 nodes (head and tail)
         assert structural_motif_graph.num_nodes == 2
     
-    @patch('code.MGNN.utils.molecular_descriptors.MolecularFeatureExtractor.calculate_distance_features')
-    @patch('code.MGNN.architectures.graph_coarsening.GraphCoarsener.create_functional_group_graph')
-    @patch('code.MGNN.architectures.graph_coarsening.GraphCoarsener.create_structural_motif_graph')
+    @patch('moml.core.molecular_descriptors.MolecularFeatureExtractor.calculate_distance_features')
+    @patch('moml.core.graph_coarsening.GraphCoarsener.create_functional_group_graph')
+    @patch('moml.core.graph_coarsening.GraphCoarsener.create_structural_motif_graph')
     def test_create_hierarchical_graphs(self, mock_motif_graph, mock_fg_graph, mock_calc_dist, 
                                         mock_atom_graph, mock_functional_group_graph, test_molecule):
         """Test creation of hierarchical graphs with comprehensive mocking."""

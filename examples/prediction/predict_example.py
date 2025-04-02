@@ -16,8 +16,8 @@ project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from code.MGNN.evaluation.predictor import create_predictor
-from code.MGNN.utils.config import MGNNConfig, create_argparser
+from moml.models.mgnn.evaluation.predictor import create_predictor
+from moml.models.mgnn.training import MGNNConfig, create_argparser
 
 
 def parse_args():

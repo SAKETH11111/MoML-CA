@@ -40,9 +40,10 @@ try:
     import torch
     TORCH_AVAILABLE = True
     print("PyTorch import successful!")
-except ImportError as e:
+except ImportError:
     TORCH_AVAILABLE = False
-    print(f"Failed to import PyTorch: {e}")
+    print("PyTorch not found. Check installation.")
+    sys.exit(1)
 
 # Try to import matplotlib for visualization testing
 try:
@@ -51,19 +52,21 @@ try:
     import matplotlib.pyplot as plt
     MATPLOTLIB_AVAILABLE = True
     print("Matplotlib import successful!")
-except ImportError as e:
+except ImportError:
     MATPLOTLIB_AVAILABLE = False
-    print(f"Failed to import Matplotlib: {e}")
+    print("Matplotlib not found. Check installation.")
+    sys.exit(1)
 
 # Import from consolidated moml modules
 try:
-    from moml.core import validate_smiles, create_rdkit_mols
+    from moml.core import calculate_molecular_descriptors, validate_smiles
     from moml.pipeline.chemical_list.process_chemical_data import (
+        create_rdkit_mols,
         categorize_pfas_types, 
         calculate_pfas_statistics,
         identify_fluorinated_groups
     )
-    from moml.core import MolecularGraphProcessor
+    from moml.core.molecular_graph import MolecularGraphProcessor
     from moml.utils.visualization.visualization import visualize_molecular_graph
     
     IMPORTS_SUCCESSFUL = True
@@ -110,7 +113,7 @@ class TestPFASFeatures(unittest.TestCase):
             self.temp_dir.cleanup()
         
         # Close any open matplotlib figures
-        if MATPLOTLIB_AVAILABLE:
+        if 'plt' in globals() and plt:
             plt.close('all')
     
     def test_pfas_detection(self):

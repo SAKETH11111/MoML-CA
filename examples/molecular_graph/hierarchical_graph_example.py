@@ -14,7 +14,7 @@ from pathlib import Path
 
 from moml.core.graph_coarsening import GraphCoarsener
 from moml.core.molecular_graph import create_graph_processor
-from code.MGNN.utils.visualization import visualize_molecular_graph
+from moml.utils.visualization.visualization import visualize_molecular_graph
 
 
 def parse_args():

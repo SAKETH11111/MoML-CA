@@ -74,7 +74,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "moml-ca=code.integration.orchestration.pfas_pipeline_orchestrator:main",
+            "moml-ca=moml.pipeline.orchestration.pfas_pipeline_orchestrator:main",
         ],
     },
     project_urls={

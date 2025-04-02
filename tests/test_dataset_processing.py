@@ -42,7 +42,7 @@ logger = logging.getLogger("test_dataset_processing")
 MOCK_DATA = [
     {
         "compound_id": "PFAS-001",
-        "smiles": "C(C(F)(F)F)C(F)(F)F",
+        "smiles": "FC(F)(F)C(F)(F)F",
         "name": "Hexafluoroethane",
         "formula": "C2F6",
         "cas_number": "76-16-4"

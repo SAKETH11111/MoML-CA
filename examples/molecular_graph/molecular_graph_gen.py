@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 # Import our modules
 from moml.core.molecular_graph import create_graph_processor
 from moml.core.graph_coarsening import GraphCoarsener
-from code.MGNN.utils.visualization import (
+from moml.utils.visualization.visualization import (
     visualize_molecular_graph,
     print_graph_statistics,
 )
@@ -77,7 +77,7 @@ def create_and_visualize_atomic_graph(
     # Parse ORCA output for partial charges
     partial_charges = None
     if use_quantum_properties and orca_output and os.path.exists(orca_output):
-        from code.utils.quantum.orca_parser import parse_orca_output
+        from moml.utils.molecular.orca_parser import parse_orca_output
         orca_data = parse_orca_output(orca_output)
         if orca_data and 'mulliken' in orca_data:
             partial_charges = orca_data['mulliken'].get('charges', None)

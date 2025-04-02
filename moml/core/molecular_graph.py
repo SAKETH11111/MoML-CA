@@ -14,6 +14,7 @@ from torch_geometric.data import Data
 from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors, Lipinski
 from typing import Dict, List, Tuple, Optional, Union, Any
+import numpy as np
 
 from moml.core.molecular_descriptors import (
     FunctionalGroupDetector,
@@ -90,6 +91,78 @@ class MolecularGraphProcessor:
         # Create instances of helper classes
         self.feature_extractor = MolecularFeatureExtractor()
         self.functional_group_detector = FunctionalGroupDetector()
+    
+    @property
+    def atom_feature_dim(self):
+        """
+        Get the dimension of atom feature vectors.
+        
+        Returns:
+            int: Dimensionality of atom feature vectors
+        """
+        # Calculate the feature dimension based on one-hot encodings and additional features
+        dim = 0
+        
+        # Atomic number (one-hot)
+        dim += len(self.ATOM_FEATURES['atomic_num'])
+        
+        # Degree (one-hot)
+        dim += len(self.ATOM_FEATURES['degree'])
+        
+        # Formal charge (one-hot)
+        dim += len(self.ATOM_FEATURES['formal_charge'])
+        
+        # Hybridization (one-hot)
+        dim += len(self.ATOM_FEATURES['hybridization'])
+        
+        # Aromaticity (one-hot)
+        dim += len(self.ATOM_FEATURES['is_aromatic'])
+        
+        # Ring membership (one-hot)
+        dim += len(self.ATOM_FEATURES['is_in_ring'])
+        
+        # Number of hydrogens (integer value)
+        dim += 1
+        
+        # PFAS-specific features (if enabled)
+        if self.use_pfas_specific_features:
+            # Fluorine flag, CF flag, CF2 flag, CF3 flag
+            dim += 4
+            
+            # Functional group flags
+            dim += 3  # COOH, SO3H, PO3H2
+            
+        # Other atom properties
+        dim += 1  # Atomic mass
+        
+        return dim
+    
+    @property
+    def bond_feature_dim(self):
+        """
+        Get the dimension of bond feature vectors.
+        
+        Returns:
+            int: Dimensionality of bond feature vectors
+        """
+        # Calculate the feature dimension based on one-hot encodings and additional features
+        dim = 0
+        
+        # Bond type (one-hot)
+        dim += len(self.BOND_FEATURES['bond_type'])
+        
+        # Conjugated (one-hot)
+        dim += len(self.BOND_FEATURES['is_conjugated'])
+        
+        # In ring (one-hot)
+        dim += len(self.BOND_FEATURES['is_in_ring'])
+        
+        # 3D features (if enabled)
+        if self.use_3d_coords:
+            # Bond length
+            dim += 1
+        
+        return dim
     
     @staticmethod
     def _one_hot_encoding(value: any, choices: list) -> List[int]:
@@ -809,6 +882,106 @@ class MolecularGraphProcessor:
         except Exception as e:
             logger.error(f"Error creating graph for {file_path}: {str(e)}")
             return None
+
+    def get_atom_features(self, mol):
+        """
+        Generate feature vectors for all atoms in a molecule.
+        
+        Args:
+            mol: RDKit Mol object
+            
+        Returns:
+            numpy.ndarray: Array of atom features with shape [num_atoms, num_features]
+        """
+        if mol is None or not hasattr(mol, 'GetAtoms'):
+            # Return a minimal default array with 0 atoms and the expected feature dimension
+            return np.zeros((0, self.atom_feature_dim))
+            
+        features = []
+        for atom in mol.GetAtoms():
+            features.append(self._get_atom_features(atom))
+            
+        if not features:
+            return np.zeros((0, self.atom_feature_dim))
+            
+        # Convert to numpy array for consistent return type
+        return np.array(features, dtype=np.float32)
+        
+    def get_adjacency_matrix(self, mol):
+        """
+        Create an adjacency matrix from a molecule.
+        
+        Args:
+            mol: RDKit Mol object
+            
+        Returns:
+            numpy.ndarray: Adjacency matrix as a numpy array
+        """
+        if mol is None or not hasattr(mol, 'GetNumAtoms') or not hasattr(mol, 'GetBonds'):
+            # Return a minimal default matrix with 0x0 dimensions
+            return np.zeros((0, 0), dtype=np.float32)
+            
+        num_atoms = mol.GetNumAtoms()
+        if num_atoms == 0:
+            return np.zeros((0, 0), dtype=np.float32)
+            
+        adjacency = np.zeros((num_atoms, num_atoms), dtype=np.float32)
+        
+        for bond in mol.GetBonds():
+            i = bond.GetBeginAtomIdx()
+            j = bond.GetEndAtomIdx()
+            adjacency[i, j] = 1
+            adjacency[j, i] = 1  # Undirected graph
+            
+        return adjacency
+    
+    def process_dataframe(self, df, mol_column='rdkit_mol'):
+        """
+        Process a dataframe of molecules to extract graph features.
+        
+        Args:
+            df: Pandas DataFrame containing RDKit molecules
+            mol_column: Name of column containing RDKit molecules
+            
+        Returns:
+            DataFrame with added graph features
+        """
+        if mol_column not in df.columns:
+            raise ValueError(f"Molecule column '{mol_column}' not found in dataframe")
+            
+        # Initialize new columns
+        df['atom_features'] = None
+        df['adjacency_matrix'] = None
+        df['num_atoms'] = 0
+        df['graph_data'] = None
+        
+        # Process each molecule
+        for idx, row in df.iterrows():
+            mol = row[mol_column]
+            # Verify we have a valid RDKit molecule object
+            if mol is not None and hasattr(mol, 'GetNumAtoms'):
+                try:
+                    # Get atom features
+                    atom_features = self.get_atom_features(mol)
+                    df.at[idx, 'atom_features'] = atom_features
+                    
+                    # Get adjacency matrix
+                    adjacency = self.get_adjacency_matrix(mol)
+                    df.at[idx, 'adjacency_matrix'] = adjacency
+                    
+                    # Get number of atoms
+                    df.at[idx, 'num_atoms'] = mol.GetNumAtoms()
+                    
+                    # Create a PyTorch Geometric Data object
+                    try:
+                        graph = self.mol_to_graph(mol)
+                        df.at[idx, 'graph_data'] = graph
+                    except Exception as e:
+                        logger.warning(f"Error creating graph for molecule at index {idx}: {e}")
+                except Exception as e:
+                    logger.warning(f"Error processing molecule at index {idx}: {e}")
+        
+        return df
 
 
 def create_graph_processor(config: Dict[str, Any] = None) -> MolecularGraphProcessor:
