@@ -10,8 +10,8 @@ import os
 import argparse
 from typing import Dict, Optional
 
-from code.MGNN.utils.config import create_argparser, get_config_from_args, MGNNConfig
-from code.MGNN.evaluation.predictor import create_predictor, batch_predict_from_files
+from moml.models.mgnn.training import create_argparser, get_config_from_args, MGNNConfig
+from moml.models.mgnn.evaluation.predictor import create_predictor, batch_predict_from_files
 
 
 def parse_args():

@@ -8,7 +8,8 @@ to create graph representations for machine learning.
 
 import os
 import argparse
-from code.MGNN import preprocess_molecules, MGNNConfig
+from moml import preprocess_molecules
+from moml.models.mgnn.training import MGNNConfig
 
 
 def parse_args():
@@ -82,9 +83,9 @@ def main():
         print(f"  graph = torch.load('{example_file}')")
     
     print("\nNext steps:")
-    print("1. Use code.MGNN.data.dataset.load_dataset() to load these graphs")
-    print("2. Use code.MGNN.data.dataset.split_dataset() to create train/val/test splits")
-    print("3. Use code.MGNN.data.dataset.prepare_dataloaders() to create dataloaders")
+    print("1. Use moml.data.dataset.load_dataset() to load these graphs")
+    print("2. Use moml.data.dataset.split_dataset() to create train/val/test splits")
+    print("3. Use moml.data.dataset.prepare_dataloaders() to create dataloaders")
     
     print("\nPreprocessing example completed successfully!")
 

@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 # Import our modules
 from moml.core.molecular_graph import create_graph_processor
-from code.MGNN.utils.config import MGNNConfig
+from moml.models.mgnn.training import MGNNConfig
 
 
 def main():

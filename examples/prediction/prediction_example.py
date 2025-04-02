@@ -13,16 +13,15 @@ import argparse
 import matplotlib.pyplot as plt
 from rdkit import Chem
 
-from code.MGNN import (
+from moml import create_graph_processor
+from moml.models.mgnn.evaluation.predictor import (
     MGNNPredictor,
     create_predictor,
-    batch_predict_from_files,
-    visualize_predictions,
-    calculate_metrics,
-    initialize_model,
-    create_graph_processor,
-    MGNNConfig
+    batch_predict_from_files
 )
+from moml.models.mgnn.evaluation.metrics import calculate_metrics
+from moml.models.mgnn.training import initialize_model, MGNNConfig
+from moml.utils.visualization.visualization import visualize_predictions
 
 
 def parse_args():

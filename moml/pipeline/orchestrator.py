@@ -639,6 +639,351 @@ class MOMLPipelineOrchestrator:
             raise
 
 
+class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
+    """
+    Specialized orchestrator for PFAS molecules analysis pipeline.
+    Extends the general MOMLPipelineOrchestrator with PFAS-specific functionality.
+    """
+    
+    def __init__(self, 
+                 config_file: Optional[str] = None,
+                 data_dir: Optional[str] = None,
+                 output_dir: Optional[str] = None,
+                 working_dir: Optional[str] = None,
+                 cache_intermediates: bool = True):
+        """
+        Initialize the PFAS pipeline orchestrator.
+        
+        Args:
+            config_file: Path to JSON configuration file
+            data_dir: Path to data directory (overrides config file)
+            output_dir: Path to output directory (overrides config file)
+            working_dir: Path to working directory (overrides config file)
+            cache_intermediates: Whether to cache intermediate results in memory
+        """
+        # Initialize base class
+        super().__init__(config_file, data_dir, output_dir, working_dir)
+        
+        # Add PFAS-specific configuration
+        pfas_config = {
+            "pfas": {
+                "categorize_types": True,
+                "identify_groups": True,
+                "calculate_statistics": True,
+                "min_f_atoms": 1,  # Minimum number of F atoms to be considered PFAS
+                "min_f_c_ratio": 0.05  # Minimum F:C ratio to be considered PFAS
+            },
+            "execution": {
+                "cache_intermediates": cache_intermediates
+            }
+        }
+        
+        # Update config with PFAS defaults
+        self._deep_update(self.config, pfas_config)
+        
+        # Add PFAS-specific directories
+        self.dirs["pfas_results"] = os.path.join(self.config["output_dir"], "pfas_analysis")
+        self.dirs["checkpoints"] = os.path.join(self.config["working_dir"], "checkpoints")
+        
+        # Create the directories
+        os.makedirs(self.dirs["pfas_results"], exist_ok=True)
+        os.makedirs(self.dirs["checkpoints"], exist_ok=True)
+        
+        # Initialize cache for better performance
+        self.cache = {
+            "processed_df": None,
+            "orca_results": None,
+            "graph_results": None
+        }
+        
+        logger.info(f"PFAS Pipeline Orchestrator initialized")
+    
+    def preprocess_pfas_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
+        """
+        Preprocess PFAS data from CSV file, validating SMILES and calculating PFAS-specific properties.
+        
+        Args:
+            input_file: Path to input CSV file
+            smiles_col: Column name containing SMILES strings
+            id_col: Column name containing molecule identifiers
+            force_rerun: Force rerun of preprocessing
+            
+        Returns:
+            Processed DataFrame with PFAS-specific properties
+        """
+        logger.info(f"Preprocessing PFAS data from {input_file}")
+        
+        # First do standard preprocessing
+        df = self.preprocess_data(input_file, smiles_col, id_col, force_rerun)
+        
+        # Import PFAS-specific functionality
+        try:
+            from moml.pipeline.chemical_list.process_chemical_data import (
+                categorize_pfas_types,
+                calculate_pfas_statistics,
+                identify_fluorinated_groups
+            )
+            
+            # Apply PFAS-specific processing
+            if self.config["pfas"]["categorize_types"]:
+                logger.info("Categorizing PFAS types")
+                df = categorize_pfas_types(df, mol_column='rdkit_mol')
+            
+            if self.config["pfas"]["calculate_statistics"]:
+                logger.info("Calculating PFAS statistics")
+                df = calculate_pfas_statistics(df, mol_column='rdkit_mol')
+            
+            if self.config["pfas"]["identify_groups"]:
+                logger.info("Identifying fluorinated groups")
+                df = identify_fluorinated_groups(df, mol_column='rdkit_mol')
+            
+            # Save PFAS-processed data
+            output_file = os.path.join(self.dirs["pfas_results"], "pfas_processed.csv")
+            df.to_csv(output_file, index=False)
+            
+            logger.info(f"Preprocessed {len(df)} molecules with PFAS analysis, saved to {output_file}")
+            
+            # Save PFAS summary
+            if 'is_pfas' in df.columns:
+                pfas_count = df['is_pfas'].sum()
+                logger.info(f"Found {pfas_count} PFAS compounds out of {len(df)} total")
+                
+                # Generate a summary file
+                summary_file = os.path.join(self.dirs["pfas_results"], "pfas_summary.txt")
+                with open(summary_file, 'w') as f:
+                    f.write(f"Total compounds: {len(df)}\n")
+                    f.write(f"PFAS compounds: {pfas_count}\n\n")
+                    
+                    if 'pfas_type' in df.columns:
+                        f.write("PFAS Types:\n")
+                        type_counts = df['pfas_type'].value_counts()
+                        for pfas_type, count in type_counts.items():
+                            f.write(f"  {pfas_type}: {count}\n")
+                    
+                    if 'num_fluorine' in df.columns:
+                        f.write("\nFluorine Statistics:\n")
+                        f.write(f"  Average fluorine count: {df['num_fluorine'].mean():.2f}\n")
+                        f.write(f"  Maximum fluorine count: {df['num_fluorine'].max()}\n")
+                    
+                    if 'f_to_c_ratio' in df.columns:
+                        f.write(f"  Average F:C ratio: {df['f_to_c_ratio'].mean():.2f}\n")
+            
+        except ImportError as e:
+            logger.error(f"PFAS-specific processing failed: {e}")
+            self.state["errors"].append(f"PFAS processing error: {e}")
+        
+        return df
+    
+    def analyze_pfas_dataset(self, df=None, input_file=None, output_prefix="pfas_analysis"):
+        """
+        Perform comprehensive analysis on PFAS dataset.
+        
+        Args:
+            df: Preprocessed DataFrame (if None, will use preprocess_pfas_data)
+            input_file: Input file path (used if df is None)
+            output_prefix: Prefix for output files
+            
+        Returns:
+            DataFrame with analysis results
+        """
+        if df is None:
+            if input_file:
+                df = self.preprocess_pfas_data(input_file)
+            else:
+                pfas_file = os.path.join(self.dirs["pfas_results"], "pfas_processed.csv")
+                if os.path.exists(pfas_file):
+                    df = pd.read_csv(pfas_file)
+                else:
+                    raise ValueError("No data provided and no processed PFAS data found")
+        
+        logger.info(f"Analyzing PFAS dataset with {len(df)} compounds")
+        
+        # Generate result files with various aggregations and analyses
+        
+        # Get the valid molecules that have PFAS characteristics
+        if 'is_pfas' in df.columns:
+            pfas_df = df[df['is_pfas'] == True].copy()
+            logger.info(f"Found {len(pfas_df)} PFAS compounds for analysis")
+            
+            # Output file for detailed PFAS data
+            output_detailed = os.path.join(self.dirs["pfas_results"], f"{output_prefix}_detailed.csv")
+            pfas_df.to_csv(output_detailed, index=False)
+            
+            # Output file for summary statistics by PFAS type
+            if 'pfas_type' in pfas_df.columns:
+                output_by_type = os.path.join(self.dirs["pfas_results"], f"{output_prefix}_by_type.csv")
+                type_stats = pfas_df.groupby('pfas_type').agg({
+                    'num_fluorine': ['mean', 'min', 'max', 'count'],
+                    'num_carbon': ['mean', 'min', 'max'],
+                    'f_to_c_ratio': ['mean', 'min', 'max'],
+                    'molecular_weight': ['mean', 'min', 'max']
+                }).reset_index()
+                type_stats.columns = ['_'.join(col).strip('_') for col in type_stats.columns.values]
+                type_stats.to_csv(output_by_type, index=False)
+            
+            logger.info(f"PFAS analysis complete, results saved to {self.dirs['pfas_results']}")
+            return pfas_df
+        else:
+            logger.warning("No PFAS classification found in the dataset")
+            return df
+
+    def preprocess_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
+        """
+        Preprocess molecular data from CSV file with PFAS-specific processing.
+        
+        Args:
+            input_file: Path to input CSV file
+            smiles_col: Column name containing SMILES strings
+            id_col: Column name containing molecule identifiers
+            force_rerun: Force rerun of preprocessing
+            
+        Returns:
+            Processed DataFrame
+        """
+        # Check if we have cached results and not forcing rerun
+        if not force_rerun and self.cache["processed_df"] is not None and self.config["execution"]["cache_intermediates"]:
+            logger.info("Using cached preprocessing results")
+            return self.cache["processed_df"]
+            
+        # Check if we have a checkpoint file
+        checkpoint_file = os.path.join(self.dirs["checkpoints"], "preprocessing_checkpoint.pkl")
+        if not force_rerun and os.path.exists(checkpoint_file) and self.config["execution"]["cache_intermediates"]:
+            logger.info(f"Loading preprocessing results from checkpoint: {checkpoint_file}")
+            try:
+                df = pd.read_pickle(checkpoint_file)
+                self.cache["processed_df"] = df
+                self.state["preprocessed"] = True
+                self.state["molecules_processed"] = len(df)
+                return df
+            except Exception as e:
+                logger.warning(f"Failed to load checkpoint, will reprocess: {e}")
+        
+        # Run base preprocessing first
+        logger.info(f"Preprocessing data from {input_file}")
+        df = super().preprocess_data(input_file, smiles_col, id_col, force_rerun)
+        
+        # Now run PFAS-specific processing
+        logger.info("Running PFAS-specific processing")
+        try:
+            df = self.preprocess_pfas_data(input_file)
+        except Exception as e:
+            logger.error(f"PFAS-specific processing failed: {e}")
+            self.state["errors"].append(f"PFAS processing error: {e}")
+        
+        # Save checkpoint
+        if self.config["execution"]["cache_intermediates"]:
+            try:
+                df.to_pickle(checkpoint_file)
+                logger.info(f"Saved preprocessing checkpoint to {checkpoint_file}")
+            except Exception as e:
+                logger.warning(f"Failed to save checkpoint: {e}")
+        
+        # Cache the results
+        if self.config["execution"]["cache_intermediates"]:
+            self.cache["processed_df"] = df
+        
+        return df
+
+    def run_orca_calculations(self, df=None, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
+        """
+        Run ORCA quantum mechanical calculations for PFAS molecules.
+        
+        Args:
+            df: DataFrame containing SMILES strings (if None, will load from processed data)
+            input_file: Path to input CSV file (used if df is None and no processed data exists)
+            smiles_col: Column name containing SMILES strings
+            id_col: Column name containing molecule identifiers
+            force_rerun: Force rerun of calculations even if they already exist
+            
+        Returns:
+            DataFrame with calculation results
+        """
+        # Check if we should skip QM calculations
+        if self.config["execution"]["skip_qm"]:
+            logger.info("ORCA calculations skipped according to configuration")
+            return pd.DataFrame()  # Return empty DataFrame
+            
+        # Check if we have cached results and not forcing rerun
+        if not force_rerun and self.cache["orca_results"] is not None and self.config["execution"]["cache_intermediates"]:
+            logger.info("Using cached ORCA results")
+            return self.cache["orca_results"]
+            
+        # Run base ORCA calculations
+        orca_results = super().run_orca_calculations(df, input_file, smiles_col, id_col, force_rerun)
+        
+        # Cache results if requested
+        if self.config["execution"]["cache_intermediates"]:
+            self.cache["orca_results"] = orca_results
+            
+        return orca_results
+    
+    def run_full_pipeline(self, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
+        """
+        Run the complete PFAS analysis pipeline.
+        
+        Args:
+            input_file: Path to input CSV file
+            smiles_col: Column name containing SMILES strings
+            id_col: Column name containing molecule identifiers
+            force_rerun: Force rerun of all stages
+            
+        Returns:
+            Dictionary with results from all pipeline stages
+        """
+        results = {}
+        
+        # 1. Preprocessing stage
+        logger.info("Starting preprocessing stage")
+        df = self.preprocess_data(input_file, smiles_col, id_col, force_rerun)
+        results["preprocessing"] = {
+            "total_compounds": len(df),
+            "valid_compounds": df["is_valid_smiles"].sum() if "is_valid_smiles" in df.columns else 0,
+            "pfas_compounds": df["is_pfas"].sum() if "is_pfas" in df.columns else 0
+        }
+        
+        # 2. ORCA calculations stage (if not skipped)
+        if not self.config["execution"]["skip_qm"]:
+            logger.info("Starting ORCA calculations stage")
+            orca_results = self.run_orca_calculations(df, input_file, smiles_col, id_col, force_rerun)
+            results["orca"] = {
+                "compounds_calculated": len(orca_results),
+                "success_count": self.state["orca_success_count"],
+                "error_count": self.state["orca_error_count"]
+            }
+        else:
+            logger.info("Skipping ORCA calculations stage")
+            results["orca"] = {"skipped": True}
+            
+        # 3. Molecular graph generation stage (if not skipped)
+        if not self.config["execution"]["skip_graph_generation"]:
+            logger.info("Starting molecular graph generation stage")
+            # Empty implementation for now
+            results["graph_generation"] = {"compounds": 0}
+        else:
+            logger.info("Skipping molecular graph generation stage")
+            results["graph_generation"] = {"skipped": True}
+            
+        # 4. PFAS analysis stage
+        logger.info("Starting PFAS analysis stage")
+        pfas_results = self.analyze_pfas_dataset(df, input_file)
+        results["pfas_analysis"] = {
+            "total_pfas_compounds": len(pfas_results) if isinstance(pfas_results, pd.DataFrame) else 0
+        }
+        
+        # Store final results
+        if isinstance(df, pd.DataFrame):
+            results["final_data"] = {
+                "total_compounds": len(df),
+                "valid_compounds": df["is_valid_smiles"].sum() if "is_valid_smiles" in df.columns else 0
+            }
+            
+        # Store any errors
+        results["errors"] = self.state["errors"]
+        
+        logger.info("Full pipeline completed")
+        return results
+
+
 def main():
     """Main function for command-line execution."""
     parser = argparse.ArgumentParser(description="Molecular Analysis Pipeline")
@@ -652,16 +997,28 @@ def main():
     parser.add_argument("--force", action="store_true", help="Force rerun even if already processed")
     parser.add_argument("--skip-qm", action="store_true", help="Skip quantum mechanical calculations")
     parser.add_argument("--skip-graphs", action="store_true", help="Skip graph generation")
+    parser.add_argument("--pfas", action="store_true", help="Use PFAS-specific pipeline with enhanced analysis")
     
     args = parser.parse_args()
     
     # Initialize orchestrator
-    orchestrator = MOMLPipelineOrchestrator(
-        config_file=args.config,
-        data_dir=args.data_dir,
-        output_dir=args.output_dir,
-        working_dir=args.working_dir
-    )
+    if args.pfas:
+        logger.info("Initializing PFAS-specific pipeline orchestrator")
+        orchestrator = PFASPipelineOrchestrator(
+            config_file=args.config,
+            data_dir=args.data_dir,
+            output_dir=args.output_dir,
+            working_dir=args.working_dir,
+            cache_intermediates=True
+        )
+    else:
+        logger.info("Initializing general molecular pipeline orchestrator")
+        orchestrator = MOMLPipelineOrchestrator(
+            config_file=args.config,
+            data_dir=args.data_dir,
+            output_dir=args.output_dir,
+            working_dir=args.working_dir
+        )
     
     # Update configuration based on command-line arguments
     if args.skip_qm:
@@ -682,12 +1039,33 @@ def main():
         orchestrator.generate_molecular_graphs(force_rerun=args.force)
     
     elif args.stage == "resume":
-        orchestrator.resume_pipeline(input_file=args.input)
+        if not args.input and not os.path.exists(os.path.join(orchestrator.dirs["processed_data"], "molecules_processed.csv")):
+            parser.error("--input is required for resume when no processed data exists")
+        
+        # Resume pipeline
+        results = orchestrator.resume_pipeline(args.input)
+        
+        # Print summary
+        logger.info("Pipeline resumed and completed with results:")
+        for key, value in results.items():
+            logger.info(f"  {key}: {value}")
     
     elif args.stage == "all":
         if not args.input:
             parser.error("--input is required for full pipeline")
-        orchestrator.run_full_pipeline(args.input, force_rerun=args.force)
+        
+        # Run full pipeline
+        results = orchestrator.run_full_pipeline(args.input, force_rerun=args.force)
+        
+        # Print summary
+        logger.info("Pipeline completed with results:")
+        for key, value in results.items():
+            if isinstance(value, dict):
+                logger.info(f"  {key}:")
+                for subkey, subvalue in value.items():
+                    logger.info(f"    {subkey}: {subvalue}")
+            else:
+                logger.info(f"  {key}: {value}")
 
 
 if __name__ == "__main__":

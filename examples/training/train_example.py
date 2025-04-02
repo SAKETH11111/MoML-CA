@@ -8,8 +8,8 @@ import torch
 import torch.nn as nn
 from typing import Dict, Optional
 
-from code.MGNN.utils.config import create_argparser, get_config_from_args, MGNNConfig
-from code.MGNN.training.trainer import create_trainer
+from moml.utils.config import create_argparser, get_config_from_args, MGNNConfig
+from moml.models.mgnn.training.trainer import create_trainer
 
 
 def parse_args():
