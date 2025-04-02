@@ -70,6 +70,7 @@ coverage.xml
 *.sdf
 !data/processed/chemical_list/pfas20_rdkit_mols.pkl
 
+
 # Logs and temp files
 *.log
 *.tmp
@@ -77,14 +78,6 @@ tmp/
 temp/
 logs/
 
-# Visualization files
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.svg
-!data/processed/visualizations/pfas20_compounds_grid.png
-!data/processed/visualizations/individual/*.png
 
 # ORCA calculation files
 *.gbw
