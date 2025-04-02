@@ -15,10 +15,10 @@ The `quickstart.py` script provides a comprehensive example showcasing the core 
 
 ```bash
 # From the project root directory:
-python -m code.MGNN.examples.quickstart
+python -m examples.quickstart.quickstart
 
 # Alternatively, if the script is executable:
-./code/MGNN/examples/quickstart.py
+./examples/quickstart/quickstart.py
 ```
 
 ### What You'll Learn
@@ -38,7 +38,7 @@ The `custom_model.py` script demonstrates how to implement and use a custom mode
 
 ```bash
 # From the project root directory:
-python -m code.MGNN.examples.custom_model
+python -m examples.custom_model
 ```
 
 ### What You'll Learn
@@ -58,7 +58,7 @@ The `preprocessing_example.py` script demonstrates how to preprocess molecule fi
 
 ```bash
 # From the project root directory:
-python -m code.MGNN.examples.preprocessing_example --input_dir path/to/molecules --output_dir path/to/output
+python -m examples.preprocess.preprocessing_example --input_dir path/to/molecules --output_dir path/to/output
 ```
 
 ### What You'll Learn
@@ -77,7 +77,7 @@ The `prediction_example.py` script demonstrates how to use a trained model to ma
 
 ```bash
 # From the project root directory:
-python -m code.MGNN.examples.prediction_example --model_path path/to/model.pt --output_dir output
+python -m examples.prediction.prediction_example --model_path path/to/model.pt --output_dir output
 ```
 
 ### What You'll Learn
@@ -96,10 +96,10 @@ The `run_predict.py` script provides a command-line interface for making predict
 
 ```bash
 # Predict properties for a single molecule
-python -m code.MGNN.examples.run_predict --model_path path/to/model.pt --mol_file path/to/molecule.mol
+python -m examples.prediction.run_predict --model_path path/to/model.pt --mol_file path/to/molecule.mol
 
 # Predict properties for all molecules in a directory
-python -m code.MGNN.examples.run_predict --model_path path/to/model.pt --mol_file path/to/molecules/ --batch_mode
+python -m examples.prediction.run_predict --model_path path/to/model.pt --mol_file path/to/molecules/ --batch_mode
 ```
 
 This script makes it easy to run predictions from the command line without writing any code, and supports both single-molecule and batch processing modes.

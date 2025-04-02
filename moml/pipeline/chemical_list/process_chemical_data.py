@@ -20,6 +20,7 @@ import os
 import pandas as pd
 import re
 from pathlib import Path
+from rdkit import Chem
 
 # Import consolidated MoML functions
 from moml.core import (
@@ -222,21 +223,42 @@ def load_cleaned_data():
     print(f"Loading data from: {CLEANED_DATA_PATH}")
     return pd.read_csv(CLEANED_DATA_PATH)
 
-def create_rdkit_mols(df):
-    """Create RDKit molecule objects from SMILES strings."""
+def create_rdkit_mols(df, smiles_col=None, mol_col=None):
+    """Create RDKit molecule objects from SMILES strings.
+    
+    Args:
+        df (pandas.DataFrame): Dataframe containing SMILES strings
+        smiles_col (str, optional): Name of column containing SMILES strings. Defaults to 'SMILES' if None.
+        mol_col (str, optional): Name of column to store RDKit molecules. Defaults to 'ROMol' if None.
+    
+    Returns:
+        pandas.DataFrame: Dataframe with RDKit molecules and validity flags
+    """
     print("\n=== Creating RDKit Molecule Objects ===")
+    
+    # Set default column names if not provided
+    smiles_col = smiles_col or 'SMILES'
+    mol_col = mol_col or 'ROMol'
+    
+    valid_col = 'Valid_SMILES'
+    if smiles_col != 'SMILES':
+        valid_col = f'is_valid_{smiles_col}'
+    
+    # Check if the SMILES column exists
+    if smiles_col not in df.columns:
+        raise ValueError(f"SMILES column '{smiles_col}' not found in dataframe")
     
     # Use MoML's consolidated function to validate SMILES and create RDKit molecules
     smiles_validation_results = [
         validate_smiles(smiles) if smiles != "Unknown" and not pd.isna(smiles) else (None, False) 
-        for smiles in df['SMILES']
+        for smiles in df[smiles_col]
     ]
     
     # Extract molecules and validity flags
-    df['ROMol'] = [result[0] for result in smiles_validation_results]
-    df['Valid_SMILES'] = [result[1] for result in smiles_validation_results]
+    df[mol_col] = [result[0] for result in smiles_validation_results]
+    df[valid_col] = [result[1] for result in smiles_validation_results]
     
-    valid_mols = df['Valid_SMILES'].sum()
+    valid_mols = df[valid_col].sum()
     print(f"Created {valid_mols} valid RDKit molecules out of {len(df)} compounds")
     
     return df
@@ -331,9 +353,24 @@ def calculate_molecular_complexity(df):
     
     return df
 
-def categorize_pfas_types(df):
-    """Categorize PFAS compounds by structural types."""
+def categorize_pfas_types(df, mol_column=None):
+    """Categorize PFAS compounds by structural types.
+    
+    Args:
+        df (pandas.DataFrame): Dataframe containing RDKit molecules
+        mol_column (str, optional): Name of column containing RDKit molecules. Defaults to 'ROMol' if None.
+    
+    Returns:
+        pandas.DataFrame: Dataframe with PFAS categorization information
+    """
     print("\n=== Categorizing PFAS Types ===")
+    
+    # Set default column name if not provided
+    mol_column = mol_column or 'ROMol'
+    
+    # Check if the molecule column exists
+    if mol_column not in df.columns:
+        raise ValueError(f"Molecule column '{mol_column}' not found in dataframe")
     
     # Use the feature extractor to determine molecular properties
     feature_extractor = MolecularFeatureExtractor()
@@ -370,57 +407,261 @@ def categorize_pfas_types(df):
         except:
             return False
     
+    # Determine if compounds contain fluorine
+    def has_fluorine(mol):
+        if mol is None:
+            return False
+        try:
+            return any(atom.GetSymbol() == 'F' for atom in mol.GetAtoms())
+        except:
+            return False
+    
+    # Count fluorine atoms
+    def count_fluorine(mol):
+        if mol is None:
+            return 0
+        try:
+            return len([atom for atom in mol.GetAtoms() if atom.GetSymbol() == 'F'])
+        except:
+            return 0
+    
+    # Count carbon atoms
+    def count_carbon(mol):
+        if mol is None:
+            return 0
+        try:
+            return len([atom for atom in mol.GetAtoms() if atom.GetSymbol() == 'C'])
+        except:
+            return 0
+    
+    # Add basic PFAS flags
+    df['is_pfas'] = df[mol_column].apply(has_fluorine)
+    df['num_fluorine'] = df[mol_column].apply(count_fluorine)
+    df['num_carbon'] = df[mol_column].apply(count_carbon)
+    
     df['Chain_Category'] = pd.cut(
-        df['Chain_Length'], 
+        df['num_carbon'], 
         bins=[0, 4, 7, float('inf')], 
         labels=['Short-chain', 'Medium-chain', 'Long-chain'],
         include_lowest=True
     )
     
-    df['Is_Aromatic'] = df['ROMol'].apply(is_aromatic)
-    df['Has_Rings'] = df['ROMol'].apply(has_rings)
-    df['Is_Cyclic'] = df['ROMol'].apply(is_cyclic)
-    df['Is_Branched'] = df['ROMol'].apply(is_branched)
+    df['Is_Aromatic'] = df[mol_column].apply(is_aromatic)
+    df['Has_Rings'] = df[mol_column].apply(has_rings)
+    df['Is_Cyclic'] = df[mol_column].apply(is_cyclic)
+    df['Is_Branched'] = df[mol_column].apply(is_branched)
     
     def determine_pfas_type(row):
-        if pd.isna(row['ROMol']) or row['ROMol'] is None:
+        if pd.isna(row[mol_column]) or row[mol_column] is None:
             return 'Unknown'
         
+        if not row['is_pfas']:
+            return 'Non-PFAS'
+            
+        # Detect specific fluorinated groups
+        mol = row[mol_column]
+        smiles = Chem.MolToSmiles(mol) if mol else ''
+        
+        if 'C(F)(F)F' in smiles:
+            if smiles.count('C(F)(F)F') > 1:
+                return 'Multi-CF3'
+            return 'CF3'
+        
+        if row['Is_Aromatic']:
+            return 'Aromatic PFAS'
+            
         type_components = []
         
         if not pd.isna(row['Chain_Category']):
             type_components.append(row['Chain_Category'])
         
-        if row['Is_Aromatic']:
-            type_components.append('Aromatic')
         if row['Is_Cyclic'] and not row['Is_Aromatic']:
             type_components.append('Cyclic')
+            
         if row['Is_Branched']:
             type_components.append('Branched')
         
-        if row['F_Count'] > 0:
-            if row['F_Percentage'] > 50:
+        if row['num_fluorine'] > 0:
+            if row['num_fluorine'] > 6:
                 type_components.append('Highly-fluorinated')
-            elif row['F_Percentage'] > 25:
+            elif row['num_fluorine'] > 3:
                 type_components.append('Moderately-fluorinated')
             else:
                 type_components.append('Lightly-fluorinated')
         
-        return ' '.join(type_components) if type_components else 'Unknown'
+        return ' '.join(type_components) if type_components else 'Other PFAS'
     
-    df['PFAS_Type'] = df.apply(determine_pfas_type, axis=1)
+    df['pfas_type'] = df.apply(determine_pfas_type, axis=1)
     
-    print("\nPFAS Chain Length Categories:")
-    print(df['Chain_Category'].value_counts())
+    print("\nPFAS Categories:")
+    if 'pfas_type' in df.columns:
+        print(df['pfas_type'].value_counts())
     
-    print("\nPFAS Structural Features:")
-    print(f"Aromatic: {df['Is_Aromatic'].sum()}")
-    print(f"Has Rings: {df['Has_Rings'].sum()}")
-    print(f"Cyclic: {df['Is_Cyclic'].sum()}")
-    print(f"Branched: {df['Is_Branched'].sum()}")
+    print(f"\nFound {df['is_pfas'].sum()} PFAS compounds out of {len(df)} total")
     
-    print("\nTop 10 PFAS Types:")
-    print(df['PFAS_Type'].value_counts().head(10))
+    return df
+
+def calculate_pfas_statistics(df, mol_column=None):
+    """Calculate PFAS-specific statistics for compounds.
+    
+    Args:
+        df (pandas.DataFrame): Dataframe containing RDKit molecules
+        mol_column (str, optional): Name of column containing RDKit molecules. Defaults to 'ROMol' if None.
+    
+    Returns:
+        pandas.DataFrame: Dataframe with PFAS statistics
+    """
+    print("\n=== Calculating PFAS Statistics ===")
+    
+    # Set default column name if not provided
+    mol_column = mol_column or 'ROMol'
+    
+    # Check if the molecule column exists
+    if mol_column not in df.columns:
+        raise ValueError(f"Molecule column '{mol_column}' not found in dataframe")
+    
+    # Ensure we have fluorine and carbon counts
+    if 'num_fluorine' not in df.columns or 'num_carbon' not in df.columns:
+        # If not already calculated, run the categorization function first
+        if 'is_pfas' not in df.columns:
+            df = categorize_pfas_types(df, mol_column=mol_column)
+    
+    # Calculate F:C ratio
+    df['f_to_c_ratio'] = df.apply(
+        lambda row: row['num_fluorine'] / row['num_carbon'] if row['num_carbon'] > 0 else 0, 
+        axis=1
+    )
+    
+    # Calculate average F per C
+    df['avg_f_per_c'] = df.apply(
+        lambda row: row['num_fluorine'] / row['num_carbon'] if row['num_carbon'] > 0 else 0, 
+        axis=1
+    )
+    
+    # Calculate molecular weight using RDKit
+    def calculate_mw(mol):
+        if mol is None:
+            return 0
+        try:
+            # Use RDKit's built-in molecular weight calculator
+            from rdkit.Chem import Descriptors
+            return Descriptors.MolWt(mol)
+        except Exception as e:
+            print(f"Error calculating molecular weight: {e}")
+            return 0
+    
+    if 'molecular_weight' not in df.columns:
+        df['molecular_weight'] = df[mol_column].apply(calculate_mw)
+    
+    # Calculate percentage of fluorine by weight
+    atomic_weight_f = 18.998  # Atomic weight of fluorine
+    df['f_weight_percentage'] = df.apply(
+        lambda row: (row['num_fluorine'] * atomic_weight_f / row['molecular_weight']) * 100 
+        if row['molecular_weight'] > 0 else 0,
+        axis=1
+    )
+    
+    print("\nPFAS Statistics Summary:")
+    print(f"Average F:C ratio: {df['f_to_c_ratio'].mean():.2f}")
+    print(f"Average molecular weight: {df['molecular_weight'].mean():.2f}")
+    print(f"Average fluorine content (% by atoms): {(df['num_fluorine'].sum() / df[mol_column].apply(lambda m: m.GetNumAtoms() if m else 0).sum() * 100):.2f}%")
+    
+    return df
+
+def identify_fluorinated_groups(df, mol_column=None):
+    """Identify specific fluorinated functional groups in molecules.
+    
+    Args:
+        df (pandas.DataFrame): Dataframe containing RDKit molecules
+        mol_column (str, optional): Name of column containing RDKit molecules. Defaults to 'ROMol' if None.
+    
+    Returns:
+        pandas.DataFrame: Dataframe with fluorinated group information
+    """
+    print("\n=== Identifying Fluorinated Groups ===")
+    
+    # Set default column name if not provided
+    mol_column = mol_column or 'ROMol'
+    
+    # Check if the molecule column exists
+    if mol_column not in df.columns:
+        raise ValueError(f"Molecule column '{mol_column}' not found in dataframe")
+    
+    # Define SMARTS patterns for fluorinated groups
+    fluorinated_groups = {
+        'CF3': '[C;!$(C([F])([F])([F])C([F])([F])F)]([F])([F])[F]',  # CF3 not part of CF3CF3
+        'CF2': '[C;!$(C([F])([F])C([F])([F])([F]))]([F])([F])[!F]',  # CF2 group
+        'CF': '[C;!$(C([F])C([F])([F])([F]));!$(C([F])C([F])([F])[!F])]([F])([!F])[!F]',  # CF group
+        'CF3CF3': 'FC(F)(F)C(F)(F)F',  # CF3CF3 group (hexafluoroethane)
+        'CF3CF2': 'FC(F)(F)C(F)F',     # CF3CF2 group
+    }
+    
+    # Initialize columns for group counts
+    for group_name in fluorinated_groups:
+        col_name = f'num_{group_name.lower()}_groups'
+        df[col_name] = 0
+    
+    # Initialize a column for detailed group information
+    df['fluorinated_groups'] = ''
+    
+    # Count occurrences of each fluorinated group
+    for group_name, smarts in fluorinated_groups.items():
+        # Create a pattern for the group
+        pattern = Chem.MolFromSmarts(smarts)
+        if pattern is None:
+            print(f"Warning: Invalid SMARTS pattern for {group_name}: {smarts}")
+            continue
+        
+        # Count matches in each molecule
+        col_name = f'num_{group_name.lower()}_groups'
+        
+        def count_matches(mol):
+            if mol is None:
+                return 0
+            try:
+                return len(mol.GetSubstructMatches(pattern))
+            except Exception as e:
+                print(f"Error matching pattern {group_name}: {e}")
+                return 0
+        
+        df[col_name] = df[mol_column].apply(count_matches)
+    
+    # Create a summary of fluorinated groups for each molecule
+    def summarize_groups(row):
+        summary = []
+        for group_name in fluorinated_groups:
+            col_name = f'num_{group_name.lower()}_groups'
+            count = row[col_name]
+            if count > 0:
+                summary.append(f"{group_name}:{count}")
+        return ', '.join(summary) if summary else 'None'
+    
+    df['fluorinated_groups'] = df.apply(summarize_groups, axis=1)
+    
+    # Convenience columns for the most common groups
+    if 'num_cf3_groups' not in df.columns and 'num_cf3cf3_groups' in df.columns:
+        df['num_cf3_groups'] = df['num_cf3_groups'] + (2 * df['num_cf3cf3_groups'])
+    
+    # Combined column for CF2 groups (including those in longer chains)
+    if 'num_cf2_groups' not in df.columns and 'num_cf3cf2_groups' in df.columns:
+        df['num_cf2_groups'] = df['num_cf2_groups'] + df['num_cf3cf2_groups']
+    
+    # Simplified CF group count
+    if 'num_cf_groups' not in df.columns:
+        df['num_cf_groups'] = df[mol_column].apply(
+            lambda mol: len([b for b in mol.GetBonds() 
+                            if mol.GetAtomWithIdx(b.GetBeginAtomIdx()).GetSymbol() in ['C', 'F'] 
+                            and mol.GetAtomWithIdx(b.GetEndAtomIdx()).GetSymbol() in ['C', 'F']
+                            and set([mol.GetAtomWithIdx(b.GetBeginAtomIdx()).GetSymbol(), 
+                                    mol.GetAtomWithIdx(b.GetEndAtomIdx()).GetSymbol()]) == set(['C', 'F'])]) if mol else 0
+        )
+    
+    print("\nFluorinated Group Summary:")
+    for group_name in fluorinated_groups:
+        col_name = f'num_{group_name.lower()}_groups'
+        if col_name in df.columns:
+            total = df[col_name].sum()
+            print(f"  {group_name}: {total} occurrences in {(df[col_name] > 0).sum()} compounds")
     
     return df
 
@@ -451,6 +692,10 @@ def engineer_features(df=None):
     df = calculate_molecular_complexity(df)
     
     df = categorize_pfas_types(df)
+    
+    df = calculate_pfas_statistics(df)
+    
+    df = identify_fluorinated_groups(df)
     
     df = save_engineered_data(df)
     
