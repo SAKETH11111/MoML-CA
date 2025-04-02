@@ -20,15 +20,16 @@ sys.path.append(project_root)
 # Try to import RDKit
 try:
     from rdkit import Chem
-    from rdkit.Chem import AllChem, Descriptors
+    from rdkit.Chem import AllChem
+    from rdkit.Chem.Draw import MolsToGridImage
     print("RDKit import successful!")
 except ImportError:
-    print("Failed to import RDKit. Please make sure it's installed.")
+    print("Failed to import RDKit. Check installation.")
     sys.exit(1)
 
-# Import from consolidated moml modules
-from moml.core import validate_smiles, create_rdkit_mols
-from moml.graph import MolecularGraphProcessor
+# Import from moml
+from moml.core.molecular_graph import create_graph_processor, MolecularGraphProcessor
+from moml.pipeline.chemical_list.process_chemical_data import create_rdkit_mols
 
 
 def run_tests():

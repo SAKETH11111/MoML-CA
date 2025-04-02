@@ -30,13 +30,9 @@ pip install -e .
 ```python
 import torch
 from rdkit import Chem
-from code.MGNN import (
-    create_graph_processor,
-    initialize_model,
-    create_trainer,
-    create_predictor,
-    MGNNConfig
-)
+from moml import create_graph_processor
+from moml.models.mgnn.training import initialize_model, MGNNConfig, create_trainer
+from moml.models.mgnn.evaluation.predictor import create_predictor
 
 # Create molecular graph
 processor = create_graph_processor({'use_partial_charges': True})
@@ -60,37 +56,39 @@ predictor = create_predictor(model)
 predictions = predictor.predict([graph])
 ```
 
-See the [examples directory](code/MGNN/examples) for more comprehensive examples.
+See the [examples directory](examples) for more comprehensive examples.
 
 ## Project Structure
 
 ```
 MoML-CA/
-├── code/
-│   └── MGNN/                      # Main package directory
-│       ├── architectures/         # Model architectures and components
-│       │   ├── graph_coarsening.py     # Graph coarsening algorithms
-│       │   └── molecular_graph.py      # Molecular graph representation
-│       ├── models/                # Model implementations
-│       │   ├── base.py                 # Base model class
-│       │   └── multi_task_djmgnn.py    # Multi-task DJMGNN implementation
-│       ├── training/              # Training utilities
-│       │   ├── callbacks.py            # Training callbacks
-│       │   └── trainer.py              # Model trainer
-│       ├── evaluation/            # Evaluation utilities
-│       │   ├── metrics.py              # Metrics calculation
-│       │   └── visualization.py        # Visualization tools
-│       ├── data/                  # Data handling utilities
-│       │   ├── dataset.py              # Dataset implementations
-│       │   └── transforms.py           # Data transforms
-│       ├── utils/                 # Utility functions
-│       │   ├── config.py               # Configuration handling
-│       │   └── functional.py           # Functional utilities
-│       ├── examples/              # Example scripts
-│       │   ├── README.md               # Examples documentation
-│       │   └── quickstart.py           # Quickstart example
-│       └── __init__.py            # Package initialization
-└── tests/                        # Test directory
+├── moml/                        # Main package directory
+│   ├── core/                    # Core functionality
+│   │   ├── graph_coarsening.py      # Graph coarsening algorithms
+│   │   └── molecular_graph.py       # Molecular graph representation
+│   ├── models/                  # Model implementations
+│   │   ├── mgnn/                    # MGNN models
+│   │   │   ├── djmgnn.py               # DJMGNN implementation 
+│   │   │   ├── training/               # Training utilities
+│   │   │   └── evaluation/             # Evaluation utilities
+│   │   └── lstm/                    # LSTM models
+│   ├── data/                    # Data handling utilities
+│   │   ├── dataset.py               # Dataset implementations
+│   │   └── processors.py            # Data processors
+│   ├── utils/                   # Utility functions
+│   │   ├── visualization/           # Visualization tools
+│   │   ├── molecular/               # Molecular utilities
+│   │   └── graph/                   # Graph utilities
+│   ├── pipeline/                # Pipeline orchestration
+│   ├── simulation/              # Simulation utilities
+│   └── __init__.py              # Package initialization
+├── examples/                    # Example scripts
+│   ├── quickstart/              # Quickstart examples
+│   ├── training/                # Training examples
+│   ├── prediction/              # Prediction examples
+│   ├── molecular_graph/         # Molecular graph examples
+│   └── preprocess/              # Preprocessing examples
+└── tests/                       # Test directory
 ```
 
 ## Recent Improvements

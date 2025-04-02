@@ -19,8 +19,8 @@ from moml.core.molecular_graph import (
 )
 
 # Data handling
-from moml.data.dataset import MolecularDataset
-from moml.data.processors import process_molecule_files, preprocess_molecules
+from moml.data.dataset import MolecularGraphDataset
+from moml.data.processors import process_mol_file, batch_process_molecules
 
 # Molecular visualization
 from moml.utils.visualization.molecule_visualization import (
@@ -48,7 +48,7 @@ from moml.core.molecular_descriptors import (
 __all__ = [
     # Classes
     'MolecularGraphProcessor',
-    'MolecularDataset',
+    'MolecularGraphDataset',
     'FunctionalGroupDetector',
     'MolecularFeatureExtractor',
     
@@ -61,8 +61,8 @@ __all__ = [
     'read_charges_from_file',
     
     # Data processing
-    'process_molecule_files',
-    'preprocess_molecules',
+    'process_mol_file',
+    'batch_process_molecules',
     
     # Visualization
     'draw_molecule',

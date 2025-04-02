@@ -14,18 +14,17 @@ from torch_geometric.data import Data
 from torch.utils.data import DataLoader
 
 # Import MoML-CA components
-from code.MGNN import (
+from moml import (
     create_graph_processor,
-    GraphCoarsener,
-    initialize_model,
-    create_trainer,
-    create_predictor,
-    calculate_metrics,
-    visualize_predictions,
-    MGNNConfig,
     prepare_dataloaders,
     split_dataset
 )
+from moml.core.graph_coarsening import GraphCoarsener
+from moml.models.mgnn.training import MGNNConfig
+from moml.models.mgnn.evaluation.predictor import create_predictor
+from moml.models.mgnn.evaluation.metrics import calculate_metrics
+from moml.models.mgnn.training import create_trainer, initialize_model
+from moml.utils.visualization.visualization import visualize_predictions
 
 
 def simple_example():
