@@ -70,11 +70,6 @@ coverage.xml
 *.sdf
 !data/processed/chemical_list/pfas20_rdkit_mols.pkl
 
-# Large files 
-*.csv
-!data/processed/*.csv
-!data/processed/chemical_list/pfas20_standardized.csv
-
 # Logs and temp files
 *.log
 *.tmp
