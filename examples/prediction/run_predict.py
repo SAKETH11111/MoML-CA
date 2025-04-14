@@ -10,34 +10,33 @@ import os
 import argparse
 from typing import Dict, Optional
 
-from moml.models.mgnn.training import create_argparser, get_config_from_args, MGNNConfig
-from moml.models.mgnn.evaluation.predictor import create_predictor, batch_predict_from_files
+from moml import create_predictor, batch_predict_from_files
 
 
 def parse_args():
     """Parse command line arguments for prediction."""
     # Create parser with model arguments only
-    parser = create_argparser(
-        description='Run inference with a trained MGNN model',
-        include_training=False
+    parser = argparse.ArgumentParser(
+        description='Run inference with a trained MGNN model'
     )
     
     # Add I/O arguments specific to prediction
-    io_group = parser.add_argument_group('Input/Output')
-    io_group.add_argument('--model_path', type=str, required=True,
+    parser.add_argument('--model_path', type=str, required=True,
                        help='Path to saved model checkpoint')
-    io_group.add_argument('--mol_file', type=str, required=True,
+    parser.add_argument('--mol_file', type=str, required=True,
                        help='Path to molecule file (.mol or .sdf) or directory of files')
-    io_group.add_argument('--charges_file', type=str, default=None,
+    parser.add_argument('--charges_file', type=str, default=None,
                        help='Path to charges file (optional, for single file mode only)')
-    io_group.add_argument('--output_file', type=str, default=None,
+    parser.add_argument('--output_file', type=str, default=None,
                        help='Output file or directory to save predictions')
-    io_group.add_argument('--batch_mode', action='store_true',
+    parser.add_argument('--batch_mode', action='store_true',
                        help='Whether to interpret mol_file as a directory of molecule files')
-    io_group.add_argument('--file_pattern', type=str, default="*.mol,*.sdf",
+    parser.add_argument('--file_pattern', type=str, default="*.mol,*.sdf",
                        help='File pattern to use in batch mode')
-    io_group.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size for inference in batch mode')
+    parser.add_argument('--device', type=str, default=None,
+                       help='Device to use (cuda or cpu)')
     
     return parser.parse_args()
 
@@ -46,11 +45,8 @@ def main():
     """Run prediction from command line arguments."""
     args = parse_args()
     
-    # Get unified configuration
-    config = get_config_from_args(args)
-    
-    # Set device from config
-    device = config['training'].get('device', None)
+    # Set device
+    device = args.device
     
     print(f"Loading model from {args.model_path}")
     
@@ -69,7 +65,6 @@ def main():
             model_path=args.model_path,
             input_dir=input_dir,
             output_dir=output_dir,
-            config=config,
             file_pattern=args.file_pattern,
             batch_size=args.batch_size,
             device=device
@@ -81,7 +76,7 @@ def main():
     else:
         # Single molecule prediction mode
         print(f"Creating predictor...")
-        predictor = create_predictor(args.model_path, config, device)
+        predictor = create_predictor(args.model_path, device=device)
         
         print(f"Running inference on {args.mol_file}")
         predictions = predictor.predict_from_file(args.mol_file, args.charges_file)

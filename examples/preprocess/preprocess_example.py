@@ -10,7 +10,10 @@ import os
 import sys
 import argparse
 import glob
+import json
 import pandas as pd
+import numpy as np
+import torch
 from tqdm import tqdm
 
 # Add parent directory to path
@@ -18,12 +21,25 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 # Import our modules
 from moml.core.molecular_graph import create_graph_processor
-from moml.models.mgnn.training import MGNNConfig
+
+
+def load_config(config_path):
+    """Load configuration from JSON file."""
+    if config_path and os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    return None
+
+
+def save_config(config, output_path):
+    """Save configuration to JSON file."""
+    with open(output_path, 'w') as f:
+        json.dump(config, f, indent=4)
 
 
 def main():
     """
-    Example script for preprocessing molecular data for MGNN models.
+    Example script for preprocessing molecular data for graph neural networks.
     
     This script demonstrates how to:
     1. Process a directory of molecular files into graph representations
@@ -31,7 +47,7 @@ def main():
     3. Generate feature statistics for model configuration
     """
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="MGNN Data Preprocessing Example")
+    parser = argparse.ArgumentParser(description="Molecular Graph Preprocessing Example")
     
     parser.add_argument('--input_dir', type=str, required=True,
                        help='Directory containing input molecule files')
@@ -51,19 +67,38 @@ def main():
     # Load configuration if provided or create default
     config = None
     if args.config_path and os.path.exists(args.config_path):
-        config = MGNNConfig.load(args.config_path)
+        config = load_config(args.config_path)
         print(f"Loaded configuration from {args.config_path}")
     else:
         print("Using default configuration.")
-        config = MGNNConfig()
+        config = {
+            'atom_features': {
+                'use_symbol': True,
+                'use_degree': True,
+                'use_hybridization': True,
+                'use_aromatic': True,
+                'use_in_ring': True,
+                'use_chirality': True,
+                'use_formal_charge': True,
+                'use_num_h': True,
+                'use_radical_electrons': True,
+                'use_3d_coords': True
+            },
+            'bond_features': {
+                'use_bond_type': True,
+                'use_conjugated': True,
+                'use_in_ring': True,
+                'use_stereo': True
+            }
+        }
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Create graph processor
     graph_processor = create_graph_processor({
-        'atom_features': config.atom_features,
-        'bond_features': config.bond_features
+        'atom_features': config['atom_features'],
+        'bond_features': config['bond_features']
     })
     
     # Find all molecular files
@@ -147,8 +182,6 @@ def main():
     
     # Calculate and save statistics
     if processed_files > 0:
-        import numpy as np
-        
         stats_df = pd.DataFrame({
             'statistic': [
                 'num_files', 
@@ -185,16 +218,14 @@ def main():
         # Update and save configuration file
         if args.save_config:
             # Update config with dataset statistics
-            config.node_features = feature_stats['node_feature_dim']
-            config.edge_features = feature_stats['edge_feature_dim']
+            config['node_features'] = feature_stats['node_feature_dim']
+            config['edge_features'] = feature_stats['edge_feature_dim']
             
             # Save configuration
             config_file = os.path.join(args.output_dir, 'graph_config.json')
-            config.save(config_file)
+            save_config(config, config_file)
             print(f"Configuration with dataset statistics saved to {config_file}")
 
 
 if __name__ == "__main__":
-    # Import torch here to avoid importing if there's an early error
-    import torch
     main() 

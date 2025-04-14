@@ -3,7 +3,7 @@
 Hierarchical Molecular Graph Neural Network Training Example
 
 This example demonstrates how to train a Hierarchical MGNN model for predicting
-partial charges and molecular properties of PFAS compounds using quantum chemistry data.
+partial charges and molecular properties using quantum chemistry data.
 The model processes molecular data at multiple scales (atom, functional group, motif)
 with cross-scale information exchange.
 
@@ -31,14 +31,20 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Union
 
 # Import MoML modules
-from moml.core.molecular_graph import MolecularGraphProcessor
-from moml.core.graph_coarsening import GraphCoarsener
-from moml.models.mgnn.hierarchical_mgnn import HMGNN
-from moml.models.mgnn.training.trainer import MGNNTrainer
-from moml.models.mgnn.training.callbacks import EarlyStopping, ModelCheckpoint, LearningRateScheduler
-from moml.simulation.md.force_field_mapper import ForceFieldMapper
-from moml.data.dataset import HierarchicalGraphDataset
-from moml.data.splitting import scaffold_split
+from moml import (
+    MolecularGraphProcessor,
+    GraphCoarsener,
+    HMGNN,
+    MGNNTrainer,
+    EarlyStopping,
+    ModelCheckpoint,
+    LearningRateScheduler,
+    ForceFieldMapper,
+    HierarchicalGraphDataset,
+    scaffold_split,
+    prepare_dataloaders,
+    split_dataset
+)
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
@@ -248,30 +254,20 @@ def prepare_dataset(data: pd.DataFrame, seed: int = 42) -> Dict[str, Hierarchica
             hierarchical_graphs.append(atom_graph)
         
         except Exception as e:
-            logger.warning(f"Error processing molecule {row['common_name']}: {str(e)}")
+            logger.warning(f"Failed to process molecule {row['common_name']}: {str(e)}")
+            continue
     
-    logger.info(f"Created {len(hierarchical_graphs)} hierarchical graph representations")
-    
-    # Split dataset
-    train_idx, val_idx, test_idx = scaffold_split(
-        hierarchical_graphs, 
-        sizes=[0.8, 0.1, 0.1],
-        seed=seed
-    )
+    # Split dataset using scaffold split
+    train_data, val_data, test_data = scaffold_split(hierarchical_graphs, seed=seed)
     
     # Create datasets
-    train_dataset = HierarchicalGraphDataset([hierarchical_graphs[i] for i in train_idx])
-    val_dataset = HierarchicalGraphDataset([hierarchical_graphs[i] for i in val_idx])
-    test_dataset = HierarchicalGraphDataset([hierarchical_graphs[i] for i in test_idx])
-    
-    logger.info(f"Dataset split: {len(train_dataset)} train, {len(val_dataset)} validation, {len(test_dataset)} test")
-    
-    return {
-        'train': train_dataset,
-        'val': val_dataset,
-        'test': test_dataset,
-        'all': HierarchicalGraphDataset(hierarchical_graphs)
+    datasets = {
+        'train': HierarchicalGraphDataset(train_data),
+        'val': HierarchicalGraphDataset(val_data),
+        'test': HierarchicalGraphDataset(test_data)
     }
+    
+    return datasets
 
 
 def create_hierarchical_dataloader(
@@ -279,60 +275,21 @@ def create_hierarchical_dataloader(
     batch_size: int
 ) -> Dict[str, DataLoader]:
     """
-    Create DataLoaders for hierarchical datasets.
+    Create dataloaders for hierarchical graph datasets.
     
     Args:
-        datasets: Dictionary with datasets
-        batch_size: Batch size
+        datasets: Dictionary of datasets
+        batch_size: Batch size for training
         
     Returns:
-        Dictionary with DataLoaders
+        Dictionary of dataloaders
     """
-    def collate_hierarchical_graphs(batch):
-        """Custom collate function for hierarchical graphs."""
-        # Extract atom-level graphs
-        atom_graphs = [item for item in batch]
-        
-        # Extract hierarchical data
-        hierarchical_data = []
-        cluster_mappings = []
-        
-        for graph in atom_graphs:
-            if hasattr(graph, 'hierarchical_data'):
-                # Collect scale data
-                scale_data = graph.hierarchical_data
-                hierarchical_data.append(scale_data)
-                
-                # Collect mappings
-                if hasattr(graph, 'cluster_mapping'):
-                    cluster_mappings.append({
-                        'atom_to_funcgroup': graph.cluster_mapping,
-                        'atom_to_motif': graph.structural_mapping
-                    })
-        
-        # Create a default collate function for PyG data
-        from torch_geometric.data import Batch
-        collated_batch = Batch.from_data_list(atom_graphs)
-        
-        # Add hierarchical data
-        if hierarchical_data:
-            collated_batch.hierarchical_data = hierarchical_data
-        if cluster_mappings:
-            collated_batch.cluster_mappings = cluster_mappings
-        
-        return collated_batch
-    
-    loaders = {}
-    
-    for split, dataset in datasets.items():
-        loaders[split] = DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=(split == 'train'),
-            collate_fn=collate_hierarchical_graphs
-        )
-    
-    return loaders
+    return prepare_dataloaders(
+        datasets['train'],
+        datasets['val'],
+        batch_size=batch_size,
+        test_dataset=datasets['test']
+    )
 
 
 def create_hierarchical_model(
@@ -347,28 +304,29 @@ def create_hierarchical_model(
     Create a hierarchical MGNN model.
     
     Args:
-        scale_dims: List of node feature dimensions for each scale
-        edge_attr_dims: List of edge feature dimensions for each scale
-        hidden_dim: Hidden dimension
+        scale_dims: List of input dimensions for each scale
+        edge_attr_dims: List of edge attribute dimensions for each scale
+        hidden_dim: Hidden dimension size
         n_blocks: Number of GNN blocks per scale
         layers_per_block: Number of layers per block
-        cross_scale_exchange: Whether to use cross-scale information exchange
+        cross_scale_exchange: Whether to enable cross-scale information exchange
         
     Returns:
-        HMGNN model
+        Initialized HMGNN model
     """
-    model = HMGNN(
-        scale_dims=scale_dims,
-        hidden_dim=hidden_dim,
-        n_blocks=n_blocks,
-        layers_per_block=layers_per_block,
-        edge_attr_dims=edge_attr_dims,
-        jk_mode='attention',
-        node_out_dim=1,  # For partial charges
-        graph_out_dim=3,  # For energy, dipole, homo-lumo gap
-        cross_scale_exchange=cross_scale_exchange,
-        dropout=0.2
-    )
+    # Create model configuration
+    config = {
+        'model_type': 'hierarchical_mgnn',
+        'hidden_dim': hidden_dim,
+        'n_blocks': n_blocks,
+        'layers_per_block': layers_per_block,
+        'cross_scale_exchange': cross_scale_exchange,
+        'scale_dims': scale_dims,
+        'edge_attr_dims': edge_attr_dims
+    }
+    
+    # Initialize model
+    model = HMGNN(config)
     
     return model
 
@@ -379,108 +337,48 @@ def train_hierarchical_model(
     config: Dict
 ) -> Tuple[HMGNN, Dict]:
     """
-    Train a hierarchical MGNN model.
+    Train the hierarchical MGNN model.
     
     Args:
-        model: HMGNN model
-        dataloaders: Dictionary with DataLoaders
+        model: HMGNN model to train
+        dataloaders: Dictionary of dataloaders
         config: Training configuration
         
     Returns:
-        Tuple of (trained model, training history)
+        Trained model and training history
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Move model to device
-    model = model.to(device)
-    
-    # Create optimizer
-    optimizer = torch.optim.Adam(
-        model.parameters(), 
-        lr=config['learning_rate'],
-        weight_decay=config.get('weight_decay', 1e-5)
+    # Create trainer
+    trainer = MGNNTrainer(
+        model=model,
+        train_loader=dataloaders['train'],
+        val_loader=dataloaders['val'],
+        config=config
     )
-    
-    # Define loss function for multi-task learning
-    def multi_task_loss(outputs, targets):
-        """Custom loss function for node and graph tasks."""
-        losses = {}
-        
-        # Node-level loss (partial charges)
-        if 'node_pred' in outputs and hasattr(targets, 'node_target'):
-            node_pred = outputs['node_pred']
-            node_target = targets.node_target
-            node_loss = torch.nn.functional.mse_loss(node_pred, node_target)
-            losses['node_loss'] = node_loss
-        
-        # Graph-level loss (molecular properties)
-        if 'graph_pred' in outputs and hasattr(targets, 'target_property'):
-            graph_pred = outputs['graph_pred']
-            graph_target = targets.target_property
-            graph_loss = torch.nn.functional.mse_loss(graph_pred, graph_target)
-            losses['graph_loss'] = graph_loss
-        
-        # Compute total loss
-        if losses:
-            # Weight the losses (can be adjusted)
-            node_weight = config.get('node_loss_weight', 0.7)
-            graph_weight = config.get('graph_loss_weight', 0.3)
-            
-            total_loss = 0
-            if 'node_loss' in losses:
-                total_loss += node_weight * losses['node_loss']
-            if 'graph_loss' in losses:
-                total_loss += graph_weight * losses['graph_loss']
-            
-            return total_loss
-        else:
-            # Fallback to dummy loss if no targets available
-            return torch.tensor(0.0, device=device, requires_grad=True)
     
     # Create callbacks
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
-            patience=20,
-            min_delta=0.001,
+            patience=10,
             mode='min'
         ),
         ModelCheckpoint(
-            filepath=os.path.join(config['output_dir'], 'checkpoints', 'model_{epoch:03d}_{val_loss:.4f}.pt'),
-            monitor='val_loss',
-            save_best_only=True,
-            mode='min'
-        ),
-        LearningRateScheduler(
-            schedule='reduce_on_plateau',
             monitor='val_loss',
             mode='min',
+            save_best_only=True
+        ),
+        LearningRateScheduler(
+            mode='min',
             factor=0.5,
-            patience=10,
-            min_lr=1e-6
+            patience=5
         )
     ]
     
-    # Create trainer
-    trainer = MGNNTrainer(
-        model=model,
-        optimizer=optimizer,
-        loss_fn=multi_task_loss,
-        train_loader=dataloaders['train'],
-        val_loader=dataloaders['val'],
-        config=config,
-        callbacks=callbacks,
-        device=device
-    )
-    
     # Train model
-    logger.info(f"Training model on {device} for {config['epochs']} epochs")
-    history = trainer.train(epochs=config['epochs'])
-    
-    # Plot training curves
-    plot_path = os.path.join(config['output_dir'], 'training_curves.png')
-    trainer.plot_training_curves(plot_path)
-    logger.info(f"Training curves saved to {plot_path}")
+    history = trainer.train(
+        epochs=config['epochs'],
+        callbacks=callbacks
+    )
     
     return model, history
 
@@ -495,86 +393,46 @@ def evaluate_model(
     
     Args:
         model: Trained HMGNN model
-        test_loader: DataLoader with test data
-        device: Device to run evaluation on
+        test_loader: Test dataloader
+        device: Device to use for evaluation
         
     Returns:
-        Dictionary with evaluation metrics
+        Dictionary of evaluation metrics
     """
     model.eval()
-    
-    # Track metrics
-    node_mse = 0.0
-    graph_mse = 0.0
-    num_batches = 0
+    metrics = {}
     
     with torch.no_grad():
         for batch in test_loader:
             batch = batch.to(device)
             
-            # Prepare hierarchical data
-            scale_data = []
-            
-            # Add atom-level data
-            scale_data.append({
-                'x': batch.x,
-                'edge_index': batch.edge_index,
-                'edge_attr': batch.edge_attr if hasattr(batch, 'edge_attr') else None,
-                'batch': batch.batch
-            })
-            
-            # Check if we have hierarchical data
-            if hasattr(batch, 'hierarchical_data'):
-                # Extract functional group level data from first graph (they're batched together)
-                func_group_data = batch.hierarchical_data[0]['functional_group']
-                scale_data.append({
-                    'x': func_group_data.x,
-                    'edge_index': func_group_data.edge_index,
-                    'edge_attr': func_group_data.edge_attr if hasattr(func_group_data, 'edge_attr') else None,
-                    'batch': None  # No batch for higher scales in this simple example
-                })
-                
-                # Extract structural motif level data
-                motif_data = batch.hierarchical_data[0]['structural_motif']
-                scale_data.append({
-                    'x': motif_data.x,
-                    'edge_index': motif_data.edge_index,
-                    'edge_attr': motif_data.edge_attr if hasattr(motif_data, 'edge_attr') else None,
-                    'batch': None  # No batch for higher scales in this simple example
-                })
-            
-            # Get cluster mappings
-            cluster_mappings = None
-            if hasattr(batch, 'cluster_mappings'):
-                cluster_mappings = [
-                    batch.cluster_mappings[0]['atom_to_funcgroup'],
-                    batch.cluster_mappings[0]['atom_to_motif']
-                ]
-            
             # Forward pass
-            outputs = model(scale_data, cluster_mappings)
+            outputs = model(batch)
             
-            # Calculate node-level MSE (partial charges)
-            if 'node_pred' in outputs and hasattr(batch, 'node_target'):
-                node_pred = outputs['node_pred']
-                node_target = batch.node_target
-                node_mse += torch.nn.functional.mse_loss(node_pred, node_target).item()
-            
-            # Calculate graph-level MSE (molecular properties)
-            if 'graph_pred' in outputs and hasattr(batch, 'target_property'):
-                graph_pred = outputs['graph_pred']
-                graph_target = batch.target_property
-                graph_mse += torch.nn.functional.mse_loss(graph_pred, graph_target).item()
-            
-            num_batches += 1
+            # Calculate metrics for each scale
+            for scale, pred in outputs.items():
+                if scale not in metrics:
+                    metrics[scale] = {
+                        'mae': [],
+                        'mse': [],
+                        'r2': []
+                    }
+                
+                # Calculate metrics
+                if hasattr(batch, f'{scale}_target'):
+                    target = getattr(batch, f'{scale}_target')
+                    mae = torch.mean(torch.abs(pred - target))
+                    mse = torch.mean((pred - target) ** 2)
+                    r2 = 1 - mse / torch.var(target)
+                    
+                    metrics[scale]['mae'].append(mae.item())
+                    metrics[scale]['mse'].append(mse.item())
+                    metrics[scale]['r2'].append(r2.item())
     
-    # Calculate average metrics
-    metrics = {
-        'node_mse': node_mse / num_batches if num_batches > 0 else float('nan'),
-        'node_rmse': (node_mse / num_batches) ** 0.5 if num_batches > 0 else float('nan'),
-        'graph_mse': graph_mse / num_batches if num_batches > 0 else float('nan'),
-        'graph_rmse': (graph_mse / num_batches) ** 0.5 if num_batches > 0 else float('nan')
-    }
+    # Average metrics
+    for scale in metrics:
+        for metric in metrics[scale]:
+            metrics[scale][metric] = np.mean(metrics[scale][metric])
     
     return metrics
 
@@ -587,129 +445,47 @@ def export_force_field_parameters(
     engine: str = 'gromacs'
 ) -> None:
     """
-    Export force field parameters from model predictions.
+    Export force field parameters for the test molecules.
     
     Args:
         model: Trained HMGNN model
         test_dataset: Test dataset
         output_dir: Output directory
-        force_field_type: Force field type
-        engine: Simulation engine
+        force_field_type: Type of force field to use
+        engine: Molecular dynamics engine
     """
     # Create force field mapper
     mapper = ForceFieldMapper(
         force_field_type=force_field_type,
-        simulation_engine=engine
+        engine=engine
     )
     
     # Create output directory
-    ff_output_dir = os.path.join(output_dir, 'force_field_params')
-    os.makedirs(ff_output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    model.eval()
-    
-    # Process a few examples
-    num_examples = min(5, len(test_dataset))
-    
-    for i in range(num_examples):
-        data = test_dataset[i]
-        
-        # Prepare hierarchical data
-        scale_data = []
-        
-        # Add atom-level data
-        scale_data.append({
-            'x': data.x.unsqueeze(0).to(device),
-            'edge_index': data.edge_index.to(device),
-            'edge_attr': data.edge_attr.to(device) if hasattr(data, 'edge_attr') else None,
-            'batch': None
-        })
-        
-        # Add functional group level data
-        if hasattr(data, 'hierarchical_data'):
-            func_group_data = data.hierarchical_data['functional_group']
-            scale_data.append({
-                'x': func_group_data.x.unsqueeze(0).to(device),
-                'edge_index': func_group_data.edge_index.to(device),
-                'edge_attr': func_group_data.edge_attr.to(device) if hasattr(func_group_data, 'edge_attr') else None,
-                'batch': None
-            })
+    # Process each molecule
+    for i, graph in enumerate(test_dataset):
+        try:
+            # Get molecule name
+            mol_name = graph.mol_name if hasattr(graph, 'mol_name') else f'mol_{i}'
             
-            # Add structural motif level data
-            motif_data = data.hierarchical_data['structural_motif']
-            scale_data.append({
-                'x': motif_data.x.unsqueeze(0).to(device),
-                'edge_index': motif_data.edge_index.to(device),
-                'edge_attr': motif_data.edge_attr.to(device) if hasattr(motif_data, 'edge_attr') else None,
-                'batch': None
-            })
-        
-        # Get cluster mappings
-        cluster_mappings = None
-        if hasattr(data, 'cluster_mapping') and hasattr(data, 'structural_mapping'):
-            cluster_mappings = [
-                data.cluster_mapping,
-                data.structural_mapping
-            ]
-        
-        # Get molecule name
-        mol_name = f"molecule_{i}"
-        if hasattr(data, '_name'):
-            mol_name = data._name
-        
-        # Forward pass to get predictions
-        with torch.no_grad():
-            outputs = model(scale_data, cluster_mappings)
+            # Get predicted charges
+            with torch.no_grad():
+                charges = model.predict_charges(graph)
             
-            # Get partial charge predictions
-            if 'node_pred' in outputs:
-                partial_charges = outputs['node_pred'].cpu().numpy().flatten()
-                
-                # Create RDKit molecule from SMILES
-                try:
-                    mol = Chem.MolFromSmiles(data.smiles if hasattr(data, 'smiles') else "")
-                    if mol is None:
-                        logger.warning(f"Could not create molecule for {mol_name}")
-                        continue
-                    
-                    # Set name
-                    mol.SetProp('_Name', mol_name)
-                    
-                    # Add 3D coordinates
-                    mol = Chem.AddHs(mol)
-                    AllChem.EmbedMolecule(mol, randomSeed=42)
-                    AllChem.UFFOptimizeMolecule(mol)
-                    
-                    # Check if number of atoms matches
-                    if mol.GetNumAtoms() != len(partial_charges):
-                        logger.warning(
-                            f"Number of atoms in molecule ({mol.GetNumAtoms()}) doesn't match "
-                            f"number of partial charges ({len(partial_charges)})"
-                        )
-                        continue
-                    
-                    # Export to force field files
-                    mol_output_dir = os.path.join(ff_output_dir, mol_name)
-                    os.makedirs(mol_output_dir, exist_ok=True)
-                    
-                    # Convert predictions to force field parameters
-                    success, results = mapper.convert_mgnn_predictions_to_force_field(
-                        mol=mol,
-                        node_predictions=partial_charges,
-                        output_dir=mol_output_dir,
-                        engine=engine
-                    )
-                    
-                    if success:
-                        logger.info(f"Exported force field parameters for {mol_name}")
-                    else:
-                        logger.warning(f"Failed to export force field parameters for {mol_name}")
-                
-                except Exception as e:
-                    logger.error(f"Error exporting force field parameters for {mol_name}: {str(e)}")
+            # Export parameters
+            output_path = os.path.join(output_dir, f'{mol_name}_{force_field_type}.top')
+            mapper.export_parameters(
+                graph,
+                charges,
+                output_path
+            )
+            
+            logger.info(f"Exported parameters for {mol_name} to {output_path}")
+        
+        except Exception as e:
+            logger.warning(f"Failed to export parameters for molecule {i}: {str(e)}")
+            continue
 
 
 def main():
@@ -723,48 +499,24 @@ def main():
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, 'checkpoints'), exist_ok=True)
     
     # Prepare data
     data = prepare_qm_data(args.data_path, args.qm_data_path)
-    
-    # Prepare datasets
-    datasets = prepare_dataset(data, args.seed)
-    
-    # Create dataloaders
+    datasets = prepare_dataset(data, seed=args.seed)
     dataloaders = create_hierarchical_dataloader(datasets, args.batch_size)
     
-    # Create model
-    # Get node feature dimensions for each scale from the first batch
-    example_batch = next(iter(dataloaders['train']))
-    
-    scale_dims = []
-    edge_attr_dims = []
-    
-    # Atom level
-    scale_dims.append(example_batch.x.shape[1])
-    if hasattr(example_batch, 'edge_attr'):
-        edge_attr_dims.append(example_batch.edge_attr.shape[1])
-    else:
-        edge_attr_dims.append(0)
-    
-    # Higher levels (if available)
-    if hasattr(example_batch, 'hierarchical_data'):
-        # Functional group level
-        func_group_data = example_batch.hierarchical_data[0]['functional_group']
-        scale_dims.append(func_group_data.x.shape[1])
-        if hasattr(func_group_data, 'edge_attr'):
-            edge_attr_dims.append(func_group_data.edge_attr.shape[1])
-        else:
-            edge_attr_dims.append(0)
-        
-        # Structural motif level
-        motif_data = example_batch.hierarchical_data[0]['structural_motif']
-        scale_dims.append(motif_data.x.shape[1])
-        if hasattr(motif_data, 'edge_attr'):
-            edge_attr_dims.append(motif_data.edge_attr.shape[1])
-        else:
-            edge_attr_dims.append(0)
+    # Get input dimensions
+    sample_graph = datasets['train'][0]
+    scale_dims = [
+        sample_graph.x.shape[1],
+        sample_graph.hierarchical_data['functional_group'].x.shape[1],
+        sample_graph.hierarchical_data['structural_motif'].x.shape[1]
+    ]
+    edge_attr_dims = [
+        sample_graph.edge_attr.shape[1],
+        sample_graph.hierarchical_data['functional_group'].edge_attr.shape[1],
+        sample_graph.hierarchical_data['structural_motif'].edge_attr.shape[1]
+    ]
     
     # Create model
     model = create_hierarchical_model(
@@ -776,54 +528,35 @@ def main():
         cross_scale_exchange=args.cross_scale
     )
     
-    # Log model architecture
-    logger.info(f"Created model with {sum(p.numel() for p in model.parameters())} parameters")
-    logger.info(f"Model architecture: {type(model).__name__}")
-    logger.info(f"Number of scales: {len(scale_dims)}")
-    logger.info(f"Feature dimensions: {scale_dims}")
-    
-    # Train model
+    # Create training configuration
     config = {
         'epochs': args.epochs,
         'batch_size': args.batch_size,
         'learning_rate': args.lr,
-        'weight_decay': 1e-5,
-        'node_loss_weight': 0.7,  # Weight for partial charge prediction
-        'graph_loss_weight': 0.3,  # Weight for property prediction
-        'output_dir': args.output_dir
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
     }
     
+    # Train model
     model, history = train_hierarchical_model(model, dataloaders, config)
     
-    # Save model
-    model_path = os.path.join(args.output_dir, 'final_model.pt')
-    torch.save(model.state_dict(), model_path)
-    logger.info(f"Model saved to {model_path}")
-    
     # Evaluate model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(config['device'])
     metrics = evaluate_model(model, dataloaders['test'], device)
     
-    logger.info("Test metrics:")
-    for metric, value in metrics.items():
-        logger.info(f"  {metric}: {value:.6f}")
-    
     # Save metrics
-    metrics_path = os.path.join(args.output_dir, 'test_metrics.json')
+    metrics_path = os.path.join(args.output_dir, 'metrics.json')
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)
-    logger.info(f"Test metrics saved to {metrics_path}")
     
     # Export force field parameters
     export_force_field_parameters(
-        model=model,
-        test_dataset=datasets['test'],
-        output_dir=args.output_dir,
-        force_field_type='amber',
-        engine='gromacs'
+        model,
+        datasets['test'],
+        args.output_dir
     )
     
-    logger.info("Training example completed successfully")
+    logger.info("Training completed successfully!")
+    logger.info(f"Results saved to {args.output_dir}")
 
 
 if __name__ == "__main__":

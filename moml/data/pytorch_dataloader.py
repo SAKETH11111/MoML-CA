@@ -1,7 +1,7 @@
 """
-DataLoader Utilities
+PyTorch DataLoader Utilities
 
-This module provides utilities for creating and managing data loaders.
+This module provides utilities for creating and managing PyTorch DataLoader objects.
 """
 
 import os
@@ -10,8 +10,8 @@ from typing import Dict, Optional, Any
 from torch.utils.data import Dataset, DataLoader
 
 from moml.core import collate_graphs
-from moml.data.loader import load_dataset
-from moml.data.splitting import split_dataset
+from moml.data.dataset_loader import load_dataset
+from moml.data.dataset_splitter import split_dataset
 
 
 def prepare_dataloaders(
@@ -177,7 +177,7 @@ def create_stratified_dataloaders(
     Returns:
         Dictionary of dataloaders for each set
     """
-    from moml.data.splitting import stratified_split_dataset
+    from moml.data.dataset_splitter import stratified_split_dataset
     
     # Split dataset
     train_dataset, val_dataset, test_dataset = stratified_split_dataset(

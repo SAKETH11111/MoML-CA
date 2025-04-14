@@ -26,6 +26,7 @@ from moml.models.mgnn.training import (
 from moml.models.mgnn.evaluation import (
     MGNNPredictor,
     create_predictor,
+    visualize_predictions,
     batch_predict_from_files
 )
 
@@ -47,5 +48,6 @@ __all__ = [
     # Evaluation tools
     "MGNNPredictor",
     "create_predictor",
-    "batch_predict_from_files"
+    "batch_predict_from_files",
+    "visualize_predictions"
 ]

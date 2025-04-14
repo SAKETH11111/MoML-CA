@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Prediction Example for MoML-CA.
+Prediction Example for MoML.
 
 This script demonstrates how to use the MGNNPredictor class for
 making predictions with a trained model on both single molecules
@@ -13,15 +13,12 @@ import argparse
 import matplotlib.pyplot as plt
 from rdkit import Chem
 
-from moml import create_graph_processor
-from moml.models.mgnn.evaluation.predictor import (
-    MGNNPredictor,
+from moml import (
+    create_graph_processor,
     create_predictor,
-    batch_predict_from_files
+    batch_predict_from_files,
+    initialize_model
 )
-from moml.models.mgnn.evaluation.metrics import calculate_metrics
-from moml.models.mgnn.training import initialize_model, MGNNConfig
-from moml.utils.visualization.visualization import visualize_predictions
 
 
 def parse_args():
@@ -53,8 +50,8 @@ def create_sample_model():
     node_features = graph.x.shape[1]
     edge_features = graph.edge_attr.shape[1]
     
-    # Create configuration
-    config = MGNNConfig({
+    # Create configuration dictionary
+    config = {
         'model_type': 'multi_task_djmgnn',
         'hidden_dim': 32,
         'n_blocks': 2,
@@ -62,7 +59,7 @@ def create_sample_model():
         'in_dim': node_features,
         'edge_attr_dim': edge_features,
         'dropout': 0.2
-    })
+    }
     
     # Initialize model
     model = initialize_model(config, node_features, edge_features)
@@ -249,77 +246,53 @@ def trainer_prediction_example(output_dir='output'):
             self.device = 'cpu'
         
         def get_predictor(self):
-            """Simplified version of the trainer's get_predictor method"""
-            return create_predictor(model=self.model, config=self.config, device=self.device)
+            """Get a predictor from the trainer."""
+            return create_predictor(
+                model=self.model,
+                config=self.config
+            )
     
-    # Create our simplified trainer
+    # Create trainer
     trainer = SimplifiedTrainer(model, config)
     
-    # Get predictor directly from the trainer
-    print("Getting predictor from trainer...")
+    # Get predictor
     predictor = trainer.get_predictor()
     
     # Make a prediction
-    smiles = "CC(F)(F)F"  # Trifluoromethylbenzene
-    print(f"Making prediction for: {smiles}")
+    smiles = "C(C(F)(F)F)(C(F)(F)F)(F)F"
+    predictions = predictor.predict_from_smiles(smiles)
     
-    prediction = predictor.predict_from_smiles(smiles)
-    
-    # Display result
-    print("\nPrediction result:")
-    for key, value in prediction.items():
+    print("Predictions from trainer-based predictor:")
+    for key, value in predictions.items():
         if key == 'graph_pred':
             print(f"  Graph-level prediction: {value.squeeze().item():.4f}")
+        elif key == 'node_pred':
+            print(f"  Node-level predictions (first 3 nodes): {value[:3].squeeze().tolist()}")
     
-    return prediction
+    return predictions
 
 
 def main():
-    """Run the prediction examples."""
-    # Parse arguments
+    """Main function."""
     args = parse_args()
-    
-    print("MoML-CA Prediction Example")
-    print("=========================")
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Create or load model
-    model = None
-    config = None
-    
     if args.create_model:
         model, config = create_sample_model()
-        
-        # Save the model for directory example
-        model_path = os.path.join(args.output_dir, "sample_model.pt")
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        torch.save(model.state_dict(), model_path)
-        args.model_path = model_path
-        print(f"Saved sample model to {model_path}")
-    elif args.model_path is None:
-        print("No model path provided and create_model is False. Creating a sample model.")
-        model, config = create_sample_model()
-        
-        # Save the model for directory example
-        model_path = os.path.join(args.output_dir, "sample_model.pt")
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        torch.save(model.state_dict(), model_path)
-        args.model_path = model_path
-        print(f"Saved sample model to {model_path}")
+        model_path = None
+    else:
+        model = None
+        config = None
+        model_path = args.model_path
     
-    # Run the single molecule prediction example
-    single_result = single_molecule_example(model, args.model_path, config, args.output_dir)
-    
-    # Run the batch prediction example
-    batch_results, smiles_list = batch_prediction_example(model, args.model_path, config, args.output_dir)
-    
-    # Run the directory prediction example
-    dir_results = directory_prediction_example(args.model_path, args.output_dir)
-    
-    # Run the trainer prediction example
-    trainer_result = trainer_prediction_example(args.output_dir)
+    # Run examples
+    single_molecule_example(model, model_path, config, args.output_dir)
+    batch_prediction_example(model, model_path, config, args.output_dir)
+    directory_prediction_example(model_path, args.output_dir)
+    trainer_prediction_example(args.output_dir)
     
     print("\nPrediction examples completed successfully!")
 

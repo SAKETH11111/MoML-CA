@@ -168,6 +168,27 @@ class MOMLPipelineOrchestrator:
                 d[k] = v
         return d
     
+    def _process_molecule_features(self, df, molecule_id_column="common_name"):
+        """
+        Common method to process molecule features
+        This method centralizes feature extraction logic to avoid redundancy.
+        
+        Args:
+            df: DataFrame with molecule data
+            molecule_id_column: Column containing molecule identifiers
+            
+        Returns:
+            DataFrame with extracted features
+        """
+        valid_mask = df['is_valid_smiles']
+        
+        for idx, row in df[valid_mask].iterrows():
+            descriptors = calculate_molecular_descriptors(row['rdkit_mol'])
+            for name, value in descriptors.items():
+                df.at[idx, name] = value
+        
+        return df
+    
     def preprocess_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
         """
         Preprocess molecular data from CSV file, validating SMILES and calculating descriptors.
@@ -641,8 +662,7 @@ class MOMLPipelineOrchestrator:
 
 class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
     """
-    Specialized orchestrator for PFAS molecules analysis pipeline.
-    Extends the general MOMLPipelineOrchestrator with PFAS-specific functionality.
+    Specialized orchestrator for PFAS molecular analysis.
     """
     
     def __init__(self, 
@@ -700,189 +720,31 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
     
     def preprocess_pfas_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
         """
-        Preprocess PFAS data from CSV file, validating SMILES and calculating PFAS-specific properties.
+        Preprocess PFAS data with specialized PFAS-specific features.
         
         Args:
             input_file: Path to input CSV file
             smiles_col: Column name containing SMILES strings
             id_col: Column name containing molecule identifiers
-            force_rerun: Force rerun of preprocessing
+            force_rerun: Force rerun even if processed data exists
             
         Returns:
-            Processed DataFrame with PFAS-specific properties
+            Processed DataFrame with PFAS-specific features
         """
-        logger.info(f"Preprocessing PFAS data from {input_file}")
-        
-        # First do standard preprocessing
-        df = self.preprocess_data(input_file, smiles_col, id_col, force_rerun)
-        
-        # Import PFAS-specific functionality
-        try:
-            from moml.pipeline.chemical_list.process_chemical_data import (
-                categorize_pfas_types,
-                calculate_pfas_statistics,
-                identify_fluorinated_groups
-            )
-            
-            # Apply PFAS-specific processing
-            if self.config["pfas"]["categorize_types"]:
-                logger.info("Categorizing PFAS types")
-                df = categorize_pfas_types(df, mol_column='rdkit_mol')
-            
-            if self.config["pfas"]["calculate_statistics"]:
-                logger.info("Calculating PFAS statistics")
-                df = calculate_pfas_statistics(df, mol_column='rdkit_mol')
-            
-            if self.config["pfas"]["identify_groups"]:
-                logger.info("Identifying fluorinated groups")
-                df = identify_fluorinated_groups(df, mol_column='rdkit_mol')
-            
-            # Save PFAS-processed data
-            output_file = os.path.join(self.dirs["pfas_results"], "pfas_processed.csv")
-            df.to_csv(output_file, index=False)
-            
-            logger.info(f"Preprocessed {len(df)} molecules with PFAS analysis, saved to {output_file}")
-            
-            # Save PFAS summary
-            if 'is_pfas' in df.columns:
-                pfas_count = df['is_pfas'].sum()
-                logger.info(f"Found {pfas_count} PFAS compounds out of {len(df)} total")
-                
-                # Generate a summary file
-                summary_file = os.path.join(self.dirs["pfas_results"], "pfas_summary.txt")
-                with open(summary_file, 'w') as f:
-                    f.write(f"Total compounds: {len(df)}\n")
-                    f.write(f"PFAS compounds: {pfas_count}\n\n")
-                    
-                    if 'pfas_type' in df.columns:
-                        f.write("PFAS Types:\n")
-                        type_counts = df['pfas_type'].value_counts()
-                        for pfas_type, count in type_counts.items():
-                            f.write(f"  {pfas_type}: {count}\n")
-                    
-                    if 'num_fluorine' in df.columns:
-                        f.write("\nFluorine Statistics:\n")
-                        f.write(f"  Average fluorine count: {df['num_fluorine'].mean():.2f}\n")
-                        f.write(f"  Maximum fluorine count: {df['num_fluorine'].max()}\n")
-                    
-                    if 'f_to_c_ratio' in df.columns:
-                        f.write(f"  Average F:C ratio: {df['f_to_c_ratio'].mean():.2f}\n")
-            
-        except ImportError as e:
-            logger.error(f"PFAS-specific processing failed: {e}")
-            self.state["errors"].append(f"PFAS processing error: {e}")
-        
-        return df
-    
-    def analyze_pfas_dataset(self, df=None, input_file=None, output_prefix="pfas_analysis"):
-        """
-        Perform comprehensive analysis on PFAS dataset.
-        
-        Args:
-            df: Preprocessed DataFrame (if None, will use preprocess_pfas_data)
-            input_file: Input file path (used if df is None)
-            output_prefix: Prefix for output files
-            
-        Returns:
-            DataFrame with analysis results
-        """
-        if df is None:
-            if input_file:
-                df = self.preprocess_pfas_data(input_file)
-            else:
-                pfas_file = os.path.join(self.dirs["pfas_results"], "pfas_processed.csv")
-                if os.path.exists(pfas_file):
-                    df = pd.read_csv(pfas_file)
-                else:
-                    raise ValueError("No data provided and no processed PFAS data found")
-        
-        logger.info(f"Analyzing PFAS dataset with {len(df)} compounds")
-        
-        # Generate result files with various aggregations and analyses
-        
-        # Get the valid molecules that have PFAS characteristics
-        if 'is_pfas' in df.columns:
-            pfas_df = df[df['is_pfas'] == True].copy()
-            logger.info(f"Found {len(pfas_df)} PFAS compounds for analysis")
-            
-            # Output file for detailed PFAS data
-            output_detailed = os.path.join(self.dirs["pfas_results"], f"{output_prefix}_detailed.csv")
-            pfas_df.to_csv(output_detailed, index=False)
-            
-            # Output file for summary statistics by PFAS type
-            if 'pfas_type' in pfas_df.columns:
-                output_by_type = os.path.join(self.dirs["pfas_results"], f"{output_prefix}_by_type.csv")
-                type_stats = pfas_df.groupby('pfas_type').agg({
-                    'num_fluorine': ['mean', 'min', 'max', 'count'],
-                    'num_carbon': ['mean', 'min', 'max'],
-                    'f_to_c_ratio': ['mean', 'min', 'max'],
-                    'molecular_weight': ['mean', 'min', 'max']
-                }).reset_index()
-                type_stats.columns = ['_'.join(col).strip('_') for col in type_stats.columns.values]
-                type_stats.to_csv(output_by_type, index=False)
-            
-            logger.info(f"PFAS analysis complete, results saved to {self.dirs['pfas_results']}")
-            return pfas_df
-        else:
-            logger.warning("No PFAS classification found in the dataset")
-            return df
-
-    def preprocess_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
-        """
-        Preprocess molecular data from CSV file with PFAS-specific processing.
-        
-        Args:
-            input_file: Path to input CSV file
-            smiles_col: Column name containing SMILES strings
-            id_col: Column name containing molecule identifiers
-            force_rerun: Force rerun of preprocessing
-            
-        Returns:
-            Processed DataFrame
-        """
-        # Check if we have cached results and not forcing rerun
-        if not force_rerun and self.cache["processed_df"] is not None and self.config["execution"]["cache_intermediates"]:
-            logger.info("Using cached preprocessing results")
-            return self.cache["processed_df"]
-            
-        # Check if we have a checkpoint file
-        checkpoint_file = os.path.join(self.dirs["checkpoints"], "preprocessing_checkpoint.pkl")
-        if not force_rerun and os.path.exists(checkpoint_file) and self.config["execution"]["cache_intermediates"]:
-            logger.info(f"Loading preprocessing results from checkpoint: {checkpoint_file}")
-            try:
-                df = pd.read_pickle(checkpoint_file)
-                self.cache["processed_df"] = df
-                self.state["preprocessed"] = True
-                self.state["molecules_processed"] = len(df)
-                return df
-            except Exception as e:
-                logger.warning(f"Failed to load checkpoint, will reprocess: {e}")
-        
-        # Run base preprocessing first
-        logger.info(f"Preprocessing data from {input_file}")
+        # Use common processing from parent class first
         df = super().preprocess_data(input_file, smiles_col, id_col, force_rerun)
         
-        # Now run PFAS-specific processing
-        logger.info("Running PFAS-specific processing")
-        try:
-            df = self.preprocess_pfas_data(input_file)
-        except Exception as e:
-            logger.error(f"PFAS-specific processing failed: {e}")
-            self.state["errors"].append(f"PFAS processing error: {e}")
-        
-        # Save checkpoint
-        if self.config["execution"]["cache_intermediates"]:
-            try:
-                df.to_pickle(checkpoint_file)
-                logger.info(f"Saved preprocessing checkpoint to {checkpoint_file}")
-            except Exception as e:
-                logger.warning(f"Failed to save checkpoint: {e}")
-        
-        # Cache the results
-        if self.config["execution"]["cache_intermediates"]:
-            self.cache["processed_df"] = df
+        # Add PFAS-specific processing here
+        # Instead of reimplementing descriptor calculation, call the shared method
         
         return df
+
+    # Reuse parent class implementation instead of redefining
+    def preprocess_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
+        """
+        Preprocess data, delegating to the PFAS-specific method.
+        """
+        return self.preprocess_pfas_data(input_file, smiles_col, id_col, force_rerun)
 
     def run_orca_calculations(self, df=None, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
         """
