@@ -14,10 +14,10 @@ The key components are:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import NNConv, MessagePassing, global_mean_pool, global_add_pool
-from typing import Dict, List, Tuple, Optional, Union, Any
+from torch_geometric.nn import global_mean_pool
+from typing import Dict, List, Optional, Any
 
-from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator, GraphConvLayer
+from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator
 
 class CrossScaleAttention(nn.Module):
     """

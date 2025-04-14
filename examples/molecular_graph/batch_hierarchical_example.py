@@ -3,15 +3,14 @@
 Batch Hierarchical Graph Creation Example
 
 This script demonstrates how to use the GraphCoarsener class to batch process
-multiple PFAS molecules and create hierarchical representations.
+multiple molecules and create hierarchical representations.
 """
 
 import os
-import torch
 import argparse
 from pathlib import Path
 
-from moml.core.graph_coarsening import GraphCoarsener
+from moml import GraphCoarsener
 
 
 def parse_args():

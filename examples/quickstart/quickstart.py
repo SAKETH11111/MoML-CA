@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-Quickstart example for MoML-CA.
+Quickstart example for MoML.
 
-This script demonstrates the basic usage of the MoML-CA package for
+This script demonstrates the basic usage of the MoML package for
 molecular graph creation, model training, and prediction.
 """
 
@@ -13,18 +13,27 @@ from rdkit import Chem
 from torch_geometric.data import Data
 from torch.utils.data import DataLoader
 
-# Import MoML-CA components
-from moml import (
+# Import MoML components
+from moml.core import (
     create_graph_processor,
+    GraphCoarsener,
+    initialize_model
+)
+    
+from moml.data import (
     prepare_dataloaders,
     split_dataset
 )
-from moml.core.graph_coarsening import GraphCoarsener
-from moml.models.mgnn.training import MGNNConfig
-from moml.models.mgnn.evaluation.predictor import create_predictor
-from moml.models.mgnn.evaluation.metrics import calculate_metrics
-from moml.models.mgnn.training import create_trainer, initialize_model
-from moml.utils.visualization.visualization import visualize_predictions
+
+from moml.models.mgnn.evaluation import (
+    visualize_predictions,
+    create_predictor,
+    calculate_metrics
+)
+
+from moml.models.mgnn.training import (
+    create_trainer
+)
 
 
 def simple_example():
@@ -33,7 +42,7 @@ def simple_example():
     """
     print("\n--- Simple Graph Creation Example ---\n")
     
-    # Create graph processor
+    # Create graph processor with standard configuration
     processor = create_graph_processor({
         'use_partial_charges': True,
         'use_3d_coords': True,
@@ -61,7 +70,7 @@ def hierarchical_graph_example(graph):
     """
     print("\n--- Hierarchical Graph Example ---\n")
     
-    # Create a coarsener
+    # Create a coarsener with standard configuration
     coarsener = GraphCoarsener(use_pfas_features=True)
     
     # Convert RDKit molecule to graph
@@ -119,17 +128,18 @@ def model_training_example():
         )
         graphs.append(graph)
     
-    # Split into train/validation sets
-    train_size = int(0.8 * len(graphs))
-    train_graphs = graphs[:train_size]
-    val_graphs = graphs[train_size:]
+    # Split dataset using standard utility
+    train_graphs, val_graphs = split_dataset(graphs, train_ratio=0.8)
     
-    # Create dataloaders
-    train_loader = DataLoader(train_graphs, batch_size=10, shuffle=True)
-    val_loader = DataLoader(val_graphs, batch_size=10, shuffle=False)
+    # Create dataloaders using standard utility
+    train_loader, val_loader = prepare_dataloaders(
+        train_graphs,
+        val_graphs,
+        batch_size=10
+    )
     
-    # Create configuration
-    config = MGNNConfig({
+    # Create configuration dictionary with standard settings
+    config = {
         'model_type': 'multi_task_djmgnn',
         'hidden_dim': 32,
         'n_blocks': 2,
@@ -137,7 +147,7 @@ def model_training_example():
         'learning_rate': 0.001,
         'weight_decay': 0.0001,
         'epochs': 10
-    })
+    }
     
     # Initialize model
     model = initialize_model(config, num_node_features, num_edge_features)
@@ -186,7 +196,7 @@ def prediction_example(model_path, val_loader):
     true_values = torch.cat([graph.y for graph in val_loader.dataset])
     predicted_values = predictions['graph_pred']
     
-    # Calculate metrics
+    # Calculate metrics using standard utility
     metrics = calculate_metrics(true_values, predicted_values)
     
     # Print metrics
@@ -194,7 +204,7 @@ def prediction_example(model_path, val_loader):
     for metric, value in metrics.items():
         print(f"  {metric}: {value:.6f}")
     
-    # Create visualization
+    # Create visualization using standard utility
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
     vis_path = os.path.join(output_dir, "predictions.png")
@@ -213,7 +223,7 @@ def main():
     """
     Run complete example workflow.
     """
-    print("MoML-CA Quickstart Example")
+    print("MoML Quickstart Example")
     print("=========================")
     
     # Simple graph creation

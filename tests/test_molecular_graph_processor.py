@@ -27,9 +27,9 @@ except ImportError:
     print("Failed to import RDKit. Check installation.")
     sys.exit(1)
 
-# Import from moml
+
 from moml.core.molecular_graph import create_graph_processor, MolecularGraphProcessor
-from moml.pipeline.chemical_list.process_chemical_data import create_rdkit_mols
+from moml.data.processors.process_chemical_data import create_rdkit_mols
 
 
 def run_tests():

@@ -60,7 +60,7 @@ except ImportError:
 # Import from consolidated moml modules
 try:
     from moml.core import calculate_molecular_descriptors, validate_smiles
-    from moml.pipeline.chemical_list.process_chemical_data import (
+    from moml.data.processors.process_chemical_data import (
         create_rdkit_mols,
         categorize_pfas_types, 
         calculate_pfas_statistics,

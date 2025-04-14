@@ -10,6 +10,9 @@ MoML-CA is a Python package for molecular representation learning and property p
 - **Training Utilities**: Comprehensive training pipelines with callbacks and monitoring
 - **Evaluation Tools**: Metrics calculation and visualization of predictions
 - **Example Scripts**: Ready-to-use examples for common molecular machine learning tasks
+- **Command-Line Tools**: Easy-to-use CLI for model training and prediction
+- **Data Processing**: Efficient batch processing of molecular datasets
+- **Visualization**: Tools for visualizing molecular graphs and model predictions
 
 ## Installation
 
@@ -68,7 +71,7 @@ MoML-CA/
 │   │   └── molecular_graph.py       # Molecular graph representation
 │   ├── models/                  # Model implementations
 │   │   ├── mgnn/                    # MGNN models
-│   │   │   ├── djmgnn.py               # DJMGNN implementation 
+│   │   │   ├── djmgnn.py               # DJMGNN implementation
 │   │   │   ├── training/               # Training utilities
 │   │   │   └── evaluation/             # Evaluation utilities
 │   │   └── lstm/                    # LSTM models
@@ -93,11 +96,13 @@ MoML-CA/
 
 ## Recent Improvements
 
-- **Modular API**: Simplified API with factory functions for common operations
-- **Improved Model Architecture**: Enhanced model architectures with hierarchical graph representations
-- **Enhanced Training Pipeline**: Flexible training utilities with callbacks and monitoring
-- **Comprehensive Examples**: Ready-to-use examples for common tasks
-- **Better Documentation**: Improved documentation and code comments
+- **Enhanced Model Architecture**: Improved hierarchical graph representations and attention mechanisms
+- **Streamlined API**: Simplified interface with factory functions and better error handling
+- **Advanced Training Features**: Added support for mixed precision training and gradient accumulation
+- **Improved Data Processing**: Enhanced batch processing and memory efficiency
+- **Better Visualization**: New tools for visualizing molecular graphs and model attention
+- **Command-Line Interface**: Added CLI tools for common tasks
+- **Documentation**: Comprehensive documentation with examples and tutorials
 
 ## Documentation
 
@@ -105,8 +110,8 @@ See the [docs](docs/) directory for comprehensive documentation.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a Pull Request. For guidelines on contributing, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

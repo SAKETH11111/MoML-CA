@@ -50,31 +50,9 @@ class MolecularGraphProcessor:
     """
     
     # Common atom and bond features
-    ATOM_FEATURES = {
-        'atomic_num': [1, 6, 7, 8, 9, 15, 16, 17],  # H, C, N, O, F, P, S, Cl
-        'degree': [0, 1, 2, 3, 4, 5, 6],
-        'formal_charge': [-2, -1, 0, 1, 2],
-        'hybridization': [
-            Chem.rdchem.HybridizationType.SP, 
-            Chem.rdchem.HybridizationType.SP2,
-            Chem.rdchem.HybridizationType.SP3,
-            Chem.rdchem.HybridizationType.SP3D,
-            Chem.rdchem.HybridizationType.SP3D2
-        ],
-        'is_aromatic': [0, 1],
-        'is_in_ring': [0, 1],
-    }
+    ATOM_FEATURES = MolecularFeatureExtractor.ATOM_FEATURES
     
-    BOND_FEATURES = {
-        'bond_type': [
-            Chem.rdchem.BondType.SINGLE,
-            Chem.rdchem.BondType.DOUBLE,
-            Chem.rdchem.BondType.TRIPLE,
-            Chem.rdchem.BondType.AROMATIC
-        ],
-        'is_conjugated': [0, 1],
-        'is_in_ring': [0, 1],
-    }
+    BOND_FEATURES = MolecularFeatureExtractor.BOND_FEATURES
     
     def __init__(self, config: Dict[str, Any] = None):
         """

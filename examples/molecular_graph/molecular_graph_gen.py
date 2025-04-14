@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-PFAS Molecular Graph Generator
+Molecular Graph Generator
 
-A unified tool for generating molecular graph representations for PFAS molecules:
+A unified tool for generating molecular graph representations for molecules:
 - Regular atomic-level graphs
 - Hierarchical graphs (atom, functional group, and structural motif levels)
 - Graph visualization
@@ -27,25 +27,18 @@ import os
 import sys
 import argparse
 import torch
-import numpy as np
 from typing import Dict, Optional
-import matplotlib.pyplot as plt
 from rdkit import Chem
-from rdkit.Chem import Draw
-from matplotlib.colors import ListedColormap
-import networkx as nx
 
-# Add parent directory to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
-
-# Import our modules
-from moml.core.molecular_graph import create_graph_processor
-from moml.core.graph_coarsening import GraphCoarsener
-from moml.utils.visualization.visualization import (
+# Import modules
+from moml import (
+    create_graph_processor,
+    GraphCoarsener,
     visualize_molecular_graph,
     print_graph_statistics,
+    parse_orca_output,
+    FunctionalGroupDetector
 )
-from moml.core.molecular_descriptors import FunctionalGroupDetector
 
 
 def create_and_visualize_atomic_graph(
@@ -77,7 +70,6 @@ def create_and_visualize_atomic_graph(
     # Parse ORCA output for partial charges
     partial_charges = None
     if use_quantum_properties and orca_output and os.path.exists(orca_output):
-        from moml.utils.molecular.orca_parser import parse_orca_output
         orca_data = parse_orca_output(orca_output)
         if orca_data and 'mulliken' in orca_data:
             partial_charges = orca_data['mulliken'].get('charges', None)
@@ -205,7 +197,7 @@ def analyze_functional_groups(mol_file: str) -> None:
 
 def main():
     """Parse arguments and run the appropriate function."""
-    parser = argparse.ArgumentParser(description='PFAS Molecular Graph Generator')
+    parser = argparse.ArgumentParser(description='Molecular Graph Generator')
     subparsers = parser.add_subparsers(dest='command', required=True,
                                        help='Command to run')
     
@@ -255,7 +247,6 @@ def main():
             use_pfas_features=args.use_pfas_features,
             use_quantum_properties=args.use_quantum_properties
         )
-    
     elif args.command == 'hierarchical':
         create_and_visualize_hierarchical_graphs(
             mol_file=args.mol,
@@ -265,10 +256,11 @@ def main():
             use_pfas_features=args.use_pfas_features,
             use_quantum_properties=args.use_quantum_properties
         )
-    
     elif args.command == 'analyze':
         analyze_functional_groups(args.mol)
+    else:
+        parser.print_help()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main() 

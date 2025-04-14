@@ -10,7 +10,7 @@ This module provides tools for working with molecular datasets in the MoML frame
   - `HierarchicalGraphDataset`: For hierarchical molecular representations
   - `PFASDataset`: Specialized dataset for PFAS compounds
 
-- **loader.py**: Functions for loading datasets from files and directories
+- **dataset_loader.py**: Functions for loading datasets from files and directories
 
   - `load_dataset`: Load dataset from a directory of molecule files
   - `load_datasets_from_splits`: Load datasets from pre-split directories
@@ -22,7 +22,7 @@ This module provides tools for working with molecular datasets in the MoML frame
   - `stratified_split_dataset`: Splitting while preserving label distributions
   - `scaffold_split_dataset`: Splitting based on molecular scaffolds
 
-- **dataloader.py**: Tools for creating PyTorch DataLoader objects
+- **pytorch_dataloader.py**: Tools for creating PyTorch DataLoader objects
 
   - `prepare_dataloaders`: Create dataloaders from existing dataset splits
   - `create_dataloaders_from_directory`: One-step loading and dataloader creation

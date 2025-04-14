@@ -9,17 +9,21 @@ using the MoML framework.
 
 import os
 import argparse
+from pathlib import Path
 import pandas as pd
 from rdkit import Chem
 
 from moml.core import (
     GraphCoarsener,
-    calculate_molecular_descriptors, 
-    
+    calculate_molecular_descriptors
 )
 from moml.data import (
     process_dataset,
     save_processed_molecules
+)
+from moml.utils.data.molecular import (
+    create_rdkit_mols,
+    calculate_molecular_complexity
 )
 
 
@@ -35,6 +39,12 @@ def process_pfas20_dataset(input_path: str) -> pd.DataFrame:
     """
     # Use our consolidated function to process the dataset
     df = process_dataset(input_path, smiles_col='smiles', id_col='id')
+    
+    # Create RDKit molecules
+    df = create_rdkit_mols(df, smiles_col='smiles', mol_col='rdkit_mol')
+    
+    # Calculate molecular complexity
+    df = calculate_molecular_complexity(df, mol_col='rdkit_mol')
     
     return df
 

@@ -13,10 +13,10 @@ import numpy as np
 
 class FunctionalGroupDetector:
     """
-    Provides methods to detect common functional groups in PFAS molecules.
+    Class for detecting functional groups in molecules.
     
-    This class is used by both the MolecularGraphBuilder and GraphCoarsener
-    to provide consistent functional group detection.
+    This is the single source of truth for functional group detection in the MoML library.
+    All functional group detection should use this class to maintain consistency.
     """
     
     # Define functional group types
@@ -314,6 +314,27 @@ class FunctionalGroupDetector:
         
         return cf_groups, all_functional_groups
 
+    def get_all_functional_groups(self, mol) -> dict:
+        """
+        Comprehensive function to detect all functional groups in one pass.
+        
+        Args:
+            mol: RDKit molecule
+            
+        Returns:
+            Dictionary mapping functional group names to atom indices
+        """
+        groups = {
+            'cf3_groups': self.find_cf3_groups(mol),
+            'cf2_groups': self.find_cf2_groups(mol),
+            'cf_groups': self.find_cf_groups(mol),
+            'carboxylic_groups': self.find_carboxylic_groups(mol),
+            'sulfonic_groups': self.find_sulfonic_groups(mol),
+            'phosphonic_groups': self.find_phosphonic_groups(mol),
+            'amino_groups': self.find_amino_groups(mol),
+            'hydroxyl_groups': self.find_hydroxyl_groups(mol)
+        }
+        return groups
 
 class MolecularFeatureExtractor:
     """
@@ -490,13 +511,16 @@ def validate_smiles(smiles: str) -> tuple:
 
 def calculate_molecular_descriptors(mol) -> dict:
     """
-    Calculate basic molecular descriptors for a molecule.
+    Calculate molecular descriptors for a molecule.
+    
+    This is the single source of truth for molecular descriptor calculation.
+    All descriptor calculations should use this function to maintain consistency.
     
     Args:
-        mol: RDKit molecule object
+        mol: RDKit molecule
         
     Returns:
-        Dictionary of descriptor values
+        Dictionary of molecular descriptors
     """
     from rdkit.Chem import Descriptors, Lipinski
     
