@@ -1,122 +1,156 @@
 # MoML-CA Examples
 
-This directory contains example scripts demonstrating how to use the MoML-CA (Molecular Machine Learning for Chemical Applications) library.
+This directory contains example scripts demonstrating how to use the MoML-CA (Molecular Machine Learning for Chemical Applications) library. Each subdirectory focuses on a specific aspect of the library's functionality.
+
+## Directory Structure
+
+- **`quickstart/`**: Basic examples to get started with MoML-CA
+
+  - `quickstart.py`: Comprehensive example of core functionality
+  - `custom_model.py`: Example of implementing a custom model
+
+- **`training/`**: Examples for model training and evaluation
+
+  - `train_model.py`: Complete training pipeline example
+  - `evaluate_model.py`: Model evaluation and metrics calculation
+  - `hyperparameter_tuning.py`: Hyperparameter optimization example
+
+- **`prediction/`**: Examples for making predictions with trained models
+
+  - `prediction_example.py`: Basic prediction pipeline
+  - `run_predict.py`: Command-line interface for predictions
+  - `batch_predict.py`: Batch prediction on multiple molecules
+
+- **`molecular_graph/`**: Examples for working with molecular graphs
+
+  - `graph_creation.py`: Creating and manipulating molecular graphs
+  - `graph_features.py`: Extracting and visualizing graph features
+  - `hierarchical_graphs.py`: Working with hierarchical graph representations
+
+- **`preprocess/`**: Examples for data preprocessing
+  - `preprocessing_example.py`: Basic preprocessing pipeline
+  - `batch_preprocess.py`: Batch processing of molecular datasets
+  - `feature_extraction.py`: Extracting molecular features
 
 ## Quickstart Example
 
 The `quickstart.py` script provides a comprehensive example showcasing the core functionality of MoML-CA:
 
-1. Creating molecular graphs from SMILES
-2. Building hierarchical molecular graphs using GraphCoarsener
-3. Training a model with synthetic data
-4. Making predictions and evaluating results
-
-### Running the Quickstart Example
-
 ```bash
 # From the project root directory:
 python -m examples.quickstart.quickstart
-
-# Alternatively, if the script is executable:
-./examples/quickstart/quickstart.py
 ```
 
 ### What You'll Learn
 
-The quickstart example demonstrates:
-
-- How to convert molecules to graph representations
-- Creating hierarchical molecular graphs for improved performance
+- Converting molecules to graph representations
+- Creating hierarchical molecular graphs
 - Configuring and initializing a model
 - Training a model with the provided trainer utilities
 - Making predictions with a trained model
 - Calculating metrics and visualizing results
 
-## Custom Model Example
+## Training Examples
 
-The `custom_model.py` script demonstrates how to implement and use a custom model architecture with the MoML-CA framework:
+The training examples demonstrate how to train models on molecular datasets:
 
 ```bash
-# From the project root directory:
-python -m examples.custom_model
+# Train a model
+python -m examples.training.train_model --config config.yaml
+
+# Evaluate a trained model
+python -m examples.training.evaluate_model --model_path model.pt
+
+# Perform hyperparameter tuning
+python -m examples.training.hyperparameter_tuning --study_name "optimization_study"
 ```
 
 ### What You'll Learn
 
-The custom model example demonstrates:
+- Setting up training configurations
+- Using callbacks and monitoring
+- Implementing custom training loops
+- Evaluating model performance
+- Optimizing hyperparameters
 
-- How to implement a custom GNN architecture compatible with the MoML-CA framework
-- Integrating custom model components (GCN layers, residual connections, different pooling strategies)
-- Creating a synthetic classification dataset
-- Training a custom model using the MoML-CA trainer
-- Making predictions and evaluating classification results
-- Visualizing the classification performance
+## Prediction Examples
 
-## Preprocessing Example
-
-The `preprocessing_example.py` script demonstrates how to preprocess molecule files into graph representations for machine learning:
-
-```bash
-# From the project root directory:
-python -m examples.preprocess.preprocessing_example --input_dir path/to/molecules --output_dir path/to/output
-```
-
-### What You'll Learn
-
-The preprocessing example demonstrates:
-
-- How to preprocess multiple molecule files in batch
-- Configuring the preprocessing pipeline for different molecular features
-- Working with 3D coordinates and partial charges
-- Creating serialized graph representations for faster loading
-- How preprocessed data connects with the dataset/dataloader system
-
-## Prediction Example
-
-The `prediction_example.py` script demonstrates how to use a trained model to make predictions on molecules:
-
-```bash
-# From the project root directory:
-python -m examples.prediction.prediction_example --model_path path/to/model.pt --output_dir output
-```
-
-### What You'll Learn
-
-The prediction example demonstrates:
-
-- How to load a trained model and create a predictor
-- Making predictions on a single molecule using SMILES
-- Batch prediction on multiple molecules
-- Processing a directory of molecule files for prediction
-- Saving and interpreting prediction results
-
-## Command-Line Prediction
-
-The `run_predict.py` script provides a command-line interface for making predictions with trained models:
+The prediction examples show how to use trained models for making predictions:
 
 ```bash
 # Predict properties for a single molecule
-python -m examples.prediction.run_predict --model_path path/to/model.pt --mol_file path/to/molecule.mol
+python -m examples.prediction.run_predict --model_path model.pt --mol_file molecule.mol
 
-# Predict properties for all molecules in a directory
-python -m examples.prediction.run_predict --model_path path/to/model.pt --mol_file path/to/molecules/ --batch_mode
+# Batch prediction on multiple molecules
+python -m examples.prediction.batch_predict --model_path model.pt --input_dir molecules/
 ```
 
-This script makes it easy to run predictions from the command line without writing any code, and supports both single-molecule and batch processing modes.
+### What You'll Learn
+
+- Loading trained models
+- Making predictions on new molecules
+- Processing prediction results
+- Visualizing predictions
+- Batch processing for efficiency
+
+## Molecular Graph Examples
+
+The molecular graph examples demonstrate working with graph representations:
+
+```bash
+# Create and visualize molecular graphs
+python -m examples.molecular_graph.graph_creation --smiles "CCO"
+
+# Extract and analyze graph features
+python -m examples.molecular_graph.graph_features --input_file molecules.csv
+
+# Work with hierarchical graphs
+python -m examples.molecular_graph.hierarchical_graphs --config graph_config.yaml
+```
+
+### What You'll Learn
+
+- Creating molecular graphs from SMILES
+- Extracting graph features
+- Visualizing graph structures
+- Working with hierarchical representations
+- Analyzing graph properties
+
+## Preprocessing Examples
+
+The preprocessing examples show how to prepare data for training:
+
+```bash
+# Preprocess a dataset
+python -m examples.preprocess.preprocessing_example --input_dir data/ --output_dir processed/
+
+# Batch process multiple files
+python -m examples.preprocess.batch_preprocess --config preprocess_config.yaml
+
+# Extract molecular features
+python -m examples.preprocess.feature_extraction --input_file molecules.csv
+```
+
+### What You'll Learn
+
+- Preprocessing molecular datasets
+- Extracting molecular features
+- Creating graph representations
+- Handling different file formats
+- Optimizing preprocessing pipelines
 
 ## Output
 
 Running the examples will create:
 
 - An `output` directory in your current working directory
-- A saved model file (`example_model.pt` or `custom_model.pt`)
-- Visualization files (`predictions.png` or `custom_model_predictions.png`)
+- Saved model files (`.pt` format)
+- Visualization files (`.png` format)
+- Preprocessed data files
+- Log files and metrics
 
-## Additional Examples
+## Additional Resources
 
-Check out other examples in this directory for more specialized use cases:
-
-- Feature extraction and visualization
-- Working with real molecular datasets
-- Transfer learning for molecular property prediction
-- Custom model architectures
+- Check the [main documentation](../docs/) for detailed API reference
+- See the [tests](../tests/) directory for more usage examples
+- Visit the [project website](https://github.com/yourusername/MoML-CA) for updates

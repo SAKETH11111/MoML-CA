@@ -20,19 +20,16 @@ from moml.core.molecular_graph import (
 
 # Data handling
 from moml.data.dataset import MolecularGraphDataset
-from moml.data.processors import process_mol_file, batch_process_molecules
+from moml.data.mol_processors import process_mol_file, batch_process_molecules
 
 # Molecular visualization
-from moml.utils.visualization.molecule_visualization import (
+from moml.utils.visualization.visualization import (
     draw_molecule,
     save_molecule_image,
     generate_molecule_grid,
     save_molecule_grid,
     visualize_dataset,
-    load_molecules_from_pickle
-)
-
-from moml.utils.visualization.visualization import (
+    load_molecules_from_pickle,
     visualize_molecular_graph,
     print_graph_statistics,
     visualize_hierarchical_graphs

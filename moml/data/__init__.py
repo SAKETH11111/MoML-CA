@@ -9,20 +9,20 @@ including dataset classes, data loading, splitting, and processing.
 from moml.data.dataset import MolecularGraphDataset, HierarchicalGraphDataset, PFASDataset
 
 # Dataset loading
-from moml.data.loader import load_dataset, load_datasets_from_splits, load_hierarchical_dataset
+from moml.data.dataset_loader import load_dataset, load_datasets_from_splits, load_hierarchical_dataset
 
 # Dataset splitting
-from moml.data.splitting import split_dataset, stratified_split_dataset, scaffold_split_dataset
+from moml.data.dataset_splitter import split_dataset, stratified_split_dataset, scaffold_split_dataset
 
 # DataLoader utilities
-from moml.data.dataloader import (
+from moml.data.pytorch_dataloader import (
     prepare_dataloaders,
     create_dataloaders_from_directory,
     create_stratified_dataloaders
 )
 
 # Processor utilities
-from moml.data.processors import (
+from moml.data.mol_processors import (
     process_mol_file,
     process_mol_file_to_graph,
     batch_process_molecules,

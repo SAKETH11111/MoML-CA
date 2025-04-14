@@ -9,7 +9,6 @@ to create graph representations for machine learning.
 import os
 import argparse
 from moml import preprocess_molecules
-from moml.models.mgnn.training import MGNNConfig
 
 
 def parse_args():
@@ -38,8 +37,8 @@ def main():
     print(f"Input directory: {args.input_dir}")
     print(f"Output directory: {args.output_dir}")
     
-    # Create configuration
-    config = MGNNConfig({
+    # Create configuration dictionary
+    config = {
         # Atom features
         'use_atom_symbol': True,
         'use_atom_charge': True,
@@ -60,7 +59,7 @@ def main():
         
         # Partial charges
         'use_partial_charges': True if args.charges_dir else False,
-    })
+    }
     
     # Process the molecules
     results = preprocess_molecules(

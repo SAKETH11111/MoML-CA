@@ -3,7 +3,7 @@
 Hierarchical Graph Creation Example
 
 This script demonstrates how to use the GraphCoarsener class to create
-hierarchical representations of PFAS molecules at different levels of granularity.
+hierarchical representations of molecules at different levels of granularity.
 """
 
 import os
@@ -12,9 +12,10 @@ import argparse
 from rdkit import Chem
 from pathlib import Path
 
-from moml.core.graph_coarsening import GraphCoarsener
-from moml.core.molecular_graph import create_graph_processor
-from moml.utils.visualization.visualization import visualize_molecular_graph
+from moml import (
+    GraphCoarsener,
+    visualize_molecular_graph
+)
 
 
 def parse_args():

@@ -49,7 +49,7 @@ except ImportError as e:
 # Import from consolidated moml modules
 try:
     from moml.core import validate_smiles
-    from moml.pipeline.chemical_list.process_chemical_data import create_rdkit_mols
+    from moml.data.processors.process_chemical_data import create_rdkit_mols
     from moml.core.molecular_graph import MolecularGraphProcessor
     
     IMPORTS_SUCCESSFUL = True

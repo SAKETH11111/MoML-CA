@@ -5,10 +5,8 @@ Example script for running predictions with a trained MGNN model.
 
 import os
 import sys
-import argparse
-import json
-import numpy as np
 import torch
+import argparse
 from pathlib import Path
 
 # Add project root to path if needed
@@ -16,15 +14,13 @@ project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from moml.models.mgnn.evaluation.predictor import create_predictor
-from moml.models.mgnn.training import MGNNConfig, create_argparser
+from moml import create_predictor
 
 
 def parse_args():
     """Parse command line arguments for prediction example."""
-    parser = create_argparser(
-        description='Example script for running predictions with a trained MGNN model',
-        include_training=False
+    parser = argparse.ArgumentParser(
+        description='Example script for running predictions with a trained MGNN model'
     )
     
     # Add example-specific arguments
@@ -45,9 +41,6 @@ def main():
     # Parse arguments
     args = parse_args()
     
-    # Load or create configuration
-    config = MGNNConfig.from_args(args)
-    
     # Determine device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -59,7 +52,6 @@ def main():
     print(f"Loading model from {args.model_path}")
     predictor = create_predictor(
         model_path=args.model_path,
-        config=config,
         device=device
     )
     
