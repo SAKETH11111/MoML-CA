@@ -12,11 +12,10 @@ import argparse
 from rdkit import Chem
 from pathlib import Path
 
-from moml import (
-    GraphCoarsener,
-    visualize_molecular_graph
-)
+from moml.core import (
+    GraphCoarsener,)
 
+from moml.utils.visualization.visualization import visualize_molecular_graph
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Create hierarchical molecular graphs")

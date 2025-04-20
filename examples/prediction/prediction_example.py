@@ -13,13 +13,15 @@ import argparse
 import matplotlib.pyplot as plt
 from rdkit import Chem
 
-from moml import (
+from moml.core import (
     create_graph_processor,
-    create_predictor,
-    batch_predict_from_files,
     initialize_model
 )
 
+from moml.models.mgnn.evaluation import (
+    create_predictor,
+    batch_predict_from_files
+)
 
 def parse_args():
     """Parse command line arguments."""

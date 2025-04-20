@@ -33,7 +33,7 @@ pip install -e .
 ```python
 import torch
 from rdkit import Chem
-from moml import create_graph_processor
+from moml.core import create_graph_processor
 from moml.models.mgnn.training import initialize_model, MGNNConfig, create_trainer
 from moml.models.mgnn.evaluation.predictor import create_predictor
 

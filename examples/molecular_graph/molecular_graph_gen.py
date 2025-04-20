@@ -31,15 +31,18 @@ from typing import Dict, Optional
 from rdkit import Chem
 
 # Import modules
-from moml import (
+from moml.core import (
     create_graph_processor,
     GraphCoarsener,
-    visualize_molecular_graph,
-    print_graph_statistics,
-    parse_orca_output,
     FunctionalGroupDetector
 )
 
+from moml.simulation.qm.parser.orca_parser import parse_orca_output
+
+from moml.utils.visualization.visualization import (
+    visualize_molecular_graph,
+    print_graph_statistics
+)
 
 def create_and_visualize_atomic_graph(
     mol_file: str,
