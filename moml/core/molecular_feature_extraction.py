@@ -7,8 +7,8 @@ calculations used across the MGNN package.
 """
 
 from rdkit import Chem
+from moml.utils.data.validation import validate_smiles
 from typing import Dict, List, Tuple, Set
-import torch
 import numpy as np
 
 class FunctionalGroupDetector:
@@ -479,36 +479,6 @@ class MolecularFeatureExtractor:
             
         return bond_lengths
 
-def validate_smiles(smiles: str) -> tuple:
-    """
-    Validate a SMILES string and convert to canonical form.
-    
-    Args:
-        smiles: The SMILES string to validate
-        
-    Returns:
-        Tuple containing:
-            - Boolean indicating if SMILES is valid
-            - Canonical SMILES (if valid, otherwise None)
-            - Error message (if invalid, otherwise None)
-    """
-    from rdkit import Chem
-    
-    if not smiles or not isinstance(smiles, str):
-        return False, None, "Empty or non-string SMILES input"
-    
-    try:
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            return False, None, f"Invalid SMILES: {smiles}"
-        
-        # Generate canonical SMILES
-        canonical_smiles = Chem.MolToSmiles(mol, isomericSmiles=True, canonical=True)
-        return True, canonical_smiles, None
-    
-    except Exception as e:
-        return False, None, f"Error processing SMILES: {str(e)}"
-
 def calculate_molecular_descriptors(mol) -> dict:
     """
     Calculate molecular descriptors for a molecule.
@@ -570,4 +540,4 @@ def extract_fingerprints(mol, fingerprint_type='morgan', radius=2, nBits=2048):
         fp = Chem.RDKFingerprint(mol, fpSize=nBits)
         return np.array(fp)
     else:
-        raise ValueError(f"Unsupported fingerprint type: {fingerprint_type}") 
+        raise ValueError(f"Unsupported fingerprint type: {fingerprint_type}")

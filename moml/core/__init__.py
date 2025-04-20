@@ -1,49 +1,54 @@
 """
 MoML Core Package
 
-This package contains core functionality for molecular representation,
-including graph generation, coarsening, and molecular descriptors.
+Public API:
+- MolecularGraphProcessor: build and configure graph processors
+- mol_file_to_graph, create_molecular_graph_json, batch_create_graphs_from_molecules: file‑based graph builders
+- collate_graphs, graph_to_device, find_charges_file, read_charges_from_file: graph utilities
+- GraphCoarsener: hierarchical coarsening of PFAS graphs
+- FunctionalGroupDetector, MolecularFeatureExtractor: feature‑extraction helpers
+- calculate_molecular_descriptors, extract_fingerprints: single‑molecule descriptor utilities
 """
 
-# Molecular Graph Processing
-from moml.core.molecular_graph import (
-    MolecularGraphProcessor, 
+# Import core processing classes and functions
+from .molecular_graph_processor import (
+    MolecularGraphProcessor,
     create_graph_processor,
+    mol_file_to_graph,
     create_molecular_graph_json,
     batch_create_graphs_from_molecules,
-    collate_graphs
+    collate_graphs,
+    graph_to_device,
+    find_charges_file,
+    read_charges_from_file,
 )
 
-# Graph Coarsening
-from moml.core.graph_coarsening import (
-    GraphCoarsener,
-)
+# Hierarchical graph coarsening
+from .hierarchical_graph_coarsener import GraphCoarsener
 
-# Molecular Descriptors
-from moml.core.molecular_descriptors import (
+# Feature extraction and descriptor utilities
+from .molecular_feature_extraction import (
     FunctionalGroupDetector,
     MolecularFeatureExtractor,
     calculate_molecular_descriptors,
     extract_fingerprints,
-    validate_smiles
+    # validate_smiles is provided in utils
 )
 
 __all__ = [
-    # Molecular Graph Processing
-    "MolecularGraphProcessor",
-    "create_graph_processor",
-    "create_molecular_graph_json",
-    "batch_create_graphs_from_molecules",
-    "collate_graphs",
-    
-    # Graph Coarsening
-    "GraphCoarsener",
-    "FunctionalGroupDetector",
-    "StructuralMotifDetector",
-    
-    # Molecular Descriptors
-    "MolecularFeatureExtractor",
-    "calculate_molecular_descriptors",
-    "extract_fingerprints",
-    "validate_smiles"
+    'MolecularGraphProcessor',
+    'create_graph_processor',
+    'mol_file_to_graph',
+    'create_molecular_graph_json',
+    'batch_create_graphs_from_molecules',
+    'collate_graphs',
+    'graph_to_device',
+    'find_charges_file',
+    'read_charges_from_file',
+    'GraphCoarsener',
+    'FunctionalGroupDetector',
+    'MolecularFeatureExtractor',
+    'calculate_molecular_descriptors',
+    'extract_fingerprints',
+    # 'validate_smiles', removed as part of core, use utils.validate_smiles
 ]
