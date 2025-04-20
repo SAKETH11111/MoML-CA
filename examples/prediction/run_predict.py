@@ -10,7 +10,7 @@ import os
 import argparse
 from typing import Dict, Optional
 
-from moml import create_predictor, batch_predict_from_files
+from moml.models.mgnn.evaluation import create_predictor, batch_predict_from_files
 
 
 def parse_args():

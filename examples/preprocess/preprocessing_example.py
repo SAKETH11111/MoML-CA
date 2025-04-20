@@ -6,9 +6,8 @@ This script demonstrates how to preprocess molecule files
 to create graph representations for machine learning.
 """
 
-import os
 import argparse
-from moml import preprocess_molecules
+from moml.data import process_mol_file_to_graph
 
 
 def parse_args():
@@ -62,12 +61,10 @@ def main():
     }
     
     # Process the molecules
-    results = preprocess_molecules(
-        input_dir=args.input_dir,
-        output_dir=args.output_dir,
-        config=config,
-        charges_dir=args.charges_dir,
-        file_pattern=args.file_pattern
+    results = process_mol_file_to_graph(
+        mol_file=args.input_dir,
+        output_file=args.output_dir
+        charges_file=args.charges_dir
     )
     
     # Report results

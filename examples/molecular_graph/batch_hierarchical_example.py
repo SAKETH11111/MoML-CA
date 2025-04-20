@@ -10,7 +10,7 @@ import os
 import argparse
 from pathlib import Path
 
-from moml import GraphCoarsener
+from moml.core import GraphCoarsener
 
 
 def parse_args():
