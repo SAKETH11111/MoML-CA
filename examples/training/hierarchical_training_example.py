@@ -27,24 +27,23 @@ import numpy as np
 import pandas as pd
 import torch
 from torch_geometric.loader import DataLoader
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Tuple
 
 # Import MoML modules
-from moml import (
-    MolecularGraphProcessor,
-    GraphCoarsener,
-    HMGNN,
-    MGNNTrainer,
+from moml.core.molecular_graph import MolecularGraphProcessor
+from moml.core.graph_coarsening import GraphCoarsener
+from moml.models.mgnn.hierarchical_mgnn import HMGNN
+from moml.models.mgnn.training.trainer import MGNNTrainer
+from moml.models.mgnn.training.callbacks import (
     EarlyStopping,
     ModelCheckpoint,
-    LearningRateScheduler,
-    ForceFieldMapper,
-    HierarchicalGraphDataset,
-    scaffold_split,
-    prepare_dataloaders,
-    split_dataset
+    LearningRateScheduler
 )
+
+from moml.simulation.md.force_field_mapper import ForceFieldMapper
+from moml.data.dataset import HierarchicalGraphDataset
+from moml.data import prepare_dataloaders
+from moml.data import scaffold_split_dataset
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
@@ -258,7 +257,7 @@ def prepare_dataset(data: pd.DataFrame, seed: int = 42) -> Dict[str, Hierarchica
             continue
     
     # Split dataset using scaffold split
-    train_data, val_data, test_data = scaffold_split(hierarchical_graphs, seed=seed)
+    train_data, val_data, test_data = scaffold_split_dataset(hierarchical_graphs, seed=seed)
     
     # Create datasets
     datasets = {

@@ -7,13 +7,8 @@ import os
 import torch
 import torch.nn as nn
 import argparse
-from typing import Dict, Optional
 
-from moml import (
-    create_trainer,
-    prepare_dataloaders,
-    split_dataset
-)
+from moml.models.mgnn.training import create_trainer
 
 
 def parse_args():
