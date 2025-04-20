@@ -1,62 +1,70 @@
 """
 MoML Data Package
 
-This package provides tools for working with molecular datasets,
-including dataset classes, data loading, splitting, and processing.
+Public API:
+- MolecularGraphDataset, HierarchicalGraphDataset, PFASDataset: dataset classes
+- load_dataset, load_datasets_from_splits, load_hierarchical_dataset: data loaders
+- split_dataset, stratified_split_dataset, scaffold_split_dataset: dataset splitting utilities
+- prepare_dataloaders, create_dataloaders_from_directory, create_stratified_dataloaders: PyTorch DataLoader helpers
+- process_mol_file, process_mol_file_to_graph, batch_process_molecules: molecule‑to‑graph utilities
+- process_dataset, save_processed_molecules, batch_process_molecules_dataset: CSV‑based dataset processors
 """
 
 # Dataset classes
-from moml.data.dataset import MolecularGraphDataset, HierarchicalGraphDataset, PFASDataset
-
-# Dataset loading
-from moml.data.dataset_loader import load_dataset, load_datasets_from_splits, load_hierarchical_dataset
-
-# Dataset splitting
-from moml.data.dataset_splitter import split_dataset, stratified_split_dataset, scaffold_split_dataset
-
-# DataLoader utilities
-from moml.data.pytorch_dataloader import (
-    prepare_dataloaders,
-    create_dataloaders_from_directory,
-    create_stratified_dataloaders
+from .datasets import (
+    MolecularGraphDataset,
+    HierarchicalGraphDataset,
+    PFASDataset,
 )
 
-# Processor utilities
-from moml.data.mol_processors import (
+# Loader functions
+from .dataset_loader import (
+    load_dataset,
+    load_datasets_from_splits,
+    load_hierarchical_dataset,
+)
+
+# Splitting functions
+from .dataset_splitter import (
+    split_dataset,
+    stratified_split_dataset,
+    scaffold_split_dataset,
+)
+
+# DataLoader utilities
+from .pytorch_data_loader import (
+    prepare_dataloaders,
+    create_dataloaders_from_directory,
+    create_stratified_dataloaders,
+)
+
+# Molecule processing utilities
+from .molecule_processors import (
     process_mol_file,
     process_mol_file_to_graph,
     batch_process_molecules,
     process_dataset,
     save_processed_molecules,
-    batch_process_molecules_dataset
+    batch_process_molecules_dataset,
 )
 
 __all__ = [
-    # Dataset classes
-    "MolecularGraphDataset",
-    "HierarchicalGraphDataset",
-    "PFASDataset",
-    
-    # Loading functions
-    "load_dataset",
-    "load_datasets_from_splits",
-    "load_hierarchical_dataset",
-    
-    # Splitting functions
-    "split_dataset",
-    "stratified_split_dataset",
-    "scaffold_split_dataset",
-    
-    # DataLoader utilities
-    "prepare_dataloaders",
-    "create_dataloaders_from_directory",
-    "create_stratified_dataloaders",
-    
-    # Processor utilities
-    "process_mol_file",
-    "process_mol_file_to_graph",
-    "batch_process_molecules",
-    "process_dataset",
-    "save_processed_molecules",
-    "batch_process_molecules_dataset"
+    'MolecularGraphDataset',
+    'HierarchicalGraphDataset',
+    'PFASDataset',
+    'load_dataset',
+    'load_datasets_from_splits',
+    'load_hierarchical_dataset',
+    'split_dataset',
+    'stratified_split_dataset',
+    'scaffold_split_dataset',
+    'prepare_dataloaders',
+    'create_dataloaders_from_directory',
+    'create_stratified_dataloaders',
+    'process_mol_file',
+    'process_mol_file_to_graph',
+    'batch_process_molecules',
+    'process_dataset',
+    'save_processed_molecules',
+    'batch_process_molecules_dataset',
 ]
