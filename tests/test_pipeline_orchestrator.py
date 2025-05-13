@@ -37,7 +37,7 @@ if project_root not in sys.path:
 
 # Import pipeline components
 try:
-    from moml.pipeline.orchestrator import PFASPipelineOrchestrator
+    from moml.pipeline import PFASPipelineOrchestrator
     PIPELINE_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Pipeline module not available: {e}")

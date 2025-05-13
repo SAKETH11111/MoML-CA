@@ -20,12 +20,10 @@ import logging
 from pathlib import Path
 
 # Import utility functions
-from moml.utils.data.data_processing import (
+from moml.utils import (
     load_data,
     inspect_data,
-    handle_missing_values
-)
-from moml.utils.visualization.visualization import (
+    handle_missing_values,
     plot_distribution,
     plot_top_types,
     plot_pie_chart,

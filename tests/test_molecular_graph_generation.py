@@ -48,9 +48,9 @@ except ImportError as e:
 
 # Import from consolidated moml modules
 try:
-    from moml.core import validate_smiles
+    from moml.utils import validate_smiles
     from moml.data.processors.process_chemical_data import create_rdkit_mols
-    from moml.core.molecular_graph import MolecularGraphProcessor
+    from moml.core import MolecularGraphProcessor
     
     IMPORTS_SUCCESSFUL = True
     print("Successfully imported moml modules!")
@@ -81,18 +81,24 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         self.mol_files = []
         
         for i, smiles in enumerate(self.test_smiles):
-            is_valid, canonical, mol = validate_smiles(smiles)
-            if is_valid and mol is not None:
-                mol = Chem.AddHs(mol)
-                AllChem.EmbedMolecule(mol, randomSeed=42)
-                AllChem.MMFFOptimizeMolecule(mol)
-                
-                self.mols.append(mol)
-                
-                # Save as MOL file
-                mol_file = os.path.join(self.temp_dir.name, f"test_mol_{i}.mol")
-                Chem.MolToMolFile(mol, mol_file)
-                self.mol_files.append(mol_file)
+            is_valid, canonical_smi, error_msg = validate_smiles(smiles) # Corrected unpacking
+            if is_valid:
+                mol = Chem.MolFromSmiles(canonical_smi) # Create mol from canonical SMILES
+                if mol is not None: # Further check if mol creation was successful
+                    mol = Chem.AddHs(mol)
+                    AllChem.EmbedMolecule(mol, randomSeed=42)
+                    AllChem.MMFFOptimizeMolecule(mol)
+                    
+                    self.mols.append(mol)
+                    
+                    # Save as MOL file
+                    mol_file = os.path.join(self.temp_dir.name, f"test_mol_{i}.mol")
+                    Chem.MolToMolFile(mol, mol_file)
+                    self.mol_files.append(mol_file)
+                else:
+                    logger.warning(f"Could not create RDKit mol from canonical SMILES '{canonical_smi}' for original '{smiles}'")
+            else:
+                logger.warning(f"SMILES validation failed for '{smiles}': {error_msg}")
         
         # Initialize MolecularGraphProcessor
         self.graph_processor = MolecularGraphProcessor()

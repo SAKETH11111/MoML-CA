@@ -7,7 +7,7 @@ calculations used across the MGNN package.
 """
 
 from rdkit import Chem
-from moml.utils.data.validation import validate_smiles
+from moml.utils import validate_smiles
 from typing import Dict, List, Tuple, Set
 import numpy as np
 
@@ -412,24 +412,38 @@ class MolecularFeatureExtractor:
         for atom_idx in range(mol.GetNumAtoms()):
             # Distance to nearest CF3 group
             min_dist_cf3 = float('inf')
-            for cf3_idx in cf3_groups:
-                # Use RDKit's built-in shortest path method
-                path = Chem.GetShortestPath(mol, atom_idx, cf3_idx)
-                if path and len(path) - 1 < min_dist_cf3:
-                    min_dist_cf3 = len(path) - 1
-            
-            if min_dist_cf3 == float('inf'):
-                min_dist_cf3 = -1  # No CF3 group found
+            if not cf3_groups:
+                min_dist_cf3 = -1
+            else:
+                for cf3_idx in cf3_groups:
+                    if atom_idx == cf3_idx:
+                        min_dist_cf3 = 0
+                        break
+                    # Use RDKit's built-in shortest path method
+                    path = Chem.GetShortestPath(mol, atom_idx, cf3_idx)
+                    if path: # path can be empty if no path exists
+                        dist = len(path) - 1
+                        if dist < min_dist_cf3:
+                            min_dist_cf3 = dist
+                if min_dist_cf3 == float('inf'): # If still inf, means no path found or cf3_groups was empty initially
+                    min_dist_cf3 = -1
             
             # Distance to nearest functional group
             min_dist_func = float('inf')
-            for func_idx in functional_groups:
-                path = Chem.GetShortestPath(mol, atom_idx, func_idx)
-                if path and len(path) - 1 < min_dist_func:
-                    min_dist_func = len(path) - 1
-            
-            if min_dist_func == float('inf'):
-                min_dist_func = -1  # No functional group found
+            if not functional_groups:
+                min_dist_func = -1
+            else:
+                for func_idx in functional_groups:
+                    if atom_idx == func_idx:
+                        min_dist_func = 0
+                        break
+                    path = Chem.GetShortestPath(mol, atom_idx, func_idx)
+                    if path: # path can be empty if no path exists
+                        dist = len(path) - 1
+                        if dist < min_dist_func:
+                            min_dist_func = dist
+                if min_dist_func == float('inf'): # If still inf, means no path found
+                    min_dist_func = -1
             
             # Determine if atom is in head group or fluorinated tail
             is_head_group = False

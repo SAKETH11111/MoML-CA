@@ -95,4 +95,8 @@ logs/
 *.bibtex
 
 config/pipeline_config.json
+.roo
+.roomodes
 
+/docs/
+/memory-bank/
