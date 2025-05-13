@@ -26,9 +26,9 @@ project_dir = os.path.dirname(code_dir)
 sys.path.insert(0, project_dir)
 
 # Import with relative imports
-from moml.core.graph_coarsening import GraphCoarsener
-from moml.core.molecular_descriptors import FunctionalGroupDetector
-from moml.core.molecular_graph import MolecularGraphProcessor, create_graph_processor
+from moml.core import GraphCoarsener
+from moml.core.molecular_feature_extraction import FunctionalGroupDetector
+from moml.core import MolecularGraphProcessor, create_graph_processor
 
 
 # Create a custom Data class for testing that handles the keys attribute properly
@@ -212,7 +212,7 @@ class TestFunctionalGroupDetector:
         """Test identification of CF groups."""
         detector = FunctionalGroupDetector()
         
-        cf_groups = detector.identify_cf_groups(test_molecule)
+        cf_groups = detector.find_cf_groups(test_molecule)
         
         # Check that CF groups are identified
         assert len(cf_groups) > 0, "No CF groups identified in PFOA"
@@ -272,7 +272,7 @@ class TestGraphCoarsener:
         # The number of nodes should be less than or equal to the atom graph
         assert functional_group_graph.num_nodes <= mock_atom_graph.num_nodes
     
-    @patch('moml.core.molecular_descriptors.MolecularFeatureExtractor.calculate_distance_features')
+    @patch('moml.core.molecular_feature_extraction.MolecularFeatureExtractor.calculate_distance_features')
     def test_create_structural_motif_graph(self, mock_calc_dist, mock_functional_group_graph, test_molecule):
         """Test creation of structural motif level graph.
         
@@ -307,9 +307,9 @@ class TestGraphCoarsener:
         # Should have exactly 2 nodes (head and tail)
         assert structural_motif_graph.num_nodes == 2
     
-    @patch('moml.core.molecular_descriptors.MolecularFeatureExtractor.calculate_distance_features')
-    @patch('moml.core.graph_coarsening.GraphCoarsener.create_functional_group_graph')
-    @patch('moml.core.graph_coarsening.GraphCoarsener.create_structural_motif_graph')
+    @patch('moml.core.molecular_feature_extraction.MolecularFeatureExtractor.calculate_distance_features')
+    @patch('moml.core.hierarchical_graph_coarsener.GraphCoarsener.create_functional_group_graph')
+    @patch('moml.core.hierarchical_graph_coarsener.GraphCoarsener.create_structural_motif_graph')
     def test_create_hierarchical_graphs(self, mock_motif_graph, mock_fg_graph, mock_calc_dist, 
                                         mock_atom_graph, mock_functional_group_graph, test_molecule):
         """Test creation of hierarchical graphs with comprehensive mocking."""

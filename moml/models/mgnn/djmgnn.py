@@ -1,182 +1,345 @@
-import math, torch, torch.nn as nn, torch.nn.functional as F
-from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
+import torch
+import torch.nn as nn
+import math
+import torch.nn.functional as F
+from torch_geometric.nn import NNConv
+from torch_geometric.nn import global_mean_pool
 
-# helpers 
-def rbf_encode_dist(dists, K=32, d_min=0.0, d_max=10.0):
-    """Gaussian RBF encoding of distances (shape: [num_edges, 1] → [num_edges, K])."""
-    mu = torch.linspace(d_min, d_max, K, device=dists.device)          # centres
-    gamma = -0.5 / ((mu[1] - mu[0]) ** 2)                              # width
-    diff = dists - mu.view(1, -1)                                      # broadcast
-    return torch.exp(gamma * diff ** 2)                                # [E, K]
 
-# core layers 
-class GraphConvLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, edge_attr_dim):
+class FixedWeightProducer(nn.Module):
+    """
+    A module that produces a fixed, learnable weight matrix.
+    Used by NNConv when no edge attributes are provided (edge_attr_dim=0).
+    The output shape is (in_channels * out_channels).
+    """
+    def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
-        self.edge_mlp = nn.Sequential(
-            nn.Linear(edge_attr_dim, in_channels * out_channels),
-            nn.ReLU()
+        self.weights = nn.Parameter(torch.Tensor(in_channels * out_channels))
+        self._init_weights(in_channels, out_channels)
+
+    def _init_weights(self, in_channels: int, out_channels: int):
+        # Initialize weights similar to a Linear layer's weights
+        # A Linear layer (in_channels, out_channels) has weights of shape (out_channels, in_channels)
+        # We initialize self.weights to be a flattened version of this.
+        temp_layer_weights = torch.empty(out_channels, in_channels)
+        # Using kaiming_uniform_ as it's common for ReLU activations that follow,
+        # though here it's for the weights themselves. Default for nn.Linear.
+        nn.init.kaiming_uniform_(temp_layer_weights, a=math.sqrt(5))
+        self.weights.data = temp_layer_weights.view(-1).clone()
+
+    def forward(self, edge_attr: torch.Tensor = None) -> torch.Tensor:
+        """
+        Returns the fixed weight tensor.
+        Args:
+            edge_attr: Edge attributes. Ignored by this module.
+        Returns:
+            torch.Tensor: The learnable weight tensor of shape [in_channels * out_channels].
+        """
+        return self.weights
+
+
+class GraphConvLayer(nn.Module):
+    """
+    A graph convolution layer based on NNConv, which allows the model
+    to learn from bond (edge) attributes in addition to node features.
+    Handles cases with and without edge attributes.
+    """
+    def __init__(self, in_channels: int, out_channels: int, edge_attr_dim: int):
+        """
+        Args:
+            in_channels: Dimensionality of node features coming in
+            out_channels: Dimensionality of output node features
+            edge_attr_dim: Dimensionality of the bond (edge) feature vector.
+                           If 0, edge attributes are not used.
+        """
+        super().__init__()
+        self.edge_attr_dim = edge_attr_dim
+
+        if self.edge_attr_dim > 0:
+            # Standard MLP for generating weights from edge features
+            # Output dimension is in_channels * out_channels
+            # Using a structure like: Linear -> ReLU -> Linear
+            nn_hidden_dim = max(16, self.edge_attr_dim * 2) # Heuristic for hidden layer size
+            nn_hidden_dim = min(nn_hidden_dim, 128) # Cap hidden dim
+            self.edge_mlp = nn.Sequential(
+                nn.Linear(self.edge_attr_dim, nn_hidden_dim),
+                nn.ReLU(),
+                nn.Linear(nn_hidden_dim, in_channels * out_channels)
+            )
+        else: # edge_attr_dim == 0
+            # When no edge attributes, use a fixed (but learnable) weight producer.
+            # This makes NNConv behave like a GCNConv layer with a single shared weight matrix.
+            self.edge_mlp = FixedWeightProducer(in_channels, out_channels)
+        
+        # NNConv applies a learned linear transform (via edge_mlp) to each neighbor's features
+        self.conv = NNConv(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            nn=self.edge_mlp,
+            aggr='add'  # or 'mean', 'max', depending on your preference
         )
-        self.conv = NNConv(in_channels, out_channels, nn=self.edge_mlp, aggr='add')
-        self.norm = GraphNorm(out_channels)             # BN → GraphNorm / LayerNorm
-        self.res_connection = (in_channels == out_channels)
-
+        
+        # Optional batch norm on output features
+        self.bn = nn.BatchNorm1d(out_channels)
+    
     def forward(self, x, edge_index, edge_attr):
-        if edge_attr is None:                           # (C)
-            edge_attr = x.new_ones(edge_index.size(1), 1)
+        """
+        Forward pass of NNConv.
+        
+        Args:
+            x: Node feature matrix [num_nodes, in_channels]
+            edge_index: Graph connectivity [2, num_edges]
+            edge_attr: Edge feature matrix [num_edges, edge_attr_dim]
+        
+        Returns:
+            Updated node feature matrix [num_nodes, out_channels]
+        """
+        # Perform NNConv aggregation
+        x = self.conv(x, edge_index, edge_attr)
+        
+        # Apply batch norm (requires [batch_size, num_features])
+        x = self.bn(x)
+        
+        # Nonlinear activation
+        x = F.relu(x)
+        
+        return x
 
-        h = self.conv(x, edge_index, edge_attr)
-        h = self.norm(h)
-        h = F.relu(h)
-
-        if self.res_connection:                        # (B)
-            h = h + x
-        return h
+        
 
 class DenseGNNBlock(nn.Module):
-    def __init__(self, in_dim, hidden_dim, n_layers, transition_dim, edge_attr_dim):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dim: int,
+        n_layers: int,
+        transition_dim: int = None,
+        edge_attr_dim: int = 0
+    ):
         super().__init__()
-        self.layers, cur_dim = nn.ModuleList(), in_dim
+        self.layers = nn.ModuleList()
+        self.current_dim = in_dim  # total dimension so far
+        
+        # Build n_layers, each sees concatenated outputs from all prior layers
         for _ in range(n_layers):
-            self.layers.append(GraphConvLayer(cur_dim, hidden_dim, edge_attr_dim))
-            cur_dim += hidden_dim                       # dense concat
-        self.transition = nn.Linear(cur_dim, transition_dim)
-        self.norm = GraphNorm(transition_dim)
+            self.layers.append(
+                GraphConvLayer(
+                    in_channels=self.current_dim,
+                    out_channels=hidden_dim,
+                    edge_attr_dim=edge_attr_dim
+                )
+            )
+            self.current_dim += hidden_dim
+        
+        out_dim = self.current_dim
+        final_dim = transition_dim or hidden_dim
+        self.transition = nn.Linear(out_dim, final_dim)
+        self.bn = nn.BatchNorm1d(final_dim)
 
-    def forward(self, x, edge_index, edge_attr):
-        outs = [x]
+    def forward(self, x, edge_index, edge_attr=None):
+        out_list = [x]
         for layer in self.layers:
-            h = layer(torch.cat(outs, 1), edge_index, edge_attr)
-            outs.append(h)
-        h = self.transition(torch.cat(outs, 1))
-        return F.relu(self.norm(h))
+            concat_x = torch.cat(out_list, dim=1)
+            h = layer(concat_x, edge_index, edge_attr)
+            out_list.append(h)
+        dense_out = torch.cat(out_list, dim=1)
+        out = self.transition(dense_out)
+        out = self.bn(out)
+        out = F.relu(out)
+        return out
+
 
 class JKAggregator(nn.Module):
-    def __init__(self, block_dims, out_dim, mode='attention'):
+    def __init__(self, block_dims, out_dim, mode='concat'):
         super().__init__()
-        self.mode, self.block_count = mode, len(block_dims)
-        if mode == 'concat':
-            self.proj = nn.Linear(sum(block_dims), out_dim)
-        elif mode in ('max', 'attention'):
-            self.projs = nn.ModuleList(nn.Linear(d, out_dim) for d in block_dims)
-            if mode == 'attention':
-                self.attn_vecs = nn.ParameterList(
-                    nn.Parameter(torch.randn(out_dim)) for _ in block_dims)
+        self.mode = mode
+        self.block_count = len(block_dims)
 
-    def forward(self, blocks):
+        if mode == 'concat':
+            in_dim = sum(block_dims)
+            self.proj = nn.Linear(in_dim, out_dim)
+        elif mode == 'max':
+            self.projs = nn.ModuleList(
+                nn.Linear(dim, out_dim) for dim in block_dims
+            )
+        elif mode == 'attention':
+            self.attn_params = nn.ParameterList([
+                nn.Parameter(torch.randn(1, dim)) for dim in block_dims
+            ])
+            self.projs = nn.ModuleList([
+                nn.Linear(dim, out_dim) for dim in block_dims
+            ])
+        elif mode == 'lstm':
+            self.hidden_size = out_dim
+            max_dim = max(block_dims)
+            self.projs = nn.ModuleList([
+                nn.Linear(dim, max_dim) for dim in block_dims
+            ])
+            self.lstm = nn.LSTM(input_size=max_dim, hidden_size=out_dim, batch_first=True)
+        else:
+            raise ValueError(f"Unknown JK mode: {mode}")
+
+    def forward(self, block_outputs):
+        """
+        block_outputs: list of [batch_size, block_dims[i]] node embeddings from each block
+        """
         if self.mode == 'concat':
-            return self.proj(torch.cat(blocks, 1))
+            x_cat = torch.cat(block_outputs, dim=1)
+            return self.proj(x_cat)
         elif self.mode == 'max':
-            stacked = torch.stack([p(b) for p, b in zip(self.projs, blocks)], 0)
-            return torch.max(stacked, 0)[0]
+            # project each block output
+            ps = [self.projs[i](h) for i, h in enumerate(block_outputs)]
+            stack = torch.stack(ps, dim=0)  # [num_blocks, batch_size, out_dim]
+            out, _ = torch.max(stack, dim=0) 
+            return out
         elif self.mode == 'attention':
-            proj = [p(b) for p, b in zip(self.projs, blocks)]
-            scores = [ (b * v).sum(-1) / math.sqrt(b.size(-1))
-                       for b, v in zip(proj, self.attn_vecs) ]  # (D)
-            w = torch.stack(scores, 1).softmax(1)               # [N, B]
-            out = sum(w[:, i:i+1] * proj[i] for i in range(len(proj)))
+            attn_scores = []
+            for i, h in enumerate(block_outputs):
+                score = torch.matmul(h, self.attn_params[i].t())  # [batch_size, 1]
+                attn_scores.append(score)
+            scores_cat = torch.cat(attn_scores, dim=1)           # [batch_size, num_blocks]
+            attn_weights = F.softmax(scores_cat, dim=1)          # [batch_size, num_blocks]
+            # project each block output
+            proj_h = [self.projs[i](block_outputs[i]) for i in range(self.block_count)]
+            weighted_sum = 0
+            for i, p in enumerate(proj_h):
+                w = attn_weights[:, i].unsqueeze(1)
+                weighted_sum = weighted_sum + w * p
+            return weighted_sum
+        elif self.mode == 'lstm':
+            seq_list = []
+            for i, h in enumerate(block_outputs):
+                # project each block output to the same dimension
+                p = self.projs[i](h)
+                seq_list.append(p)
+            # shape = [batch_size, num_blocks, max_dim]
+            packed = torch.stack(seq_list, dim=1)
+            _, (h_n, _) = self.lstm(packed)
+            out = h_n.squeeze(0)  # [batch_size, out_dim]
             return out
 
+        
 class DJMGNN(nn.Module):
-    def __init__(self,
-                 in_dim, hidden_dim,
-                 n_blocks=3, layers_per_block=6,
-                 edge_attr_dim=0,
-                 jk_mode='attention',
-                 node_out_dim=1, graph_out_dim=1,
-                 dropout=0.2,
-                 pool_type='mean',
-                 p_dropedge=0.1,
-                 use_supernode=True,
-                 use_rbf=True, rbf_K=32):
-        super().__init__()
-        self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = \
-            p_dropedge, use_supernode, use_rbf, rbf_K
+    """
+    Dense + Jumping Knowledge GNN with multi-task heads:
+      - A node-level head for force-field parameters (e.g., partial charges).
+      - A graph-level head for macroscopic property (e.g., adsorption affinity).
+      - Additional heads if you like.
 
-        # Build dense blocks
+    The forward pass returns a dictionary of outputs:
+      {
+         'node_pred': [num_nodes, node_out_dim],  # optional
+         'graph_pred': [batch_size, graph_out_dim], # optional
+         ... 
+      }
+    so you can apply partial-labeled loss.
+    """
+    def __init__(
+        self,
+        in_dim: int,            # Node feature dimension
+        hidden_dim: int,        # Growth dimension for each block
+        n_blocks: int = 3,      # number of DenseGNNBlocks
+        layers_per_block: int = 8,
+        edge_attr_dim: int = 0,
+        jk_mode: str = 'attention',
+        # Node-level output dimension for force-field, e.g. partial charges or bond constants
+        node_out_dim: int = 1,
+        # Graph-level output dimension for a property (adsorption, etc.)
+        graph_out_dim: int = 1,
+        dropout: float = 0.2
+    ):
+        super().__init__()
+        
+        # Build Dense blocks 
         self.blocks = nn.ModuleList()
-        for b in range(n_blocks):
+        block_dims = []
+
+        # First block
+        self.blocks.append(
+            DenseGNNBlock(
+                in_dim=in_dim,
+                hidden_dim=hidden_dim,
+                n_layers=layers_per_block,
+                transition_dim=hidden_dim,
+                edge_attr_dim=edge_attr_dim
+            )
+        )
+        block_dims.append(hidden_dim)
+
+        # Additional blocks
+        for _ in range(n_blocks - 1):
             self.blocks.append(
                 DenseGNNBlock(
-                    in_dim=hidden_dim if b else in_dim,
+                    in_dim=hidden_dim,
                     hidden_dim=hidden_dim,
                     n_layers=layers_per_block,
                     transition_dim=hidden_dim,
-                    edge_attr_dim=edge_attr_dim + (rbf_K if use_rbf else 0)
+                    edge_attr_dim=edge_attr_dim
                 )
             )
+            block_dims.append(hidden_dim)
 
-        self.jk = JKAggregator([hidden_dim]*n_blocks, hidden_dim, mode=jk_mode)
+        # JK aggregator (node-level)
+        # merges outputs from each block into final node-level embedding
+        self.jk_aggregator = JKAggregator(
+            block_dims=block_dims,
+            out_dim=hidden_dim,
+            mode=jk_mode
+        )
 
+        # Multi-Task Heads
+        # Node-level head: e.g. partial charges
+        # We'll apply it directly to the node embeddings after JK aggregator
         self.node_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim//2), nn.ReLU(), nn.Dropout(dropout),
-            nn.Linear(hidden_dim//2, node_out_dim)
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, node_out_dim)
         )
+        
+        # Graph-level head: e.g. macroscopic property
+        # We'll pool node embeddings to get a graph embedding, then do MLP
+        self.graph_pool = global_mean_pool  # or an attention pool
         self.graph_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim//2), nn.ReLU(), nn.Dropout(dropout),
-            nn.Linear(hidden_dim//2, graph_out_dim)
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, graph_out_dim)
         )
-        self.pool = {'mean': global_mean_pool,
-                     'add':  global_add_pool,
-                     'max':  global_max_pool
-                    }.get(pool_type, global_mean_pool)
-
-    # ---------- data‑level helpers -------------
-    def add_supernode(self, x, edge_index, edge_attr, batch):
-        """Add one virtual node per graph and connect it to all nodes."""
-        if not self.use_super:                                # skip if disabled
-            return x, edge_index, edge_attr, batch
-        n = x.size(0)
-        super_feat = x.new_zeros((batch.max().item()+1, x.size(1)))
-        x = torch.cat([x, super_feat], 0)
-
-        # build edges centre⟷node
-        device = x.device
-        row = torch.arange(n, device=device)
-        col = batch                                      # destination super node id
-        col = col + n                                    # shift indices after concat
-        edge1 = torch.stack([row, col], 0)
-        edge2 = torch.stack([col, row], 0)
-        edge_index = torch.cat([edge_index, edge1, edge2], 1)
-
-        if edge_attr is not None:
-            super_e = edge_attr.new_zeros(edge1.size(1)*2, edge_attr.size(1))
-            edge_attr = torch.cat([edge_attr, super_e], 0)
-
-        batch = torch.cat([batch, torch.arange(super_feat.size(0), device=device)])
-        return x, edge_index, edge_attr, batch
-
-    def drop_edges(self, edge_index, edge_attr):
-        if not self.training or self.p_dropedge == 0:          # inference: keep all
-            return edge_index, edge_attr
-        mask = torch.rand(edge_index.size(1), device=edge_index.device) > self.p_dropedge
-        return edge_index[:, mask], (edge_attr[mask] if edge_attr is not None else None)
-
-    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None):
+    
+    def forward(self, x, edge_index, edge_attr=None, batch=None):
         """
-        dist: optional tensor [num_edges, 1] of inter‑atomic distances
+        Return a dictionary of node-level and graph-level predictions:
+          {
+            'node_pred': Tensor [num_nodes, node_out_dim],
+            'graph_pred': Tensor [batch_size, graph_out_dim]
+          }
+        Some tasks may want only one of these.
         """
-        # RBF encode distances and concatenate to edge_attr  (H)
-        if self.use_rbf and dist is not None:
-            rbf = rbf_encode_dist(dist, K=self.rbf_K)          # [E, K]
-            edge_attr = rbf if edge_attr is None else torch.cat([edge_attr, rbf], 1)
+        block_outputs = []
+        h = x
 
-        # Add virtual super node  (G)
-        if batch is None:
-            batch = x.new_zeros(x.size(0), dtype=torch.long)
-        x, edge_index, edge_attr, batch = self.add_supernode(x, edge_index, edge_attr, batch)
-
-        # DropEdge regularisation  (F)
-        edge_index, edge_attr = self.drop_edges(edge_index, edge_attr)
-
-        # Backbone
-        h, outs = x, []
+        # Pass through each Dense block
         for block in self.blocks:
             h = block(h, edge_index, edge_attr)
-            outs.append(h)
-        h = self.jk(outs)                                      # node embeddings
+            block_outputs.append(h)
+        
+        # Jumping Knowledge aggregator merges the node embeddings from each block
+        jk_node_features = self.jk_aggregator(block_outputs)  # [num_nodes, hidden_dim]
 
-        node_pred = self.node_head(h)
+        # A) Node-level prediction (e.g. partial charges)
+        node_pred = self.node_head(jk_node_features)  # shape [num_nodes, node_out_dim]
 
-        graph_pred = self.graph_head(self.pool(h, batch))
-        return {'node_pred': node_pred, 'graph_pred': graph_pred}
+        # B) Graph-level prediction (pool first, then MLP)
+        if batch is None:
+            # single-graph scenario: average all node embeddings
+            graph_embed = jk_node_features.mean(dim=0, keepdim=True)
+        else:
+            # multiple graphs in batch
+            graph_embed = self.graph_pool(jk_node_features, batch)
+        graph_pred = self.graph_head(graph_embed)
+
+        return {
+            'node_pred': node_pred,     # [num_nodes, node_out_dim]
+            'graph_pred': graph_pred    # [batch_size, graph_out_dim]
+        } 

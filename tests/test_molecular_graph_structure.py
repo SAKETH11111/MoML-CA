@@ -16,7 +16,7 @@ from rdkit.Chem import AllChem
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
-from moml.core.molecular_graph import MolecularGraphProcessor, create_graph_processor
+from moml.core import MolecularGraphProcessor, create_graph_processor
 
 
 def create_test_molecule():

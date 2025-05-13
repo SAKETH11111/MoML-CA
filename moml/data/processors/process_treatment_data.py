@@ -29,7 +29,7 @@ from moml.core import validate_smiles
 from moml.data import save_processed_molecules
 
 # Import utility functions
-from moml.utils.data.data_processing import (
+from moml.utils import (
     load_data,
     inspect_data,
     clean_column_names,

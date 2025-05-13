@@ -1,0 +1,51 @@
+# environment.yml
+# Defines the Conda environment for the MoML-CA project.
+# Designed for a base image with CUDA 12.1.
+name: moml_ca_env
+channels:
+  - pytorch        # Primary channel for PyTorch
+  - pyg            # For PyTorch Geometric
+  - conda-forge    # For many community-maintained packages including OpenMM, Hydra
+  - rdkit          # For RDKit
+  - nvidia         # Sometimes needed for specific CUDA-related builds if not in pytorch channel
+  - defaults
+dependencies:
+  # Core Python
+  - python=3.10
+
+  # PyTorch Ecosystem (targeting CUDA 12.1)
+  - pytorch::pytorch=2.2.1        # Example: Specify a recent stable PyTorch version
+  - pytorch::torchvision        # Will pick version compatible with PyTorch 2.2.1
+  - pytorch::torchaudio         # Will pick version compatible with PyTorch 2.2.1
+  - pytorch::pytorch-cuda=12.1  # Crucial: ensures PyTorch is built for CUDA 12.1
+
+  # PyTorch Geometric (ensure this is compatible with PyTorch 2.2.1 and CUDA 12.1)
+  # Conda will attempt to find the best match from the pyg channel.
+  - pyg::pyg
+
+  # Molecular Modeling
+  - rdkit::rdkit                # Latest stable RDKit
+  - conda-forge::openmm>=8.0    # Latest stable OpenMM (e.g., 8.0 or newer)
+                                # The conda-forge package should utilize the system CUDA.
+
+  # Scientific Computing & Data Handling
+  - conda-forge::numpy>=1.23
+  - conda-forge::scipy>=1.9
+  - conda-forge::pandas>=1.5
+
+  # Configuration Management
+  - conda-forge::hydra-core>=1.3
+
+  # Development, Testing & Linting
+  - conda-forge::pytest>=7.0
+  - conda-forge::pytest-cov
+  - conda-forge::hypothesis
+  - conda-forge::black
+  - conda-forge::isort
+
+  # Utility Libraries
+  - conda-forge::tqdm           # Progress bars
+
+  # Pip-installed packages (if any are not well-supported by Conda or need specific versions)
+  # - pip:
+  #   - py3dmol # Example, if needed

@@ -9,7 +9,7 @@ import glob
 import pandas as pd
 from typing import Dict, List, Optional, Any
 
-from moml.data.dataset import MolecularGraphDataset, HierarchicalGraphDataset
+from moml.data.datasets import MolecularGraphDataset, HierarchicalGraphDataset
 
 
 

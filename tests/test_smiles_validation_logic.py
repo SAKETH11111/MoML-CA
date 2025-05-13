@@ -24,7 +24,8 @@ except ImportError:
     sys.exit(1)
 
 # Import from consolidated moml module
-from moml.core import validate_smiles, calculate_molecular_descriptors
+from moml.core import calculate_molecular_descriptors
+from moml.utils import validate_smiles
 
 # Setup logging
 logging.basicConfig(

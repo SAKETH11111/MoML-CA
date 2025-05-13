@@ -21,7 +21,7 @@ from moml.data import (
     process_dataset,
     save_processed_molecules
 )
-from moml.utils.data.molecular import (
+from moml.utils import (
     create_rdkit_mols,
     calculate_molecular_complexity
 )
