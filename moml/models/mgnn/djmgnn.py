@@ -1,28 +1,75 @@
 import torch
 import torch.nn as nn
+import math
 import torch.nn.functional as F
 from torch_geometric.nn import NNConv
 from torch_geometric.nn import global_mean_pool
+
+
+class FixedWeightProducer(nn.Module):
+    """
+    A module that produces a fixed, learnable weight matrix.
+    Used by NNConv when no edge attributes are provided (edge_attr_dim=0).
+    The output shape is (in_channels * out_channels).
+    """
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.weights = nn.Parameter(torch.Tensor(in_channels * out_channels))
+        self._init_weights(in_channels, out_channels)
+
+    def _init_weights(self, in_channels: int, out_channels: int):
+        # Initialize weights similar to a Linear layer's weights
+        # A Linear layer (in_channels, out_channels) has weights of shape (out_channels, in_channels)
+        # We initialize self.weights to be a flattened version of this.
+        temp_layer_weights = torch.empty(out_channels, in_channels)
+        # Using kaiming_uniform_ as it's common for ReLU activations that follow,
+        # though here it's for the weights themselves. Default for nn.Linear.
+        nn.init.kaiming_uniform_(temp_layer_weights, a=math.sqrt(5))
+        self.weights.data = temp_layer_weights.view(-1).clone()
+
+    def forward(self, edge_attr: torch.Tensor = None) -> torch.Tensor:
+        """
+        Returns the fixed weight tensor.
+        Args:
+            edge_attr: Edge attributes. Ignored by this module.
+        Returns:
+            torch.Tensor: The learnable weight tensor of shape [in_channels * out_channels].
+        """
+        return self.weights
+
 
 class GraphConvLayer(nn.Module):
     """
     A graph convolution layer based on NNConv, which allows the model
     to learn from bond (edge) attributes in addition to node features.
+    Handles cases with and without edge attributes.
     """
     def __init__(self, in_channels: int, out_channels: int, edge_attr_dim: int):
         """
         Args:
             in_channels: Dimensionality of node features coming in
             out_channels: Dimensionality of output node features
-            edge_attr_dim: Dimensionality of the bond (edge) feature vector
+            edge_attr_dim: Dimensionality of the bond (edge) feature vector.
+                           If 0, edge attributes are not used.
         """
         super().__init__()
-        
-        # MLP that maps each edge_attr -> a [in_channels * out_channels] weight matrix
-        self.edge_mlp = nn.Sequential(
-            nn.Linear(edge_attr_dim, in_channels * out_channels),
-            nn.ReLU()
-        )
+        self.edge_attr_dim = edge_attr_dim
+
+        if self.edge_attr_dim > 0:
+            # Standard MLP for generating weights from edge features
+            # Output dimension is in_channels * out_channels
+            # Using a structure like: Linear -> ReLU -> Linear
+            nn_hidden_dim = max(16, self.edge_attr_dim * 2) # Heuristic for hidden layer size
+            nn_hidden_dim = min(nn_hidden_dim, 128) # Cap hidden dim
+            self.edge_mlp = nn.Sequential(
+                nn.Linear(self.edge_attr_dim, nn_hidden_dim),
+                nn.ReLU(),
+                nn.Linear(nn_hidden_dim, in_channels * out_channels)
+            )
+        else: # edge_attr_dim == 0
+            # When no edge attributes, use a fixed (but learnable) weight producer.
+            # This makes NNConv behave like a GCNConv layer with a single shared weight matrix.
+            self.edge_mlp = FixedWeightProducer(in_channels, out_channels)
         
         # NNConv applies a learned linear transform (via edge_mlp) to each neighbor's features
         self.conv = NNConv(

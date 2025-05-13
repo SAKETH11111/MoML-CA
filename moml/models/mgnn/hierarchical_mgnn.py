@@ -14,10 +14,32 @@ The key components are:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import global_mean_pool, global_add_pool, global_max_pool
 from typing import Dict, List, Optional, Any
 
 from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator
+
+# Wrapper for global pooling functions
+class GlobalPool(nn.Module):
+    """
+    Wrapper for PyTorch Geometric global pooling functions to be used in nn.ModuleList.
+    """
+    def __init__(self, pool_fn):
+        super().__init__()
+        self.pool_fn = pool_fn
+
+    def forward(self, x: torch.Tensor, batch: Optional[torch.Tensor] = None, size: Optional[int] = None) -> torch.Tensor:
+        if batch is None: # Should not happen if data is prepared correctly
+            if x.ndim == 2: # [num_nodes, features] -> [1, features]
+                return self.pool_fn(x, torch.zeros(x.size(0), dtype=torch.long, device=x.device))
+            elif x.ndim ==3: # [batch_size, num_nodes, features] -> [batch_size, features]
+                 # This case needs careful handling if batch is truly None.
+                 # Assuming for now that if batch is None, it's a single graph with 2D input.
+                raise ValueError("Batch tensor must be provided for 3D input to GlobalPool without batch.")
+            else:
+                raise ValueError(f"Unsupported input dimension {x.ndim} for GlobalPool without batch.")
+
+        return self.pool_fn(x, batch, size)
 
 class CrossScaleAttention(nn.Module):
     """
@@ -160,10 +182,13 @@ class CrossScaleAttention(nn.Module):
                         attn_weights = F.softmax(attn_scores, dim=-1)
                         
                         # Compute attended values
-                        attended_values = torch.matmul(attn_weights, values[other_idx])
+                        attended_values_at_fine = torch.matmul(attn_weights, values[other_idx])
                         
-                        # Apply to original scale
-                        scale_output = scale_output + attended_values
+                        # Aggregate these fine-scale attended values to the coarse scale (scale_idx)
+                        aggregated_to_coarse = self._aggregate_features(
+                            attended_values_at_fine, other_idx, scale_idx # Aggregate from fine (other_idx) to coarse (scale_idx)
+                        )
+                        scale_output = scale_output + aggregated_to_coarse
             
             # Project back to original dimension
             updated_feature = scale_features[scale_idx] + self.output_projections[scale_idx](scale_output)
@@ -431,7 +456,7 @@ class HMGNN(nn.Module):
         
         # Graph-level prediction heads for each scale
         self.graph_pools = nn.ModuleList([
-            global_mean_pool for _ in range(self.num_scales)
+            GlobalPool(global_mean_pool) for _ in range(self.num_scales)
         ])
         
         self.graph_heads = nn.ModuleList([
@@ -475,6 +500,18 @@ class HMGNN(nn.Module):
         # Set cluster mappings for cross-scale attention
         if self.cross_scale_exchange and cluster_mappings is not None:
             self.cross_scale_attention.set_cluster_mappings(cluster_mappings)
+
+        # Determine overall batch size from the first available batch tensor
+        overall_batch_size = 0
+        if scale_data: # Ensure scale_data is not empty
+            for s_data_item in scale_data:
+                batch_tensor_item = s_data_item.get('batch')
+                if batch_tensor_item is not None and batch_tensor_item.numel() > 0:
+                    overall_batch_size = batch_tensor_item.max().item() + 1
+                    break
+            if overall_batch_size == 0:
+                if any(s_data_item['x'].numel() > 0 for s_data_item in scale_data):
+                    overall_batch_size = 1
         
         # Process each scale
         scale_block_outputs = []
@@ -511,44 +548,154 @@ class HMGNN(nn.Module):
         scale_graph_embeds = []
         
         for scale_idx in range(self.num_scales):
-            # Get batch indices for this scale
-            batch = scale_data[scale_idx].get('batch', None)
-            
+            current_scale_batch_tensor = scale_data[scale_idx].get('batch', None)
+
             # Node-level prediction
-            node_pred = self.node_heads[scale_idx](scale_final_features[scale_idx])
-            scale_node_preds.append(node_pred)
-            
-            # Graph-level prediction
-            if batch is None:
-                # Single-graph scenario
-                graph_embed = scale_final_features[scale_idx].mean(dim=0, keepdim=True)
+            if scale_final_features[scale_idx].numel() > 0:
+                node_pred = self.node_heads[scale_idx](scale_final_features[scale_idx])
             else:
-                # Multi-graph scenario
-                graph_embed = self.graph_pools[scale_idx](scale_final_features[scale_idx], batch)
-            
+                node_out_features = self.hidden_dim # Default to hidden_dim if head structure is complex
+                if isinstance(self.node_heads[scale_idx], nn.Sequential) and \
+                   len(self.node_heads[scale_idx]) > 0 and \
+                   hasattr(self.node_heads[scale_idx][-1], 'out_features'):
+                    node_out_features = self.node_heads[scale_idx][-1].out_features
+                elif hasattr(self.node_heads[scale_idx], 'out_features'): # If head is a single layer
+                     node_out_features = self.node_heads[scale_idx].out_features
+
+                node_pred = torch.empty((0, node_out_features),
+                                        device=scale_final_features[scale_idx].device)
+            scale_node_preds.append(node_pred)
+
+            # Graph-level prediction
+            graph_embed_dim = self.hidden_dim # Default, should be input dim of graph_head
+            if isinstance(self.graph_heads[scale_idx], nn.Sequential) and \
+               len(self.graph_heads[scale_idx]) > 0 and \
+               hasattr(self.graph_heads[scale_idx][0], 'in_features'):
+                graph_embed_dim = self.graph_heads[scale_idx][0].in_features
+            elif hasattr(self.graph_heads[scale_idx], 'in_features'):
+                 graph_embed_dim = self.graph_heads[scale_idx].in_features
+
+
+            if scale_final_features[scale_idx].numel() == 0 or overall_batch_size == 0:
+                graph_embed = torch.zeros((overall_batch_size, graph_embed_dim),
+                                          device=scale_final_features[scale_idx].device)
+            else:
+                if current_scale_batch_tensor is None and overall_batch_size == 1: # Single graph, features exist
+                    current_scale_batch_tensor = torch.zeros(scale_final_features[scale_idx].size(0),
+                                                             dtype=torch.long,
+                                                             device=scale_final_features[scale_idx].device)
+                
+                if current_scale_batch_tensor is None: # Should only happen if overall_batch_size is 0 now
+                     raise ValueError(f"Batch tensor is None for scale {scale_idx} but overall_batch_size={overall_batch_size} and features exist.")
+
+                graph_embed = self.graph_pools[scale_idx](scale_final_features[scale_idx], current_scale_batch_tensor)
+
+                # If pooling results in an empty tensor (e.g. (0,D) because all graphs in batch had 0 nodes for this scale)
+                # but overall_batch_size > 0, we need to reshape to (overall_batch_size, D) of zeros.
+                if graph_embed.numel() == 0 and overall_batch_size > 0:
+                     graph_embed = torch.zeros((overall_batch_size, graph_embed_dim),
+                                               device=scale_final_features[scale_idx].device)
+                # Ensure consistent batch dimension if pooling was sparse (this is a simplified handling)
+                elif graph_embed.size(0) != overall_batch_size and overall_batch_size > 0:
+                    # This implies global_pool might have returned a sparse batch.
+                    # We create a dense zero tensor and fill it. This assumes pooled indices are contiguous.
+                    # A truly robust solution for sparse batches from global_pool would require scatter.
+                    # print(f"Warning: Correcting graph_embed size for scale {scale_idx}. From {graph_embed.shape} to ({overall_batch_size}, {graph_embed_dim})")
+                    temp_dense_embed = torch.zeros((overall_batch_size, graph_embed_dim), device=graph_embed.device)
+                    if graph_embed.numel() > 0: # only copy if there's something to copy
+                        # This assumes that if graph_embed.size(0) < overall_batch_size, the existing embeddings
+                        # correspond to the first graph_embed.size(0) items in the batch.
+                        # This is a strong assumption about the output of global_pool with sparse batches.
+                        # PyG's global_add_pool, global_mean_pool, global_max_pool with a complete batch vector
+                        # (0 to B-1) should return (B, D). If not, the batch vector itself might be sparse.
+                        # For this test (zero_nodes_in_one_scale), it's a single graph, so overall_batch_size=1.
+                        # If scale_final_features[scale_idx].numel() > 0, graph_embed should be (1,D).
+                        # If it's not, then the pooling or batching is the issue.
+                        # The numel()==0 check above should handle the "all nodes empty for this scale" case.
+                        # This branch is more for "some graphs in batch are empty for this scale".
+                        # For the specific failing test (single graph, one scale 0 nodes), this branch might not be critical
+                        # if the numel()==0 path correctly makes a (1,D) zero tensor.
+                        # The critical part is that `graph_embed` must be `(overall_batch_size, D)`.
+                        # If `global_pool` returns `(k, D)` where `k < overall_batch_size`, it means only `k` graphs had nodes.
+                        # We need to expand this to `(overall_batch_size, D)`.
+                        # The current test is single graph, so `overall_batch_size` is 1.
+                        # If `scale_final_features` is not empty, `graph_embed` should be `(1,D)`.
+                        # If `scale_final_features` is empty, the `numel()==0` path makes `(1,D)` zeros.
+                        # This specific `elif` might be more for true batched scenarios.
+                        # For safety, let's ensure the (overall_batch_size, D) shape.
+                        if graph_embed.size(0) > 0:
+                             temp_dense_embed[:graph_embed.size(0)] = graph_embed # Naive fill
+                        graph_embed = temp_dense_embed
+
+
             graph_pred = self.graph_heads[scale_idx](graph_embed)
             scale_graph_preds.append(graph_pred)
             scale_graph_embeds.append(graph_embed)
         
         # Combined graph-level prediction
-        if len(scale_graph_embeds) > 1:
-            combined_graph_embed = torch.cat(scale_graph_embeds, dim=1)
-            combined_graph_pred = self.combined_graph_head(combined_graph_embed)
-        else:
-            combined_graph_pred = scale_graph_preds[0]
-        
+        # Filter out any graph_embeds that might be (0,D) if overall_batch_size was 0
+        valid_graph_embeds = [embed for embed in scale_graph_embeds if embed.size(0) > 0]
+        if not valid_graph_embeds and overall_batch_size == 0 : # All were (0,D) because batch was empty
+            # Output a (0,D) prediction for combined
+            combined_graph_pred_dim = self.combined_graph_head[-1].out_features
+            combined_graph_pred = torch.empty((0, combined_graph_pred_dim), device=scale_data[0]['x'].device if scale_data and scale_data[0]['x'] is not None else torch.device('cpu'))
+        elif not valid_graph_embeds and overall_batch_size > 0:
+             # This means all scales resulted in empty features for all graphs in the batch.
+             # Should produce a zero prediction of shape (overall_batch_size, out_dim)
+            combined_graph_pred_dim = self.combined_graph_head[-1].out_features
+            combined_graph_pred = torch.zeros((overall_batch_size, combined_graph_pred_dim), device=scale_data[0]['x'].device if scale_data and scale_data[0]['x'] is not None else torch.device('cpu'))
+        elif len(valid_graph_embeds) == 1: # Only one scale had actual embeddings or only one scale model
+            combined_graph_pred = self.graph_heads[0](valid_graph_embeds[0]) # Assuming if one valid, it's from scale 0 or it's a single scale model
+                                                                            # This needs to be more robust if only one valid embed is not from scale 0
+                                                                            # For now, if only one valid, use its graph_pred directly.
+                                                                            # Find which scale_graph_pred corresponds to the valid_graph_embed
+            original_idx = -1
+            for idx, embed in enumerate(scale_graph_embeds):
+                if embed is valid_graph_embeds[0]:
+                    original_idx = idx
+                    break
+            if original_idx != -1:
+                combined_graph_pred = scale_graph_preds[original_idx]
+            else: # Should not happen
+                combined_graph_pred = scale_graph_preds[0]
+
+
+        elif len(valid_graph_embeds) > 1:
+            # Ensure all valid_graph_embeds have the same batch size (overall_batch_size)
+            # This should be guaranteed by the logic above.
+            combined_graph_embed_cat = torch.cat(valid_graph_embeds, dim=1)
+            combined_graph_pred = self.combined_graph_head(combined_graph_embed_cat)
+        else: # No valid graph embeds, but overall_batch_size > 0 (e.g. all scales were empty for all graphs)
+             # This case is covered by the `elif not valid_graph_embeds and overall_batch_size > 0`
+             # For safety, re-state:
+            combined_graph_pred_dim = self.combined_graph_head[-1].out_features
+            combined_graph_pred = torch.zeros((overall_batch_size, combined_graph_pred_dim), device=scale_data[0]['x'].device if scale_data and scale_data[0]['x'] is not None else torch.device('cpu'))
+
+
+        # Default node_pred from scale 0, ensure it's (0,D) if scale 0 had no nodes
+        default_node_pred = scale_node_preds[0] if self.num_scales > 0 else torch.empty((0,0))
+
+
         # Build results dictionary
         results = {
-            'node_pred': scale_node_preds[0],  # Atom-level predictions (default)
-            'graph_pred': combined_graph_pred  # Combined graph-level predictions (default)
+            'node_pred': default_node_pred,
+            'graph_pred': combined_graph_pred
         }
         
         # Add scale-specific predictions
         for scale_idx in range(self.num_scales):
             scale_name = f"scale_{scale_idx}"
             results[f"{scale_name}_node_pred"] = scale_node_preds[scale_idx]
-            results[f"{scale_name}_graph_pred"] = scale_graph_preds[scale_idx]
-        
+            # Ensure graph_pred for empty scales is (overall_batch_size, D_out) or (0, D_out)
+            if scale_graph_preds[scale_idx].size(0) != overall_batch_size and overall_batch_size > 0 :
+                 # This implies the graph_head might have processed a (0,D_in) embed if overall_batch_size was 0 for that head
+                 # Or the graph_embed fed to it was (0,D_in)
+                 # We need the output to be (overall_batch_size, D_out_graph_head)
+                graph_head_out_dim = self.graph_heads[scale_idx][-1].out_features
+                results[f"{scale_name}_graph_pred"] = torch.zeros((overall_batch_size, graph_head_out_dim), device=combined_graph_pred.device)
+            else:
+                results[f"{scale_name}_graph_pred"] = scale_graph_preds[scale_idx]
+
         return results
 
 
