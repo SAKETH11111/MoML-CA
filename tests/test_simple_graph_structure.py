@@ -44,7 +44,7 @@ except ImportError as e:
 
 # Import the MolecularGraphProcessor
 try:
-    from moml.core.molecular_graph import MolecularGraphProcessor, create_graph_processor
+    from moml.core import MolecularGraphProcessor, create_graph_processor
     MGNN_AVAILABLE = True
     print("MolecularGraphProcessor import successful!")
 except ImportError as e:

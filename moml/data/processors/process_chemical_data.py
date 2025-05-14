@@ -21,22 +21,20 @@ from pathlib import Path
 
 # Import consolidated MoML functions
 from moml.core import (
-    validate_smiles,
     calculate_molecular_descriptors,
     MolecularFeatureExtractor
 )
+from moml.utils import validate_smiles
 
 # Import utility functions
-from moml.utils.data.data_processing import (
+from moml.utils import (
     load_data,
     inspect_data,
     clean_column_names,
     convert_numeric_columns,
     handle_missing_values,
     standardize_text_data,
-    save_processed_data
-)
-from moml.utils.data.molecular import (
+    save_processed_data,
     create_rdkit_mols,
     extract_fluorine_count,
     calculate_molecular_complexity,

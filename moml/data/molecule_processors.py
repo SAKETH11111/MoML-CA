@@ -16,12 +16,12 @@ from typing import List, Dict, Optional, Any
 import pandas as pd
 import pickle
 
-from moml.core.molecular_graph import (
-    create_graph_processor, 
-    find_charges_file, 
+from moml.core import (
+    create_graph_processor,
+    find_charges_file,
     read_charges_from_file
 )
-from moml.core.molecular_descriptors import validate_smiles
+from moml.utils import validate_smiles
 
 
 def process_mol_file(mol_file: str, processor=None, charges_file: Optional[str] = None) -> Any:
@@ -371,7 +371,7 @@ def batch_process_molecules_dataset(
     """
     import os
     import pandas as pd
-    from moml.core.molecular_descriptors import calculate_molecular_descriptors
+    from moml.core import calculate_molecular_descriptors
     
     # Process the dataset
     df = process_dataset(input_file, smiles_col, id_col)
