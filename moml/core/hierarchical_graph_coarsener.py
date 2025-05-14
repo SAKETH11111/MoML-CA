@@ -89,7 +89,7 @@ class GraphCoarsener:
             Dictionary mapping atom indices to cluster indices
         """
         # Identify functional groups
-        cf_groups, functional_groups = self.functional_group_detector.identify_all_functional_groups(mol)
+        functional_groups = self.functional_group_detector.identify_all_functional_groups(mol)
         
         # Create initial mapping with each atom as its own cluster
         cluster_mapping = {i: i for i in range(mol.GetNumAtoms())}
