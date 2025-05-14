@@ -263,23 +263,23 @@ class HMGNN(nn.Module):
 
 
 #  Factory convenience
-# def create_hierarchical_mgnn(scale_dims: List[int],
-#                              hidden_dim: int = 64,
-#                              n_blocks: int = 2,
-#                              layers_per_block: int = 3,
-#                              edge_attr_dims: Optional[List[int]] = None,
-#                              jk_mode: str = 'attention',
-#                              node_out_dim: int = 1,
-#                              graph_out_dim: int = 1,
-#                              cross_scale_exchange: bool = True,
-#                              dropout: float = 0.2,
-#                              n_heads_cs: int = 4,
-#                              edge_dim_cs: int = 0,
-#                              pool_type: str = 'mean'
-#                             ) -> HMGNN:
-#     """Easy constructor mirroring DJMGNN.create_* style."""
-#     return HMGNN(scale_dims, hidden_dim, n_blocks, layers_per_block,
-#                  edge_attr_dims, jk_mode,
-#                  node_out_dim, graph_out_dim,
-#                  cross_scale_exchange, dropout,
-#                  n_heads_cs, edge_dim_cs, pool_type)
+def create_hierarchical_mgnn(scale_dims: List[int],
+                             hidden_dim: int = 64,
+                             n_blocks: int = 2,
+                             layers_per_block: int = 3,
+                             edge_attr_dims: Optional[List[int]] = None,
+                             jk_mode: str = 'attention',
+                             node_out_dim: int = 1,
+                             graph_out_dim: int = 1,
+                             cross_scale_exchange: bool = True,
+                             dropout: float = 0.2,
+                             n_heads_cs: int = 4,
+                             edge_dim_cs: int = 0,
+                             pool_type: str = 'mean'
+                            ) -> HMGNN:
+    """Easy constructor mirroring DJMGNN.create_* style."""
+    return HMGNN(scale_dims, hidden_dim, n_blocks, layers_per_block,
+                 edge_attr_dims, jk_mode,
+                 node_out_dim, graph_out_dim,
+                 cross_scale_exchange, dropout,
+                 n_heads_cs, edge_dim_cs, pool_type)
