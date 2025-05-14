@@ -7,7 +7,7 @@ calculations used across the MGNN package.
 """
 
 from rdkit import Chem
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple, Set, Any
 import numpy as np
 
 class FunctionalGroupDetector:
@@ -166,6 +166,44 @@ class FunctionalGroupDetector:
                     cf3_groups.append(atom.GetIdx())
         return cf3_groups
     
+    @staticmethod
+    def find_cf2_groups(mol: Chem.Mol) -> List[int]:
+        """
+        Find all CF2 groups in the molecule.
+        
+        Args:
+            mol: RDKit molecule
+            
+        Returns:
+            List of atom indices corresponding to carbon atoms in CF2 groups
+        """
+        cf2_groups = []
+        for atom in mol.GetAtoms():
+            if atom.GetAtomicNum() == 6:  # Carbon
+                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                if f_neighbors == 2:
+                    cf2_groups.append(atom.GetIdx())
+        return cf2_groups
+    
+    @staticmethod
+    def find_cf1_groups(mol: Chem.Mol) -> List[int]:
+        """
+        Find all CF (monofluoro) groups on a carbon atom.
+        
+        Args:
+            mol: RDKit molecule
+            
+        Returns:
+            List of atom indices corresponding to carbon atoms in CF groups
+        """
+        cf1_groups = []
+        for atom in mol.GetAtoms():
+            if atom.GetAtomicNum() == 6:  # Carbon
+                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                if f_neighbors == 1:
+                    cf1_groups.append(atom.GetIdx())
+        return cf1_groups
+    
     @classmethod
     def identify_carboxylic_groups(cls, mol: Chem.Mol) -> List[Set[int]]:
         """
@@ -313,7 +351,25 @@ class FunctionalGroupDetector:
         
         return cf_groups, all_functional_groups
 
-    def get_all_functional_groups(self, mol) -> dict:
+
+    @staticmethod
+    def find_hydroxyl_groups(mol: Chem.Mol) -> List[int]:
+        """
+        Find all hydroxyl groups in the molecule.
+        Placeholder: Not fully implemented.
+        
+        Args:
+            mol: RDKit molecule
+            
+        Returns:
+            List of atom indices (currently empty)
+        """
+        # TODO: Implement actual hydroxyl group detection logic
+        # Example SMARTS for hydroxyl: '[OX2H]'
+        return []
+
+    @classmethod
+    def get_all_functional_groups(cls, mol: Chem.Mol) -> dict:
         """
         Comprehensive function to detect all functional groups in one pass.
         
@@ -321,17 +377,16 @@ class FunctionalGroupDetector:
             mol: RDKit molecule
             
         Returns:
-            Dictionary mapping functional group names to atom indices
+            Dictionary mapping functional group names to atom indices or sets of atom indices
         """
         groups = {
-            'cf3_groups': self.find_cf3_groups(mol),
-            'cf2_groups': self.find_cf2_groups(mol),
-            'cf_groups': self.find_cf_groups(mol),
-            'carboxylic_groups': self.find_carboxylic_groups(mol),
-            'sulfonic_groups': self.find_sulfonic_groups(mol),
-            'phosphonic_groups': self.find_phosphonic_groups(mol),
-            'amino_groups': self.find_amino_groups(mol),
-            'hydroxyl_groups': self.find_hydroxyl_groups(mol)
+            'cf3_groups': cls.find_cf3_groups(mol),
+            'cf2_groups': cls.find_cf2_groups(mol),
+            'cf_groups': cls.find_cf1_groups(mol), # For C-F (single F)
+            'carboxylic_groups': cls.identify_carboxylic_groups(mol),
+            'sulfonic_groups': cls.identify_sulfonic_groups(mol),
+            'phosphonic_groups': cls.identify_phosphonic_groups(mol), 
+            'hydroxyl_groups': cls.find_hydroxyl_groups(mol)
         }
         return groups
 
@@ -370,7 +425,7 @@ class MolecularFeatureExtractor:
     }
     
     @staticmethod
-    def one_hot_encoding(value: any, choices: list) -> List[int]:
+    def one_hot_encoding(value: Any, choices: list) -> List[int]:
         """
         Create a one-hot encoding of a value from a list of choices.
         
@@ -511,14 +566,14 @@ def calculate_molecular_descriptors(mol) -> dict:
         return {}
     
     descriptors = {
-        'molecular_weight': Descriptors.MolWt(mol),
-        'logp': Descriptors.MolLogP(mol),
-        'num_heavy_atoms': mol.GetNumHeavyAtoms(),
-        'num_rotatable_bonds': Descriptors.NumRotatableBonds(mol),
-        'h_bond_donors': Lipinski.NumHDonors(mol),
-        'h_bond_acceptors': Lipinski.NumHAcceptors(mol),
-        'topological_polar_surface_area': Descriptors.TPSA(mol),
-        'fraction_sp3': Descriptors.FractionCSP3(mol)
+        'molecular_weight': Descriptors.MolWt(mol), # type: ignore
+        'logp': Descriptors.MolLogP(mol), # type: ignore
+        'num_heavy_atoms': mol.GetNumHeavyAtoms(), # type: ignore
+        'num_rotatable_bonds': Descriptors.NumRotatableBonds(mol), # type: ignore
+        'h_bond_donors': Lipinski.NumHDonors(mol), # type: ignore
+        'h_bond_acceptors': Lipinski.NumHAcceptors(mol), # type: ignore
+        'topological_polar_surface_area': Descriptors.TPSA(mol), # type: ignore
+        'fraction_sp3': Descriptors.FractionCSP3(mol) # type: ignore
     }
     
     return descriptors
@@ -544,10 +599,10 @@ def extract_fingerprints(mol, fingerprint_type='morgan', radius=2, nBits=2048):
         return None
     
     if fingerprint_type.lower() == 'morgan':
-        fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=nBits)
+        fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=nBits) # type: ignore
         return np.array(fp)
     elif fingerprint_type.lower() == 'maccs':
-        fp = MACCSkeys.GenMACCSKeys(mol)
+        fp = MACCSkeys.GenMACCSKeys(mol) # type: ignore
         return np.array(fp)
     elif fingerprint_type.lower() == 'rdkit':
         fp = Chem.RDKFingerprint(mol, fpSize=nBits)
