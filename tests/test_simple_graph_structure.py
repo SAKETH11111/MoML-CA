@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!python
 """
 Simplified test script for molecular graph generation
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!python
 """
 Test script for PFAS data processing pipeline components
 

@@ -1,5 +1,5 @@
 """
-Unit tests for the HMGNN model and its components in moml.models.mgnn.hierarchical_mgnn.
+Unit tests for the HMGNN model and its components in moml.models.mgnn.hmgnn.
 """
 import pytest
 import torch
@@ -7,8 +7,8 @@ import torch.nn as nn
 from torch_geometric.data import Data, Batch
 from typing import List, Dict, Any, Optional
 
-from moml.models.mgnn.hierarchical_mgnn import (
-    CrossScaleAttention,
+from moml.models.mgnn.hmgnn import (
+    CrossScaleAttentionMH,
     HMGNN,
     create_hierarchical_mgnn
 )
@@ -143,19 +143,19 @@ def dummy_hierarchical_graph_data_batch(request) -> List[Dict[str, Any]]:
 class TestCrossScaleAttention:
     def test_instantiation(self):
         attn_scale_dims = [HIDDEN_DIM_HMGNN] * NUM_SCALES
-        attention = CrossScaleAttention(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
+        attention = CrossScaleAttentionMH(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
         assert len(attention.scale_projections) == NUM_SCALES
         assert len(attention.query_projections) == NUM_SCALES
 
     def test_set_cluster_mappings(self, dummy_cluster_mappings):
         attn_scale_dims = [HIDDEN_DIM_HMGNN] * NUM_SCALES
-        attention = CrossScaleAttention(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
+        attention = CrossScaleAttentionMH(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
         attention.set_cluster_mappings(dummy_cluster_mappings)
         assert attention.cluster_mappings == dummy_cluster_mappings
 
     def test_forward_pass_no_mappings(self, dummy_scale_features_for_cross_attn):
         attn_scale_dims = [f.shape[1] for f in dummy_scale_features_for_cross_attn]
-        attention = CrossScaleAttention(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
+        attention = CrossScaleAttentionMH(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
         updated_features = attention(dummy_scale_features_for_cross_attn)
         for i in range(NUM_SCALES):
             assert torch.allclose(updated_features[i], dummy_scale_features_for_cross_attn[i])
@@ -163,7 +163,7 @@ class TestCrossScaleAttention:
     # @pytest.mark.skip(reason="Current _aggregate/_distribute/_broadcast are simplified and need robust testing with specific examples.")
     def test_forward_pass_with_mappings(self, dummy_scale_features_for_cross_attn, dummy_cluster_mappings):
         attn_scale_dims = [f.shape[1] for f in dummy_scale_features_for_cross_attn]
-        attention = CrossScaleAttention(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
+        attention = CrossScaleAttentionMH(attn_scale_dims, CROSS_ATTN_HIDDEN_DIM)
         attention.set_cluster_mappings(dummy_cluster_mappings)
         
         # Ensure cluster mappings are actually set and not None
@@ -220,7 +220,7 @@ class TestCrossScaleAttention:
         # However, set_cluster_mappings needs to be called.
         # The hidden_dim for CrossScaleAttention doesn't directly affect _aggregate_features's logic,
         # only the expected input/output dimensions if projections were involved.
-        attention = CrossScaleAttention(scale_dims=[fine_features.shape[1]] * NUM_SCALES, hidden_dim=fine_features.shape[1])
+        attention = CrossScaleAttentionMH(scale_dims=[fine_features.shape[1]] * NUM_SCALES, hidden_dim=fine_features.shape[1])
         attention.set_cluster_mappings(dummy_cluster_mappings) # Sets list of mappings
 
         # Call _aggregate_features to aggregate from scale 0 to scale 1
@@ -260,7 +260,7 @@ class TestHMGNN:
         )
         assert len(model.scale_gnns) == NUM_SCALES
         assert len(model.scale_jk_aggregators) == NUM_SCALES
-        assert isinstance(model.cross_scale_attention, CrossScaleAttention)
+        assert isinstance(model.cross_scale_attention, CrossScaleAttentionMH)
         assert len(model.node_heads) == NUM_SCALES
         assert len(model.graph_heads) == NUM_SCALES
         assert isinstance(model.combined_graph_head, nn.Sequential)

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!python
 """
 Test script for 3D structure generation from SMILES
 
