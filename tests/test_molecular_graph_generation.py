@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!python
 """
 Test script for the Unified Graph Generator
 
@@ -242,35 +242,16 @@ class TestMolecularGraphGenerator(unittest.TestCase):
 
 
 def run_graph_generation_tests():
-    """Run the graph generation tests."""
-    print("\nTesting molecular graph generation functionality...")
-    # Create a test suite
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(TestMolecularGraphGenerator))
+    """Run all graph generation tests."""
+    # Create test suite
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromTestCase(TestMolecularGraphGenerator)
     
-    # Run the tests
-    runner = unittest.TextTestRunner(verbosity=1)
+    # Run tests
+    runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
     
-    # Check if all tests were skipped (which is OK)
-    all_skipped = True
-    for test, reason in result.skipped:
-        print(f"Test skipped: {test} - {reason}")
-        all_skipped = False
-    
-    if all_skipped and result.testsRun > 0:
-        print("\nAll graph generation tests were skipped due to missing dependencies.")
-        print("This is expected in this configuration and is not a failure.")
-        return True
-    
-    # Return True if all tests passed or were skipped
-    success = result.wasSuccessful()
-    if success:
-        print("\nAll graph generation tests PASSED!")
-    else:
-        print("\nSome graph generation tests FAILED!")
-    
-    return success
+    return result.wasSuccessful()
 
 
 if __name__ == "__main__":

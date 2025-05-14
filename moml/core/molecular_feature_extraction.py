@@ -7,7 +7,6 @@ calculations used across the MGNN package.
 """
 
 from rdkit import Chem
-from moml.utils import validate_smiles
 from typing import Dict, List, Tuple, Set
 import numpy as np
 

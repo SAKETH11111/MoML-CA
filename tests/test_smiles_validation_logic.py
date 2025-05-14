@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!python
 """
 Test script for SMILES validation functionality
 
