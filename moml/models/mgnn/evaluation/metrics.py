@@ -150,16 +150,46 @@ def calculate_classification_metrics(
         else:
             # Predictions are already binary
             accuracy = accuracy_score(true_values, pred_values)
-            precision = precision_score(true_values, pred_values, zero_division=0)
-            recall = recall_score(true_values, pred_values, zero_division=0)
-            f1 = f1_score(true_values, pred_values, zero_division=0)
+            # Check if true_values (and pred_values) are actually multiclass despite being 1D
+            unique_labels_true = np.unique(true_values)
             
-            return {
+            # If more than 2 unique labels, or labels are not exclusively {0,1}
+            # (e.g., contains 2 but not 0 or 1, or contains 0,1,2)
+            is_multiclass_1d = len(unique_labels_true) > 2 or \
+                               not np.all(np.isin(unique_labels_true, [0, 1]))
+
+            if is_multiclass_1d:
+                # This is actually multiclass, use macro averaging
+                precision = precision_score(true_values, pred_values, average='macro', zero_division=0)
+                recall = recall_score(true_values, pred_values, average='macro', zero_division=0)
+                f1 = f1_score(true_values, pred_values, average='macro', zero_division=0)
+            else:
+                # This is truly binary with 0/1 labels
+                precision = precision_score(true_values, pred_values, zero_division=0)
+                recall = recall_score(true_values, pred_values, zero_division=0)
+                f1 = f1_score(true_values, pred_values, zero_division=0)
+            
+            metrics_dict = {
                 'accuracy': accuracy,
                 'precision': precision,
                 'recall': recall,
                 'f1': f1
             }
+            # AUC can be calculated if both true and pred are binary 0/1 labels
+            # and true_values are not all one class (roc_auc_score handles this)
+            if not is_multiclass_1d and len(unique_labels_true) > 1 and \
+               np.all(np.isin(np.unique(pred_values), [0,1])):
+                try:
+                    # For roc_auc_score, pred_values should be scores/probabilities if available.
+                    # Here, pred_values are labels. It will still compute, but might not be ideal.
+                    # The original code path for probabilities (lines 137-141) is preferred for AUC.
+                    # This path (pred_values are already binary) implies we don't have original probas.
+                    auc = roc_auc_score(true_values, pred_values)
+                    metrics_dict['auc'] = auc
+                except ValueError: # e.g. if only one class in true_values
+                    metrics_dict['auc'] = 0.5
+            
+            return metrics_dict
     
     # Handle multi-class classification
     else:

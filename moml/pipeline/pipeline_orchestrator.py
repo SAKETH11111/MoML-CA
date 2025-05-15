@@ -105,6 +105,9 @@ class MOMLPipelineOrchestrator:
                 # Update config with file values (nested update)
                 self._deep_update(self.config, file_config)
         
+        self.config_file_path = config_file # Store the original path used for loading
+        self.config_path = config_file      # Alias for tests that might expect 'config_path'
+
         # Override with provided paths if any
         if data_dir:
             self.config["data_dir"] = data_dir

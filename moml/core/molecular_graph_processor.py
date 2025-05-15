@@ -1,7 +1,7 @@
 """
 Molecular Graph Representation for PFAS Molecules
 
-This module provides functionality to convert PFAS molecules into graph 
+This module provides functionality to convert PFAS molecules into graph
 representations suitable for graph neural networks using PyTorch Geometric.
 It also supports JSON-based graph representations for interoperability.
 """
@@ -10,6 +10,7 @@ import os
 import json
 import torch
 import logging
+import glob # Added import
 from torch_geometric.data import Data
 from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors
@@ -17,6 +18,8 @@ from rdkit.Chem import Lipinski
 from rdkit.Chem import QED
 from typing import Dict, List, Tuple, Optional, Union, Any
 import numpy as np
+import concurrent.futures
+
 
 from moml.core.molecular_feature_extraction import (
     FunctionalGroupDetector,
@@ -34,13 +37,13 @@ __all__ = [
     'create_graph_processor',
     
     # Utility functions
-    'mol_file_to_graph',
+    'mol_file_to_graph', # Note: This is a standalone, consider if it should use MolecularGraphProcessor
     'graph_to_device',
     'collate_graphs',
     'find_charges_file',
     'read_charges_from_file',
-    'create_molecular_graph_json',
-    'batch_create_graphs_from_molecules'
+    'create_molecular_graph_json', # Note: This is a standalone
+    'batch_create_graphs_from_molecules' # Note: This is a standalone
 ]
 
 class MolecularGraphProcessor:
@@ -51,107 +54,145 @@ class MolecularGraphProcessor:
     input formats, providing a consistent interface for graph operations used in MGNN.
     """
     
-    # Common atom and bond features
-    ATOM_FEATURES = MolecularFeatureExtractor.ATOM_FEATURES
-    
-    BOND_FEATURES = MolecularFeatureExtractor.BOND_FEATURES
+    # Define ATOM_FEATURES at the class level for reference by atom_feature_dim property
+    # and _get_atom_features method.
+    ATOM_FEATURES_DEFAULTS = {
+        'atomic_num': [5, 6, 7, 8, 9, 15, 16, 17, 35, 53, -1],  # Common non-metals + F, Cl, Br, I, Other
+        'degree': [0, 1, 2, 3, 4, 5, 6, -1],  # Max 6, Other
+        'formal_charge': [-2, -1, 0, 1, 2, -999],  # Common charges, Other
+        'hybridization': [
+            Chem.rdchem.HybridizationType.SP,
+            Chem.rdchem.HybridizationType.SP2,
+            Chem.rdchem.HybridizationType.SP3,
+            Chem.rdchem.HybridizationType.SP3D,
+            Chem.rdchem.HybridizationType.SP3D2,
+            Chem.rdchem.HybridizationType.UNSPECIFIED,
+            -1 # Other
+        ],
+        'is_aromatic': [0, 1], # False, True
+        'is_in_ring': [0, 1], # False, True
+        # Numerical features (not one-hot)
+        'num_hydrogens': None, # Placeholder, will be a single value
+        'is_fluorine': None, # Placeholder, will be 0 or 1
+        'is_carbon_bonded_to_fluorine': None, # Placeholder, will be 0 or 1
+        'num_fluorine_neighbors': None, # Placeholder
+        'is_in_carboxylic_group': None,
+        'is_in_sulfonic_group': None,
+        'is_in_phosphonic_group': None,
+        'partial_charge': None, # If use_partial_charges is True
+        'dist_to_cf3': None, # If use_pfas_specific_features and use_3d_coords
+        'dist_to_functional_group': None, # If use_pfas_specific_features and use_3d_coords
+        'is_head_group_atom': None, # If use_pfas_specific_features and use_3d_coords
+        'homo_contribution': None, # If additional_features provided
+        'lumo_contribution': None, # If additional_features provided
+    }
+
+    BOND_FEATURES_DEFAULTS = {
+        'bond_type': [
+            Chem.rdchem.BondType.SINGLE,
+            Chem.rdchem.BondType.DOUBLE,
+            Chem.rdchem.BondType.TRIPLE,
+            Chem.rdchem.BondType.AROMATIC,
+            -1 # Other
+        ],
+        'is_conjugated': [0, 1], # False, True
+        'is_in_ring': [0, 1], # False, True
+        # Numerical features
+        'is_cf_bond': None,
+        'is_cf_cf_bond': None, # If use_pfas_specific_features
+        'is_fluorinated_tail_bond': None, # If use_pfas_specific_features
+        'is_functional_group_bond': None, # If use_pfas_specific_features
+        'bond_length': None, # If use_3d_coords
+    }
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         Initialize the MolecularGraphProcessor.
         
         Args:
-            config: Configuration dictionary with processing parameters
+            config: Configuration dictionary with processing parameters.
+                    Expected keys:
+                    - 'atom_feature_schemes': List of atom feature names to include.
+                                              If None, all default features are used.
+                    - 'bond_feature_schemes': List of bond feature names to include.
+                                              If None, all default features are used.
+                    - 'use_partial_charges': bool (default: True)
+                    - 'use_3d_coords': bool (default: True)
+                    - 'use_pfas_specific_features': bool (default: True)
         """
         self.config = config or {}
         self.use_partial_charges = self.config.get('use_partial_charges', True)
         self.use_3d_coords = self.config.get('use_3d_coords', True)
         self.use_pfas_specific_features = self.config.get('use_pfas_specific_features', True)
         
-        # Create instances of helper classes
+        # Determine active feature schemes
+        self.atom_feature_schemes = self.config.get('atom_feature_schemes')
+        if self.atom_feature_schemes is None: # Use all defined defaults if not specified
+            self.atom_feature_schemes = list(self.ATOM_FEATURES_DEFAULTS.keys())
+
+        self.bond_feature_schemes = self.config.get('bond_feature_schemes')
+        if self.bond_feature_schemes is None:
+            self.bond_feature_schemes = list(self.BOND_FEATURES_DEFAULTS.keys())
+
         self.feature_extractor = MolecularFeatureExtractor()
         self.functional_group_detector = FunctionalGroupDetector()
-    
+
     @property
-    def atom_feature_dim(self):
-        """
-        Get the dimension of atom feature vectors.
-        
-        Returns:
-            int: Dimensionality of atom feature vectors
-        """
-        # Calculate the feature dimension based on one-hot encodings and additional features
+    def atom_feature_dim(self) -> int:
+        """Dynamically calculate atom feature dimension based on active schemes."""
         dim = 0
-        
-        # Atomic number (one-hot)
-        dim += len(self.ATOM_FEATURES['atomic_num'])
-        
-        # Degree (one-hot)
-        dim += len(self.ATOM_FEATURES['degree'])
-        
-        # Formal charge (one-hot)
-        dim += len(self.ATOM_FEATURES['formal_charge'])
-        
-        # Hybridization (one-hot)
-        dim += len(self.ATOM_FEATURES['hybridization'])
-        
-        # Aromaticity (one-hot)
-        dim += len(self.ATOM_FEATURES['is_aromatic'])
-        
-        # Ring membership (one-hot)
-        dim += len(self.ATOM_FEATURES['is_in_ring'])
-        
-        # Number of hydrogens (integer value)
-        dim += 1
-        
-        # Basic PFAS features (is_f, is_cf) are always calculated by _get_atom_features
-        dim += 2  # is_f, is_cf
-        
-        # Enhanced PFAS-specific features (if enabled)
-        if self.use_pfas_specific_features:
-            dim += 1  # num_f_neighbors (is_f and is_cf are already counted above)
+        for scheme in self.atom_feature_schemes:
+            if scheme not in self.ATOM_FEATURES_DEFAULTS:
+                logger.warning(f"Atom feature scheme '{scheme}' not recognized. Skipping.")
+                continue
             
-            # Functional group flags
-            dim += 3  # COOH, SO3H, PO3H2
-            
-        # Other atom properties (Atomic mass is not currently added in _get_atom_features)
-        # dim += 1  # Atomic mass
-        # Note: partial_charges, distance_features, homo/lumo are conditionally added
-        # in _get_atom_features but not accounted for in this static dimension property.
+            choices = self.ATOM_FEATURES_DEFAULTS[scheme]
+            if isinstance(choices, list): # One-hot encoded
+                dim += len(choices)
+            else: # Numerical feature
+                # Conditional features based on config
+                if scheme == 'partial_charge' and not self.use_partial_charges:
+                    continue
+                if scheme in ['dist_to_cf3', 'dist_to_functional_group', 'is_head_group_atom']:
+                    if not (self.use_pfas_specific_features and self.use_3d_coords):
+                        continue
+                # These are other PFAS-specific numerical features
+                if scheme in ['num_fluorine_neighbors', 'is_in_carboxylic_group',
+                              'is_in_sulfonic_group', 'is_in_phosphonic_group']:
+                    if not self.use_pfas_specific_features:
+                        continue
+                
+                # For homo/lumo, count them if the scheme is active.
+                # The actual generation in _get_atom_features depends on additional_features.
+                # To make atom_feature_dim reflect the baseline dimension (no additional_features),
+                # we should not count them here by default.
+                # Tests for additional_features will verify the increased dimension separately.
+                if scheme in ['homo_contribution', 'lumo_contribution']:
+                    # These are only added if additional_features provide them.
+                    # So, for the baseline dimension, they are not counted.
+                    continue
+                dim += 1
         return dim
-    
+
     @property
-    def bond_feature_dim(self):
-        """
-        Get the dimension of bond feature vectors.
-        
-        Returns:
-            int: Dimensionality of bond feature vectors
-        """
-        # Calculate the feature dimension based on one-hot encodings and additional features
+    def bond_feature_dim(self) -> int:
+        """Dynamically calculate bond feature dimension based on active schemes."""
         dim = 0
-        
-        # Bond type (one-hot)
-        dim += len(self.BOND_FEATURES['bond_type'])
-        
-        # Conjugated (one-hot)
-        dim += len(self.BOND_FEATURES['is_conjugated'])
-        
-        # In ring (one-hot)
-        dim += len(self.BOND_FEATURES['is_in_ring'])
-        
-        # Basic C-F bond feature (is_cf_bond) is always calculated by _get_bond_features
-        dim += 1  # is_cf_bond
-        
-        # Enhanced PFAS-specific bond features
-        if self.use_pfas_specific_features:
-            dim += 3  # is_cf_cf_bond, is_fluorinated_tail_bond, is_func_group_bond
-            
-        # 3D features (if enabled)
-        if self.use_3d_coords:
-            # Bond length
-            dim += 1
-        
+        for scheme in self.bond_feature_schemes:
+            if scheme not in self.BOND_FEATURES_DEFAULTS:
+                logger.warning(f"Bond feature scheme '{scheme}' not recognized. Skipping.")
+                continue
+
+            choices = self.BOND_FEATURES_DEFAULTS[scheme]
+            if isinstance(choices, list): # One-hot encoded
+                dim += len(choices)
+            else: # Numerical feature
+                if scheme == 'bond_length' and not self.use_3d_coords:
+                    continue
+                if scheme in ['is_cf_cf_bond', 'is_fluorinated_tail_bond', 'is_functional_group_bond'] and \
+                   not self.use_pfas_specific_features:
+                    continue
+                dim += 1
         return dim
     
     @staticmethod
@@ -171,1303 +212,622 @@ class MolecularGraphProcessor:
             idx = choices.index(value)
             encoding[idx] = 1
         except ValueError:
-            # If value not in choices, leave encoding as all zeros
-            pass
+            # If value not in choices, check if -1 or -999 (Other) is the last choice
+            if choices and choices[-1] in [-1, -999]: # Check if 'Other' category exists
+                encoding[-1] = 1 # Encode as 'Other'
+            # else: logger.debug(f"Value {value} not in choices {choices}, not using 'Other' encoding.")
         return encoding
-    
+
     def _is_in_carboxylic_group(self, atom: Chem.Atom) -> bool:
-        """
-        Check if atom is part of a carboxylic acid group (COOH).
-        
-        Args:
-            atom: RDKit Atom object
-            
-        Returns:
-            True if atom is part of a carboxylic acid group, False otherwise
-        """
         return self.functional_group_detector.is_in_carboxylic_group(atom)
     
     def _is_in_sulfonic_group(self, atom: Chem.Atom) -> bool:
-        """
-        Check if atom is part of a sulfonic acid group (SO3H).
-        
-        Args:
-            atom: RDKit Atom object
-            
-        Returns:
-            True if atom is part of a sulfonic acid group, False otherwise
-        """
         return self.functional_group_detector.is_in_sulfonic_group(atom)
-    
+
     def _is_in_phosphonic_group(self, atom: Chem.Atom) -> bool:
-        """
-        Check if atom is part of a phosphonic acid group (PO3H2).
-        
-        Args:
-            atom: RDKit Atom object
-            
-        Returns:
-            True if atom is part of a phosphonic acid group, False otherwise
-        """
         return self.functional_group_detector.is_in_phosphonic_group(atom)
-    
-    def _find_cf3_groups(self, mol: Chem.Mol) -> List[int]:
+
+    def _get_atom_features(self, atom: Chem.Atom, mol: Chem.Mol,
+                           partial_charge_val: Optional[float] = None, 
+                           distance_features_map: Optional[Dict[int, Dict[str, float]]] = None,
+                           homo_lumo_contrib_val: Optional[List[float]] = None) -> List[float]:
         """
-        Find all CF3 (trifluoromethyl) groups in the molecule.
-        
-        Args:
-            mol: RDKit molecule
-            
-        Returns:
-            List of atom indices corresponding to carbon atoms in CF3 groups
-        """
-        return self.functional_group_detector.find_cf3_groups(mol)
-    
-    def _find_functional_groups(self, mol: Chem.Mol) -> List[int]:
-        """
-        Find all functional groups (COOH, SO3H, PO3H2) in the molecule.
-        
-        Args:
-            mol: RDKit molecule
-            
-        Returns:
-            List of atom indices corresponding to the central atoms of functional groups
-        """
-        return self.functional_group_detector.find_functional_groups(mol)
-    
-    def _calculate_distance_features(self, mol: Chem.Mol) -> Dict[int, Dict[str, float]]:
-        """
-        Calculate distance-based features for PFAS structure analysis.
-        
-        Args:
-            mol: RDKit molecule
-            
-        Returns:
-            Dictionary mapping atom indices to distance-based features
-        """
-        return self.feature_extractor.calculate_distance_features(mol)
-    
-    def _calculate_bond_lengths(self, mol: Chem.Mol) -> Dict[Tuple[int, int], float]:
-        """
-        Calculate bond lengths from 3D coordinates.
-        
-        Args:
-            mol: RDKit molecule with 3D coordinates
-            
-        Returns:
-            Dictionary mapping bond indices (atom_idx1, atom_idx2) to bond lengths
-        """
-        return self.feature_extractor.calculate_bond_lengths(mol)
-    
-    def _get_atom_features(self, atom: Chem.Atom, partial_charge: Optional[float] = None, 
-                         distance_features: Optional[Dict[str, float]] = None,
-                         homo_lumo_contrib: Optional[List[float]] = None) -> List[float]:
-        """
-        Generate a feature vector for an atom with enhanced PFAS-specific features.
-        
-        Args:
-            atom: RDKit Atom object
-            partial_charge: Optional partial charge from QM calculations
-            distance_features: Optional dictionary of distance-based features
-            homo_lumo_contrib: Optional HOMO/LUMO contributions
-            
-        Returns:
-            Feature vector for the atom
+        Generate a feature vector for an atom based on active feature schemes.
         """
         features = []
-        
-        # Atomic number (one-hot)
-        features.extend(self._one_hot_encoding(atom.GetAtomicNum(), 
-                                             self.ATOM_FEATURES['atomic_num']))
-        
-        # Degree (one-hot)
-        features.extend(self._one_hot_encoding(atom.GetDegree(), 
-                                             self.ATOM_FEATURES['degree']))
-        
-        # Formal charge (one-hot)
-        features.extend(self._one_hot_encoding(atom.GetFormalCharge(), 
-                                             self.ATOM_FEATURES['formal_charge']))
-        
-        # Hybridization (one-hot)
-        features.extend(self._one_hot_encoding(atom.GetHybridization(), 
-                                             self.ATOM_FEATURES['hybridization']))
-        
-        # Aromaticity (one-hot)
-        features.extend(self._one_hot_encoding(1 if atom.GetIsAromatic() else 0, 
-                                             self.ATOM_FEATURES['is_aromatic']))
-        
-        # Ring membership (one-hot)
-        features.extend(self._one_hot_encoding(1 if atom.IsInRing() else 0, 
-                                             self.ATOM_FEATURES['is_in_ring']))
-        
-        # Number of hydrogens (integer value)
-        features.append(atom.GetTotalNumHs())
-        
-        # Basic PFAS features (already in original implementation)
-        # Check if atom is fluorine or carbon connected to fluorine
-        is_f = atom.GetAtomicNum() == 9
-        is_cf = False
-        num_f_neighbors = 0
-        
+        atom_idx = atom.GetIdx()
+
+        # PFAS basic calculations (needed by some schemes)
+        is_f_atom = atom.GetAtomicNum() == 9
+        is_cf_atom = False
+        num_f_neighbors_atom = 0
         if atom.GetAtomicNum() == 6:  # Carbon
             for neighbor in atom.GetNeighbors():
-                if neighbor.GetAtomicNum() == 9:  # Fluorine
-                    is_cf = True
-                    num_f_neighbors += 1
+                if neighbor.GetAtomicNum() == 9:
+                    is_cf_atom = True
+                    num_f_neighbors_atom += 1
         
-        features.append(float(is_f))
-        features.append(float(is_cf))
-        
-        # Enhanced PFAS-specific features
-        if self.use_pfas_specific_features:
-            # Number of fluorine neighbors
-            features.append(float(num_f_neighbors))
-            
-            # Functional group membership
-            is_carboxylic = float(self._is_in_carboxylic_group(atom))
-            is_sulfonic = float(self._is_in_sulfonic_group(atom))
-            is_phosphonic = float(self._is_in_phosphonic_group(atom))
-            features.append(is_carboxylic)
-            features.append(is_sulfonic)
-            features.append(is_phosphonic)
-            
-            # Distance-based features
-            if distance_features is not None:
-                features.append(float(distance_features.get('dist_to_cf3', -1.0)) if distance_features.get('dist_to_cf3', -1) != -1 else -1.0)
-                features.append(float(distance_features.get('dist_to_functional', -1.0)) if distance_features.get('dist_to_functional', -1) != -1 else -1.0)
-                features.append(distance_features.get('is_head_group', 0.0))
-        
-        # Add partial charge as feature if available
-        if self.use_partial_charges and partial_charge is not None:
-            features.append(partial_charge)
-        
-        # Add HOMO/LUMO contributions if available
-        if homo_lumo_contrib is not None:
-            features.extend(homo_lumo_contrib)
-            
+        atom_dist_feats = distance_features_map.get(atom_idx, {}) if distance_features_map else {}
+
+        for scheme in self.atom_feature_schemes:
+            if scheme == 'atomic_num':
+                features.extend(self._one_hot_encoding(atom.GetAtomicNum(), self.ATOM_FEATURES_DEFAULTS['atomic_num']))
+            elif scheme == 'degree':
+                features.extend(self._one_hot_encoding(atom.GetDegree(), self.ATOM_FEATURES_DEFAULTS['degree']))
+            elif scheme == 'formal_charge':
+                features.extend(self._one_hot_encoding(atom.GetFormalCharge(), self.ATOM_FEATURES_DEFAULTS['formal_charge']))
+            elif scheme == 'hybridization':
+                features.extend(self._one_hot_encoding(atom.GetHybridization(), self.ATOM_FEATURES_DEFAULTS['hybridization']))
+            elif scheme == 'is_aromatic':
+                features.extend(self._one_hot_encoding(1 if atom.GetIsAromatic() else 0, self.ATOM_FEATURES_DEFAULTS['is_aromatic']))
+            elif scheme == 'is_in_ring':
+                features.extend(self._one_hot_encoding(1 if atom.IsInRing() else 0, self.ATOM_FEATURES_DEFAULTS['is_in_ring']))
+            elif scheme == 'num_hydrogens':
+                features.append(atom.GetTotalNumHs())
+            elif scheme == 'is_fluorine':
+                features.append(float(is_f_atom))
+            elif scheme == 'is_carbon_bonded_to_fluorine':
+                features.append(float(is_cf_atom))
+            elif scheme == 'num_fluorine_neighbors':
+                 if self.use_pfas_specific_features: # This scheme implies use_pfas_specific_features
+                    features.append(float(num_f_neighbors_atom))
+            elif scheme == 'is_in_carboxylic_group':
+                if self.use_pfas_specific_features:
+                    features.append(float(self._is_in_carboxylic_group(atom)))
+            elif scheme == 'is_in_sulfonic_group':
+                if self.use_pfas_specific_features:
+                    features.append(float(self._is_in_sulfonic_group(atom)))
+            elif scheme == 'is_in_phosphonic_group':
+                if self.use_pfas_specific_features:
+                    features.append(float(self._is_in_phosphonic_group(atom)))
+            elif scheme == 'partial_charge':
+                if self.use_partial_charges and partial_charge_val is not None:
+                    features.append(partial_charge_val)
+            elif scheme == 'dist_to_cf3':
+                if self.use_pfas_specific_features and self.use_3d_coords:
+                    features.append(float(atom_dist_feats.get('dist_to_cf3', -1.0)))
+            elif scheme == 'dist_to_functional_group':
+                if self.use_pfas_specific_features and self.use_3d_coords:
+                    features.append(float(atom_dist_feats.get('dist_to_functional', -1.0)))
+            elif scheme == 'is_head_group_atom':
+                if self.use_pfas_specific_features and self.use_3d_coords: # Assuming head group def needs 3D context
+                    features.append(float(atom_dist_feats.get('is_head_group', 0.0)))
+            elif scheme == 'homo_contribution':
+                if homo_lumo_contrib_val is not None and len(homo_lumo_contrib_val) > 0:
+                    features.append(homo_lumo_contrib_val[0])
+            elif scheme == 'lumo_contribution':
+                if homo_lumo_contrib_val is not None and len(homo_lumo_contrib_val) > 1:
+                    features.append(homo_lumo_contrib_val[1])
+            # else: logger.debug(f"Atom feature scheme '{scheme}' defined in ATOM_FEATURES_DEFAULTS but not handled in _get_atom_features.")
         return features
-    
-    def _get_bond_features(self, bond: Chem.Bond, bond_length: Optional[float] = None) -> List[float]:
+
+    def _get_bond_features(self, bond: Chem.Bond, bond_lengths_map: Optional[Dict[Tuple[int, int], float]] = None) -> List[float]:
         """
-        Generate a feature vector for a bond with enhanced PFAS-specific features.
-        
-        Args:
-            bond: RDKit Bond object
-            bond_length: Optional bond length from 3D coordinates
-            
-        Returns:
-            Feature vector for the bond
+        Generate a feature vector for a bond based on active feature schemes.
         """
         features = []
-        
-        # Bond type (one-hot)
-        features.extend(self._one_hot_encoding(bond.GetBondType(), 
-                                             self.BOND_FEATURES['bond_type']))
-        
-        # Conjugation (one-hot)
-        features.extend(self._one_hot_encoding(1 if bond.GetIsConjugated() else 0, 
-                                             self.BOND_FEATURES['is_conjugated']))
-        
-        # Ring membership (one-hot)
-        features.extend(self._one_hot_encoding(1 if bond.IsInRing() else 0, 
-                                             self.BOND_FEATURES['is_in_ring']))
-        
-        # Special C-F bond feature for PFAS
         begin_atom = bond.GetBeginAtom()
         end_atom = bond.GetEndAtom()
-        is_cf_bond = (begin_atom.GetAtomicNum() == 6 and end_atom.GetAtomicNum() == 9) or \
-                     (begin_atom.GetAtomicNum() == 9 and end_atom.GetAtomicNum() == 6)
-        features.append(float(is_cf_bond))
+
+        # PFAS basic calculations
+        is_cf_bond_val = (begin_atom.GetAtomicNum() == 6 and end_atom.GetAtomicNum() == 9) or \
+                         (begin_atom.GetAtomicNum() == 9 and end_atom.GetAtomicNum() == 6)
         
-        # Enhanced PFAS-specific bond features
+        is_cf_cf_bond_val = False
+        if self.use_pfas_specific_features and begin_atom.GetAtomicNum() == 6 and end_atom.GetAtomicNum() == 6:
+            begin_f_count = sum(1 for n in begin_atom.GetNeighbors() if n.GetAtomicNum() == 9)
+            end_f_count = sum(1 for n in end_atom.GetNeighbors() if n.GetAtomicNum() == 9)
+            is_cf_cf_bond_val = begin_f_count > 0 and end_f_count > 0
+        
+        is_fluorinated_tail_bond_val = is_cf_bond_val or is_cf_cf_bond_val if self.use_pfas_specific_features else False
+        
+        is_func_group_bond_val = False
         if self.use_pfas_specific_features:
-            # Check if it's a bond between two carbons with fluorine atoms attached
-            is_cf_cf_bond = False
-            if begin_atom.GetAtomicNum() == 6 and end_atom.GetAtomicNum() == 6:
-                begin_f_count = sum(1 for n in begin_atom.GetNeighbors() if n.GetAtomicNum() == 9)
-                end_f_count = sum(1 for n in end_atom.GetNeighbors() if n.GetAtomicNum() == 9)
-                is_cf_cf_bond = begin_f_count > 0 and end_f_count > 0
-            features.append(float(is_cf_cf_bond))
-            
-            # Check if it's a bond in the fluorinated tail
-            is_fluorinated_tail_bond = is_cf_bond or is_cf_cf_bond
-            features.append(float(is_fluorinated_tail_bond))
-            
-            # Check if it's a bond in a functional group
-            is_func_group_bond = (self._is_in_carboxylic_group(begin_atom) or 
-                                  self._is_in_carboxylic_group(end_atom) or
-                                  self._is_in_sulfonic_group(begin_atom) or
-                                  self._is_in_sulfonic_group(end_atom) or
-                                  self._is_in_phosphonic_group(begin_atom) or
-                                  self._is_in_phosphonic_group(end_atom))
-            features.append(float(is_func_group_bond))
-        
-        # Add bond length if available
-        if bond_length is not None:
-            features.append(float(bond_length))
-        
+            is_func_group_bond_val = (self._is_in_carboxylic_group(begin_atom) or 
+                                      self._is_in_carboxylic_group(end_atom) or
+                                      self._is_in_sulfonic_group(begin_atom) or
+                                      self._is_in_sulfonic_group(end_atom) or
+                                      self._is_in_phosphonic_group(begin_atom) or
+                                      self._is_in_phosphonic_group(end_atom))
+
+        bond_len_val = None
+        if self.use_3d_coords and bond_lengths_map:
+            bond_len_val = bond_lengths_map.get((bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()))
+            if bond_len_val is None: # Check reverse tuple if not found
+                 bond_len_val = bond_lengths_map.get((bond.GetEndAtomIdx(), bond.GetBeginAtomIdx()))
+
+
+        for scheme in self.bond_feature_schemes:
+            if scheme == 'bond_type':
+                features.extend(self._one_hot_encoding(bond.GetBondType(), self.BOND_FEATURES_DEFAULTS['bond_type']))
+            elif scheme == 'is_conjugated':
+                features.extend(self._one_hot_encoding(1 if bond.GetIsConjugated() else 0, self.BOND_FEATURES_DEFAULTS['is_conjugated']))
+            elif scheme == 'is_in_ring':
+                features.extend(self._one_hot_encoding(1 if bond.IsInRing() else 0, self.BOND_FEATURES_DEFAULTS['is_in_ring']))
+            elif scheme == 'is_cf_bond':
+                features.append(float(is_cf_bond_val))
+            elif scheme == 'is_cf_cf_bond':
+                if self.use_pfas_specific_features:
+                    features.append(float(is_cf_cf_bond_val))
+            elif scheme == 'is_fluorinated_tail_bond':
+                if self.use_pfas_specific_features:
+                    features.append(float(is_fluorinated_tail_bond_val))
+            elif scheme == 'is_functional_group_bond':
+                if self.use_pfas_specific_features:
+                    features.append(float(is_func_group_bond_val))
+            elif scheme == 'bond_length':
+                if self.use_3d_coords and bond_len_val is not None:
+                    features.append(bond_len_val)
+            # else: logger.debug(f"Bond feature scheme '{scheme}' defined but not handled.")
         return features
-    
+
     def mol_to_graph(self, 
                     mol: Chem.Mol, 
                     additional_features: Optional[Dict[str, List[float]]] = None) -> Data:
-        """
-        Convert an RDKit molecule to a PyTorch Geometric graph with enhanced PFAS features.
-        
-        Args:
-            mol: RDKit molecule with 3D coordinates
-            additional_features: Optional dictionary of additional features
-                - 'partial_charges': List of partial charges from QM calculations
-                - 'homo_contributions': List of HOMO contributions per atom
-                - 'lumo_contributions': List of LUMO contributions per atom
-                
-        Returns:
-            PyTorch Geometric Data object representing the molecular graph
-        """
-        # Verify the molecule has 3D coordinates if needed
         if self.use_3d_coords and mol.GetNumConformers() == 0:
-            mol = Chem.AddHs(mol)
-            AllChem.EmbedMolecule(mol, randomSeed=42)  # type: ignore[attr-defined]
-            AllChem.UFFOptimizeMolecule(mol)  # type: ignore[attr-defined]
-        
-        # Extract additional features
-        partial_charges = None
-        homo_contributions = None
-        lumo_contributions = None
-        
-        if additional_features:
-            partial_charges = additional_features.get('partial_charges', None)
-            homo_contributions = additional_features.get('homo_contributions', None)
-            lumo_contributions = additional_features.get('lumo_contributions', None)
-        
-        # Calculate bond lengths if using 3D coordinates
-        bond_lengths = self._calculate_bond_lengths(mol) if self.use_3d_coords else None
-        
-        # Calculate PFAS-specific distance features if requested
-        distance_features = None
-        if self.use_pfas_specific_features:
-            distance_features = self._calculate_distance_features(mol)
-        
-        # Create node features
-        num_atoms = mol.GetNumAtoms()
-        x = []
-        for atom_idx in range(num_atoms):
-            atom = mol.GetAtomWithIdx(atom_idx)
-            charge = partial_charges[atom_idx] if partial_charges is not None else None
-            atom_distance_features = distance_features[atom_idx] if distance_features is not None else None
-            
-            # Create homo/lumo feature for this atom if available
-            homo_lumo = None
-            if homo_contributions is not None and lumo_contributions is not None:
-                homo_lumo = [homo_contributions[atom_idx], lumo_contributions[atom_idx]]
-                
-            atom_features = self._get_atom_features(atom, charge, atom_distance_features, homo_lumo)
-            x.append(atom_features)
-        
-        # Convert node features to tensor
-        x = torch.tensor(x, dtype=torch.float)
-        
-        # Create edges and edge attributes
-        edge_indices = []
-        edge_attrs = []
-        
-        for bond in mol.GetBonds():
-            i = bond.GetBeginAtomIdx()
-            j = bond.GetEndAtomIdx()
-            
-            # Get bond length if available
-            bond_length = bond_lengths.get((i, j)) if bond_lengths else None
-            
-            # Get bond features
-            bond_feats = self._get_bond_features(bond, bond_length)
-            
-            # Add edges in both directions (undirected graph)
-            edge_indices.append([i, j])
-            edge_indices.append([j, i])
-            
-            # Add same edge features for both directions
-            edge_attrs.append(bond_feats)
-            edge_attrs.append(bond_feats)
-        
-        # If no bonds, create empty tensors
-        if len(edge_indices) == 0:
-            edge_index = torch.zeros((2, 0), dtype=torch.long)
-            edge_attr = torch.zeros((0, 1), dtype=torch.float)
-        else:
-            edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-            edge_attr = torch.tensor(edge_attrs, dtype=torch.float)
-        
-        # Get 3D node positions if available and needed
-        pos = None
-        if self.use_3d_coords:
-            conformer = mol.GetConformer()
-            positions = []
-            for atom_idx in range(num_atoms):
-                position = conformer.GetAtomPosition(atom_idx)
-                positions.append([position.x, position.y, position.z])
-            pos = torch.tensor(positions, dtype=torch.float)
-        
-        # Create additional global features for the molecule
-        global_features = [
-            Descriptors.MolWt(mol),              # Molecular weight # type: ignore[attr-defined]
-            Descriptors.TPSA(mol),                    # Topological polar surface area # type: ignore[attr-defined]
-            Lipinski.NumHDonors(mol),                 # Number of H-bond donors # type: ignore[attr-defined]
-            Lipinski.NumHAcceptors(mol),              # Number of H-bond acceptors # type: ignore[attr-defined]
-            Descriptors.MolLogP(mol),                 # Octanol-water partition coefficient # type: ignore[attr-defined]
-            mol.GetNumAtoms(),                        # Total number of atoms
-            len([a for a in mol.GetAtoms() if a.GetAtomicNum() == 9])  # Count of fluorine atoms (PFAS specific)
-        ]
-        
-        # Add PFAS-specific global features
-        if self.use_pfas_specific_features:
-            # Count CF3 groups
-            cf3_count = len(self._find_cf3_groups(mol))
-            global_features.append(cf3_count)
-            
-            # Count functional groups by type
-            carboxylic_count = sum(1 for a in mol.GetAtoms() if self._is_in_carboxylic_group(a))
-            sulfonic_count = sum(1 for a in mol.GetAtoms() if self._is_in_sulfonic_group(a))
-            phosphonic_count = sum(1 for a in mol.GetAtoms() if self._is_in_phosphonic_group(a))
-            global_features.extend([carboxylic_count, sulfonic_count, phosphonic_count])
-            
-            # Count carbon atoms with different fluorination levels
-            c_with_1f = 0
-            c_with_2f = 0
-            c_with_3f = 0
-            for atom in mol.GetAtoms():
-                if atom.GetAtomicNum() == 6:  # Carbon
-                    f_count = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
-                    if f_count == 1:
-                        c_with_1f += 1
-                    elif f_count == 2:
-                        c_with_2f += 1
-                    elif f_count == 3:
-                        c_with_3f += 1
-            global_features.extend([c_with_1f, c_with_2f, c_with_3f])
-        
-        # Create PyTorch Geometric data object
-        data = Data(
-            x=x,                                      # Node features
-            edge_index=edge_index,                    # Edge indices
-            edge_attr=edge_attr,                      # Edge features
-            pos=pos,                                  # 3D coordinates (optional)
-            y=torch.tensor(global_features, dtype=torch.float),  # Global molecule features
-            num_nodes=num_atoms                       # Number of nodes
-        )
-        
-        return data
-    
-    def file_to_graph(self, file_path: str, additional_features: Optional[Dict[str, List[float]]] = None) -> Data:
-        """
-        Create a graph representation from a molecule file.
-        
-        Args:
-            file_path: Path to molecule file (MOL/SDF format)
-            additional_features: Optional dictionary of additional features
-                - 'partial_charges': List of partial charges from QM calculations
-                - 'homo_contributions': List of HOMO contributions per atom
-                - 'lumo_contributions': List of LUMO contributions per atom
-                
-        Returns:
-            PyTorch Geometric Data object
-        """
-        # Check if file exists
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Molecule file not found: {file_path}")
-        
-        # Determine file type from extension
-        _, ext = os.path.splitext(file_path)
-        
-        if ext.lower() in ['.mol', '.sdf']:
-            mol = Chem.MolFromMolFile(file_path, removeHs=False)
-        elif ext.lower() == '.pdb':
-            mol = Chem.MolFromPDBFile(file_path, removeHs=False)
-        elif ext.lower() in ['.smiles', '.smi']:
-            with open(file_path, 'r') as f:
-                smiles = f.read().strip()
-            mol = Chem.MolFromSmiles(smiles)
-        else:
-            raise ValueError(f"Unsupported file format: {ext}")
-        
-        if mol is None:
-            raise ValueError(f"Failed to read molecule from {file_path}")
-        
-        # Generate graph
-        graph = self.mol_to_graph(mol, additional_features)
-        
-        return graph
-    
-    def smiles_to_graph(self, smiles: str, additional_features: Optional[Dict[str, List[float]]] = None) -> Data:
-        """
-        Create a graph representation from a SMILES string.
-        
-        Args:
-            smiles: SMILES string
-            additional_features: Optional dictionary of additional features
-                
-        Returns:
-            PyTorch Geometric Data object
-        """
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            raise ValueError(f"Failed to parse molecule from SMILES: {smiles}")
-        
-        # Generate 3D coordinates if needed and not present
-        if self.use_3d_coords and mol.GetNumConformers() == 0:
-            mol = Chem.AddHs(mol)
-            AllChem.EmbedMolecule(mol, randomSeed=42) # type: ignore[attr-defined]
-            AllChem.UFFOptimizeMolecule(mol) # type: ignore[attr-defined]
-        
-        # Generate graph
-        graph = self.mol_to_graph(mol, additional_features)
-        
-        return graph
-    
-    def batch_files_to_graphs(self, file_paths: List[str]) -> List[Data]:
-        """
-        Process multiple molecular files into graph representations.
-        
-        Args:
-            file_paths: List of paths to molecular files
-            
-        Returns:
-            List of graph data objects
-        """
-        graphs = []
-        for file_path in file_paths:
+            # Try to generate 3D conformer if missing
             try:
-                graph = self.file_to_graph(file_path)
-                graphs.append(graph)
+                AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
+                AllChem.UFFOptimizeMolecule(mol)
+                if mol.GetNumConformers() == 0: # Check again
+                    raise ValueError("Failed to generate 3D coordinates for molecule.")
             except Exception as e:
-                print(f"Error processing file {file_path}: {e}")
+                logger.error(f"Error generating 3D conformer: {e}. Proceeding without 3D if possible or features might be missing.")
+                # If use_3d_coords is True but we fail, subsequent features might be missing.
+                # This could be handled by turning off 3D-dependent features for this molecule,
+                # or by raising the error if 3D is strictly required.
+                # For now, let it proceed, features requiring 3D will be absent.
+                # raise ValueError(f"Molecule does not have 3D coordinates, and generation failed, but use_3d_coords is True: {e}")
+
+
+        partial_charges_list = additional_features.get('partial_charges') if additional_features else None
+        homo_contribs = additional_features.get('homo_contributions') if additional_features else None
+        lumo_contribs = additional_features.get('lumo_contributions') if additional_features else None
         
-        return graphs
+        bond_lengths_map = self.feature_extractor.calculate_bond_lengths(mol) if self.use_3d_coords and mol.GetNumConformers() > 0 else {}
+        
+        distance_features_map = None
+        if self.use_pfas_specific_features and self.use_3d_coords and mol.GetNumConformers() > 0:
+            distance_features_map = self.feature_extractor.calculate_distance_features(mol)
+        
+        x_features = []
+        for i in range(mol.GetNumAtoms()):
+            atom = mol.GetAtomWithIdx(i)
+            pc = partial_charges_list[i] if partial_charges_list and i < len(partial_charges_list) else None
+            hlc = None
+            if homo_contribs and i < len(homo_contribs) and lumo_contribs and i < len(lumo_contribs):
+                hlc = [homo_contribs[i], lumo_contribs[i]]
+            
+            atom_feats = self._get_atom_features(atom, mol, pc, distance_features_map, hlc)
+            x_features.append(atom_feats)
+        
+        x = torch.tensor(x_features, dtype=torch.float) if x_features else torch.empty((0, self.atom_feature_dim), dtype=torch.float)
+
+        edge_indices = []
+        edge_attrs_list = []
+        for bond in mol.GetBonds():
+            i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+            bond_feats = self._get_bond_features(bond, bond_lengths_map)
+            edge_indices.extend([[i, j], [j, i]])
+            edge_attrs_list.extend([bond_feats, bond_feats])
+        
+        edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous() if edge_indices else torch.empty((2,0), dtype=torch.long)
+        edge_attr = torch.tensor(edge_attrs_list, dtype=torch.float) if edge_attrs_list else torch.empty((0, self.bond_feature_dim), dtype=torch.float)
+
+        pos = None
+        if self.use_3d_coords and mol.GetNumConformers() > 0:
+            conformer = mol.GetConformer()
+            positions = [conformer.GetAtomPosition(i) for i in range(mol.GetNumAtoms())]
+            pos = torch.tensor([[p.x, p.y, p.z] for p in positions], dtype=torch.float)
+        
+        # Add other graph-level properties from config if needed
+        data_dict = {'x': x, 'edge_index': edge_index, 'edge_attr': edge_attr, 'num_nodes': mol.GetNumAtoms()}
+        if pos is not None:
+            data_dict['pos'] = pos
+        
+        # Example of adding a graph-level label if provided (e.g. for training)
+        if additional_features and 'label' in additional_features:
+            data_dict['y'] = torch.tensor([additional_features['label']], dtype=torch.float)
+
+        return Data(**data_dict)
+
+    def file_to_graph(self, file_path: str, additional_features: Optional[Dict[str, List[float]]] = None) -> Optional[Data]:
+        if not os.path.exists(file_path):
+            # logger.error(f"Molecule file not found: {file_path}") # Logging can be removed if raising
+            raise FileNotFoundError(f"Molecule file not found: {file_path}")
+        try:
+            if file_path.endswith('.sdf'):
+                suppl = Chem.SDMolSupplier(file_path, removeHs=False)
+                mol = next(iter(suppl), None)
+            elif file_path.endswith('.mol2'):
+                mol = Chem.MolFromMol2File(file_path, removeHs=False)
+            elif file_path.endswith('.pdb'):
+                mol = Chem.MolFromPDBFile(file_path, removeHs=False)
+            elif file_path.endswith('.mol'): # Added .mol handling
+                mol = Chem.MolFromMolFile(file_path, removeHs=False)
+            else:
+                logger.error(f"Unsupported molecule file format: {file_path}")
+                return None
+
+            if mol is None:
+                logger.error(f"Failed to read molecule from {file_path}")
+                return None
+            
+            return self.mol_to_graph(mol, additional_features)
+        except Exception as e:
+            logger.error(f"Error processing molecule file {file_path}: {e}")
+            return None
+
+    def smiles_to_graph(self, smiles: str, additional_features: Optional[Dict[str, List[float]]] = None) -> Optional[Data]:
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                logger.error(f"Invalid SMILES string: {smiles}")
+                return None
+            # Generate 3D coordinates for SMILES
+            mol = Chem.AddHs(mol)
+            AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
+            AllChem.UFFOptimizeMolecule(mol)
+            mol = Chem.RemoveHs(mol) # Optionally remove Hs after embedding if not needed for features
+            return self.mol_to_graph(mol, additional_features)
+        except Exception as e:
+            logger.error(f"Error processing SMILES string {smiles}: {e}")
+            return None
+
+    # Batch processing can be added here if needed, e.g. batch_files_to_graphs
+    # For now, datasets will call file_to_graph or smiles_to_graph iteratively.
 
     def mol_to_json_graph(self, mol: Chem.Mol) -> Dict[str, Any]:
-        """
-        Convert an RDKit molecule to a JSON-serializable graph representation.
-        
-        Args:
-            mol: RDKit molecule with 3D coordinates
-                
-        Returns:
-            Dictionary representing the molecular graph
-        """
-        # Verify the molecule has 3D coordinates
-        if mol.GetNumConformers() == 0:
-            raise ValueError("Molecule does not have 3D coordinates")
-        
-        # Get atom features
-        atoms = []
+        """Converts an RDKit molecule to a JSON-serializable graph dictionary."""
+        # This is a simplified JSON representation, not directly a PyG Data object.
+        # For full PyG Data serialization, torch.save is typically used.
+        graph_dict = {
+            "nodes": [],
+            "edges": [],
+            "descriptors": self._get_molecule_descriptors(mol)
+        }
+
+        bond_lengths_map = self.feature_extractor.calculate_bond_lengths(mol) if self.use_3d_coords and mol.GetNumConformers() > 0 else {}
+
         for atom in mol.GetAtoms():
-            atom_idx = atom.GetIdx()
-            atom_features = self._get_atom_features_dict(atom)
-            atom_coords = mol.GetConformer().GetAtomPosition(atom_idx)
-            
-            atoms.append({
-                "idx": atom_idx,
-                "features": atom_features,
-                "coords": {
-                    "x": atom_coords.x,
-                    "y": atom_coords.y,
-                    "z": atom_coords.z
-                }
-            })
-        
-        # Get bond features
-        bonds = []
+            # Using a simplified feature set for JSON for readability
+            atom_data = {
+                "id": atom.GetIdx(),
+                "atomic_num": atom.GetAtomicNum(),
+                "symbol": atom.GetSymbol(),
+                "formal_charge": atom.GetFormalCharge(),
+                "hybridization": str(atom.GetHybridization()),
+                "is_aromatic": atom.GetIsAromatic(),
+                "num_hs": atom.GetTotalNumHs()
+            }
+            if self.use_3d_coords and mol.GetNumConformers() > 0:
+                pos = mol.GetConformer().GetAtomPosition(atom.GetIdx())
+                atom_data["pos"] = {"x": pos.x, "y": pos.y, "z": pos.z}
+            graph_dict["nodes"].append(atom_data)
+
         for bond in mol.GetBonds():
-            begin_idx = bond.GetBeginAtomIdx()
-            end_idx = bond.GetEndAtomIdx()
-            
-            # Get bond length if using 3D coordinates
-            bond_length = None
-            if self.use_3d_coords:
-                bond_lengths = self._calculate_bond_lengths(mol)
-                bond_length = bond_lengths.get((begin_idx, end_idx))
-            
-            # Convert bond features to dictionary
-            bond_features = self._get_bond_features_dict(bond, bond_length)
-            
-            bonds.append({
-                "begin_atom_idx": begin_idx,
-                "end_atom_idx": end_idx,
-                "features": bond_features
-            })
+            bond_data = {
+                "source": bond.GetBeginAtomIdx(),
+                "target": bond.GetEndAtomIdx(),
+                "bond_type": str(bond.GetBondType()),
+                "is_conjugated": bond.GetIsConjugated(),
+                "is_in_ring": bond.IsInRing()
+            }
+            if self.use_3d_coords and bond_lengths_map:
+                 length = bond_lengths_map.get((bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()))
+                 if length is None: length = bond_lengths_map.get((bond.GetEndAtomIdx(), bond.GetBeginAtomIdx()))
+                 if length is not None: bond_data["length"] = length
+            graph_dict["edges"].append(bond_data)
         
-        # Calculate molecule descriptors
-        descriptors = self._get_molecule_descriptors(mol)
-        
-        # Create graph structure
-        graph = {
-            "atoms": atoms,
-            "bonds": bonds,
-            "descriptors": descriptors,
-            "quantum_properties": {}  # Empty by default
-        }
-        
-        return graph
-    
-    def _get_atom_features_dict(self, atom: Chem.Atom) -> Dict[str, Any]:
-        """
-        Generate a dictionary of features for an atom.
-        
-        Args:
-            atom: RDKit Atom object
-            
-        Returns:
-            Dictionary of atom features
-        """
-        # Basic atom features
-        features = {
-            "atomic_num": atom.GetAtomicNum(),
-            "formal_charge": atom.GetFormalCharge(),
-            "hybridization": int(atom.GetHybridization()),
-            "num_hydrogens": atom.GetTotalNumHs(),
-            "is_aromatic": int(atom.GetIsAromatic()),
-            "is_in_ring": int(atom.IsInRing()),
-            "degree": atom.GetDegree(),
-            "implicit_valence": atom.GetImplicitValence(),
-            "explicit_valence": atom.GetExplicitValence(),
-        }
-        
-        # Add PFAS-specific features if configured
-        if self.use_pfas_specific_features:
-            features.update({
-                "is_halogen": int(atom.GetAtomicNum() in [9, 17, 35, 53]),  # F, Cl, Br, I
-                "is_fluorine": int(atom.GetAtomicNum() == 9),
-                "is_carbon": int(atom.GetAtomicNum() == 6),
-                "is_oxygen": int(atom.GetAtomicNum() == 8),
-                "is_sulfur": int(atom.GetAtomicNum() == 16),
-                "is_nitrogen": int(atom.GetAtomicNum() == 7),
-                "is_phosphorus": int(atom.GetAtomicNum() == 15),
-                "is_carboxylic": int(self._is_in_carboxylic_group(atom)),
-                "is_sulfonic": int(self._is_in_sulfonic_group(atom)),
-                "is_phosphonic": int(self._is_in_phosphonic_group(atom))
-            })
-        
-        return features
-    
-    def _get_bond_features_dict(self, bond: Chem.Bond, bond_length: Optional[float] = None) -> Dict[str, Any]:
-        """
-        Generate a dictionary of features for a bond.
-        
-        Args:
-            bond: RDKit Bond object
-            bond_length: Optional bond length from 3D coordinates
-            
-        Returns:
-            Dictionary of bond features
-        """
-        bond_type = bond.GetBondType()
-        
-        # Convert bond type to integer
-        if bond_type == Chem.rdchem.BondType.SINGLE:
-            bond_type_int = 1
-        elif bond_type == Chem.rdchem.BondType.DOUBLE:
-            bond_type_int = 2
-        elif bond_type == Chem.rdchem.BondType.TRIPLE:
-            bond_type_int = 3
-        elif bond_type == Chem.rdchem.BondType.AROMATIC:
-            bond_type_int = 4
-        else:
-            bond_type_int = 0
-        
-        # Basic bond features
-        features = {
-            "bond_type": bond_type_int,
-            "is_conjugated": int(bond.GetIsConjugated()),
-            "is_in_ring": int(bond.IsInRing()),
-            "is_aromatic": int(bond.GetIsAromatic()),
-        }
-        
-        # Add bond length if available
-        if bond_length is not None:
-            features["bond_length"] = float(bond_length)  # type: ignore
-        
-        return features
-    
+        return graph_dict
+
     def _get_molecule_descriptors(self, mol: Chem.Mol) -> Dict[str, float]:
-        """
-        Calculate basic molecular descriptors for a molecule.
-        
-        Args:
-            mol: RDKit molecule object
-            
-        Returns:
-            Dictionary of molecular descriptors
-        """
-        descriptors = {
-            "mol_weight": Descriptors.MolWt(mol), # type: ignore[attr-defined]
-            "num_atoms": mol.GetNumAtoms(),
-            "num_heavy_atoms": mol.GetNumHeavyAtoms(),
-            "num_bonds": mol.GetNumBonds(),
-            "num_rotatable_bonds": Descriptors.NumRotatableBonds(mol), # type: ignore[attr-defined]
-            "num_h_donors": Lipinski.NumHDonors(mol), # type: ignore[attr-defined]
-            "num_h_acceptors": Lipinski.NumHAcceptors(mol), # type: ignore[attr-defined]
-            "logp": Descriptors.MolLogP(mol), # type: ignore[attr-defined]
-            "tpsa": Descriptors.TPSA(mol), # type: ignore[attr-defined]
-            "qed": QED.qed(mol),
-            "fraction_sp3": Descriptors.FractionCSP3(mol), # type: ignore[attr-defined]
+        """Helper to get some basic molecular descriptors."""
+        return {
+            "mol_weight": Descriptors.MolWt(mol),
+            "logp": Descriptors.MolLogP(mol),
+            "num_h_donors": Lipinski.NumHDonors(mol),
+            "num_h_acceptors": Lipinski.NumHAcceptors(mol),
+            "num_rotatable_bonds": Lipinski.NumRotatableBonds(mol),
+            "tpsa": Descriptors.TPSA(mol)
         }
-        
-        # Add PFAS-specific descriptors if configured
-        if self.use_pfas_specific_features:
-            cf_groups = self.functional_group_detector.find_cf_groups(mol)
-            
-            descriptors.update({
-                "num_fluorine_atoms": sum(1 for atom in mol.GetAtoms() if atom.GetAtomicNum() == 9),
-                "num_cf_groups": sum(1 for t in cf_groups.values() if t == 'CF'),
-                "num_cf2_groups": sum(1 for t in cf_groups.values() if t == 'CF2'),
-                "num_cf3_groups": sum(1 for t in cf_groups.values() if t == 'CF3'),
-            })
-        
-        return descriptors
-    
+
     def file_to_json_graph(self, file_path: str, output_dir: Optional[str] = None, output_filename: Optional[str] = None) -> Optional[str]:
-        """
-        Create a JSON graph representation from a molecule file and optionally save it.
-        
-        Args:
-            file_path: Path to molecule file (MOL/SDF format)
-            output_dir: Optional directory to save the graph JSON file
-            output_filename: Optional filename for the graph JSON file
-                
-        Returns:
-            Path to the saved graph file if output_dir is provided, None otherwise
-        """
+        """Reads a molecule file, converts to JSON graph, and saves it."""
         try:
-            # Check if file exists
-            if not os.path.exists(file_path):
-                logger.error(f"File not found: {file_path}")
+            mol: Optional[Chem.Mol] = None # Ensure mol is defined before the block
+            if not os.path.exists(file_path): # Check existence first
+                logger.error(f"Molecule file not found for JSON conversion: {file_path}")
                 return None
-            
-            # Get molecule ID from filename
-            mol_id = os.path.splitext(os.path.basename(file_path))[0]
-            
-            # Load molecule from file
-            mol = Chem.MolFromMolFile(file_path, removeHs=False)
+
+            if file_path.endswith('.sdf'):
+                suppl = Chem.SDMolSupplier(file_path, removeHs=False, sanitize=True)
+                mol = next(iter(suppl), None)
+            elif file_path.endswith('.mol2'):
+                mol = Chem.MolFromMol2File(file_path, removeHs=False, sanitize=True)
+            elif file_path.endswith('.pdb'):
+                mol = Chem.MolFromPDBFile(file_path, removeHs=False, sanitize=True)
+            elif file_path.endswith('.mol'): # Add .mol support
+                mol = Chem.MolFromMolFile(file_path, removeHs=False, sanitize=True)
+            else:
+                logger.error(f"Unsupported molecule file format for JSON conversion: {file_path}")
+                return None
+
             if mol is None:
-                logger.error(f"Failed to load molecule from {file_path}")
+                logger.error(f"Failed to read RDKit molecule from {file_path} for JSON conversion.")
                 return None
-            
-            # Convert to JSON graph
-            graph = self.mol_to_json_graph(mol)
-            graph["mol_id"] = mol_id
-            
-            # Save graph to file if output_dir is provided
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-                
-                if output_filename is None:
-                    output_filename = f"{mol_id}_graph.json"
-                
-                output_file = os.path.join(output_dir, output_filename)
-                with open(output_file, 'w') as f:
-                    json.dump(graph, f, indent=2)
-                
-                logger.info(f"Saved graph to {output_file}")
-                return output_file
-            
-            return None
-            
+
+            graph_dict = self.mol_to_json_graph(mol)
+
+            if output_dir and output_filename:
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+                output_path = os.path.join(output_dir, output_filename)
+                with open(output_path, 'w') as f:
+                    json.dump(graph_dict, f, indent=2)
+                logger.info(f"Saved JSON graph to {output_path}")
+                return output_path
+            # If output_dir/filename not provided, could return dict, but signature implies path
+            logger.warning("output_dir or output_filename not provided for file_to_json_graph, JSON not saved.")
+            return None # Or return graph_dict if that's useful
         except Exception as e:
-            logger.error(f"Error creating graph for {file_path}: {str(e)}")
+            logger.error(f"Error in file_to_json_graph for {file_path}: {e}")
             return None
 
-    def get_atom_features(self, mol):
-        """
-        Generate feature vectors for all atoms in a molecule.
-        
-        Args:
-            mol: RDKit Mol object
-            
-        Returns:
-            numpy.ndarray: Array of atom features with shape [num_atoms, num_features]
-        """
-        if mol is None or not hasattr(mol, 'GetAtoms'):
-            # Return a minimal default array with 0 atoms and the expected feature dimension
-            return np.zeros((0, self.atom_feature_dim))
-            
-        features = []
-        for atom in mol.GetAtoms():
-            features.append(self._get_atom_features(atom))
-            
-        if not features:
-            return np.zeros((0, self.atom_feature_dim))
-            
-        # Convert to numpy array for consistent return type
-        return np.array(features, dtype=np.float32)
-        
-    def get_adjacency_matrix(self, mol):
-        """
-        Create an adjacency matrix from a molecule.
-        
-        Args:
-            mol: RDKit Mol object
-            
-        Returns:
-            numpy.ndarray: Adjacency matrix as a numpy array
-        """
-        if mol is None or not hasattr(mol, 'GetNumAtoms') or not hasattr(mol, 'GetBonds'):
-            # Return a minimal default matrix with 0x0 dimensions
-            return np.zeros((0, 0), dtype=np.float32)
-            
-        num_atoms = mol.GetNumAtoms()
-        if num_atoms == 0:
-            return np.zeros((0, 0), dtype=np.float32)
-            
-        adjacency = np.zeros((num_atoms, num_atoms), dtype=np.float32)
-        
-        for bond in mol.GetBonds():
-            i = bond.GetBeginAtomIdx()
-            j = bond.GetEndAtomIdx()
-            adjacency[i, j] = 1
-            adjacency[j, i] = 1  # Undirected graph
-            
-        return adjacency
-    
-    def process_dataframe(self, df, mol_column='rdkit_mol'):
-        """
-        Process a dataframe of molecules to extract graph features.
-        
-        Args:
-            df: Pandas DataFrame containing RDKit molecules
-            mol_column: Name of column containing RDKit molecules
-            
-        Returns:
-            DataFrame with added graph features
-        """
-        if mol_column not in df.columns:
-            raise ValueError(f"Molecule column '{mol_column}' not found in dataframe")
-            
-        # Initialize new columns
-        df['atom_features'] = None
-        df['adjacency_matrix'] = None
-        df['num_atoms'] = 0
-        df['graph_data'] = None
-        
-        # Process each molecule
-        for idx, row in df.iterrows():
-            mol = row[mol_column]
-            # Verify we have a valid RDKit molecule object
-            if mol is not None and hasattr(mol, 'GetNumAtoms'):
-                try:
-                    # Get atom features
-                    atom_features = self.get_atom_features(mol)
-                    df.at[idx, 'atom_features'] = atom_features
-                    
-                    # Get adjacency matrix
-                    adjacency = self.get_adjacency_matrix(mol)
-                    df.at[idx, 'adjacency_matrix'] = adjacency
-                    
-                    # Get number of atoms
-                    df.at[idx, 'num_atoms'] = mol.GetNumAtoms()
-                    
-                    # Create a PyTorch Geometric Data object
-                    try:
-                        graph = self.mol_to_graph(mol)
-                        df.at[idx, 'graph_data'] = graph
-                    except Exception as e:
-                        logger.warning(f"Error creating graph for molecule at index {idx}: {e}")
-                except Exception as e:
-                    logger.warning(f"Error processing molecule at index {idx}: {e}")
-        
-        return df
-
-
-def create_graph_processor(config: Optional[Dict[str, Any]] = None) -> MolecularGraphProcessor:
+# Factory function
+def create_graph_processor(config: Dict[str, Any] = None) -> MolecularGraphProcessor:
     """
-    Create a MolecularGraphProcessor with the specified configuration.
+    Factory function to create a MolecularGraphProcessor.
     
     Args:
-        config: Configuration dictionary with processing parameters
+        config: Configuration dictionary
         
     Returns:
-        Configured MolecularGraphProcessor instance
+        MolecularGraphProcessor instance
     """
-    return MolecularGraphProcessor(config)
+    return MolecularGraphProcessor(config=config)
 
+
+# Standalone utility functions (might be deprecated or refactored to use MolecularGraphProcessor)
 
 def mol_file_to_graph(mol_file_path: str,
-                     charges_file_path: Optional[str] = None,
-                     config: Optional[Dict[str, Any]] = None) -> Data:
+                      use_partial_charges: bool = True,
+                      charges_file_path: Optional[str] = None,
+                      use_3d_coords: bool = True,
+                      use_pfas_specific_features: bool = True,
+                      config: Optional[Dict[str, Any]] = None) -> Optional[Data]:
     """
-    Create a graph representation from a molecule file and optional charges file.
-    
-    Args:
-        mol_file_path: Path to molecule file (MOL, SDF, PDB format)
-        charges_file_path: Optional path to file with partial charges
-        config: Optional configuration dictionary for MolecularGraphProcessor.
-                Overrides default behaviors for 'use_3d_coords',
-                'use_pfas_specific_features', 'use_partial_charges'.
-        
-    Returns:
-        PyTorch Geometric Data object
-        
-    Raises:
-        FileNotFoundError: If the molecule file does not exist
-        ValueError: If the molecule cannot be processed
+    Converts a molecule file (SDF, MOL2, PDB) to a PyTorch Geometric Data object.
+    This is a standalone version. Consider using MolecularGraphProcessor class for more features.
     """
-    if not os.path.exists(mol_file_path):
-        raise FileNotFoundError(f"Molecule file not found: {mol_file_path}")
-
-    # Determine file type and load molecule
-    mol = None
-    if mol_file_path.endswith((".mol", ".sdf")):
-        mol = Chem.MolFromMolFile(mol_file_path, removeHs=False)
-    elif mol_file_path.endswith(".pdb"):
-        mol = Chem.MolFromPDBFile(mol_file_path, removeHs=False)
-    else:
-        try:
-            mol = Chem.MolFromMolFile(mol_file_path, removeHs=False)
-        except Exception:
-            pass
-        if mol is None:
-            try:
-                mol = Chem.MolFromPDBFile(mol_file_path, removeHs=False)
-            except Exception as e_load:
-                raise ValueError(f"Could not load molecule from {mol_file_path}. Error: {e_load}")
-
-    if mol is None:
-        raise ValueError(f"Could not read molecule from file: {mol_file_path}")
-
-    # Read partial charges if provided
-    partial_charges = None
-    if charges_file_path: # Check if path is provided first
-        if not os.path.exists(charges_file_path):
-            logger.warning(f"Charges file not found: {charges_file_path}, proceeding without charges.")
-        else:
-            partial_charges = read_charges_from_file(charges_file_path)
-            if partial_charges and len(partial_charges) != mol.GetNumAtoms():
-                logger.warning(
-                    f"Number of charges ({len(partial_charges)}) from {charges_file_path} "
-                    f"does not match number of atoms ({mol.GetNumAtoms()}). Ignoring charges."
-                )
-                partial_charges = None
+    # This standalone function should ideally use an instance of MolecularGraphProcessor
+    # to ensure consistency with feature generation.
+    # For now, it replicates some logic, which is not ideal.
     
-    additional_features = {}
-    if partial_charges:
-        additional_features['partial_charges'] = partial_charges
-
-    # Create processor using the provided config or defaults
-    # The MolecularGraphProcessor itself handles defaults if keys are missing from cfg.
-    # We ensure 'use_partial_charges' is set based on whether charges were loaded.
-    processor_cfg = (config or {}).copy() # Start with user config or empty dict
-    processor_cfg['use_partial_charges'] = (partial_charges is not None)
+    # Default config if none provided
+    effective_config = config or {}
+    effective_config.setdefault('use_partial_charges', use_partial_charges)
+    effective_config.setdefault('use_3d_coords', use_3d_coords)
+    effective_config.setdefault('use_pfas_specific_features', use_pfas_specific_features)
     
-    processor = MolecularGraphProcessor(config=processor_cfg)
+    processor = MolecularGraphProcessor(config=effective_config)
     
-    return processor.mol_to_graph(mol, additional_features=additional_features)
+    additional_processor_features = {}
+    if use_partial_charges and charges_file_path:
+        qm_charges = read_charges_from_file(charges_file_path)
+        if qm_charges:
+            additional_processor_features['partial_charges'] = qm_charges
+            
+    return processor.file_to_graph(mol_file_path, additional_features=additional_processor_features)
 
 
-# Utility functions for working with graphs
-
-def graph_to_device(graph: Union[Dict[str, torch.Tensor], Any], device: torch.device) -> Union[Dict[str, torch.Tensor], Any]:
-    """
-    Move a graph or batch of graphs to the specified device.
-    
-    Args:
-        graph: A graph object or dictionary containing graph tensors
-        device: PyTorch device to move tensors to
-        
-    Returns:
-        Graph with tensors moved to the specified device
-    """
-    if isinstance(graph, dict):
-        for key, value in graph.items():
-            if isinstance(value, torch.Tensor):
-                graph[key] = value.to(device)
-    else:
-        # Assume it's a PyTorch Geometric Data object
-        graph = graph.to(device)
-    
-    return graph
-
+def graph_to_device(graph: Union[Data, Dict[str, torch.Tensor]], device: torch.device) -> Union[Data, Dict[str, torch.Tensor]]:
+    """Moves a graph or dictionary of tensors to the specified device."""
+    if isinstance(graph, Data):
+        return graph.to(device)
+    elif isinstance(graph, dict):
+        return {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in graph.items()}
+    return graph # Or raise error
 
 def collate_graphs(graphs: List[Data]) -> Data:
-    """
-    Collate a list of PyTorch Geometric Data objects into a batch.
-    
-    Args:
-        graphs: List of PyTorch Geometric Data objects
-        
-    Returns:
-        Batched Data object
-    """
+    """Collates a list of PyG Data objects into a single Batch object."""
+    from torch_geometric.loader import DataLoader # Local import to avoid circularity if Batch was imported globally
+    # DataLoader can collate. A bit heavy if just for collation.
+    # PyG Batch.from_data_list is the standard way.
     from torch_geometric.data import Batch
-    
-    # Use PyTorch Geometric's built-in batching
-    batch = Batch.from_data_list(graphs)  # type: ignore[arg-type]
-    
-    return batch  # type: ignore[return-value]
+    if not graphs:
+        return Batch() # Return an empty batch
+    return Batch.from_data_list(graphs)
 
 
 def find_charges_file(mol_file: str, charges_dir: str) -> Optional[str]:
     """
-    Find the corresponding charges file for a molecule file.
-    
-    Args:
-        mol_file: Path to the molecule file
-        charges_dir: Directory containing charge files
-        
-    Returns:
-        Path to the charges file if found, otherwise None
+    Finds a corresponding .charges file for a given molecule file.
+    Assumes charge file has the same base name but with .charges extension.
     """
-    import os
-    
     base_name = os.path.splitext(os.path.basename(mol_file))[0]
+    charge_file = os.path.join(charges_dir, base_name + ".charges")
+    if os.path.exists(charge_file):
+        return charge_file
     
-    # Try different possible extensions for charges file
-    for ext in ['.charges', '.q', '_charges.txt', '_q.txt']:
-        charge_file = os.path.join(charges_dir, f"{base_name}{ext}")
-        if os.path.exists(charge_file):
-            return charge_file
-    
+    # Try .txt as well, as per ORCA output
+    charge_file_txt = os.path.join(charges_dir, base_name + ".txt")
+    if os.path.exists(charge_file_txt):
+        return charge_file_txt
+        
+    logger.warning(f"No .charges or .txt file found for {mol_file} in {charges_dir}")
     return None
-
 
 def read_charges_from_file(charge_file: str) -> Optional[List[float]]:
     """
-    Read partial charges from a file.
-    Supports .chg, .json, and plain text files.
-    
-    Args:
-        charge_file: Path to the file containing partial charges
-        
-    Returns:
-        List of partial charges, or None if parsing fails or file is empty.
+    Reads partial charges from a file.
+    Supports simple text files with one charge per line, or ORCA .prop files.
     """
-    # Logger is already imported at module level
-    # JSON is already imported at module level
+    if not os.path.exists(charge_file):
+        # logger.error(f"Charge file not found: {charge_file}") # Test expects FileNotFoundError
+        raise FileNotFoundError(f"Charges file not found: {charge_file}")
     
-    charges: List[float] = []
-
+    charges = []
     try:
-        with open(charge_file, 'r') as f:
-            content = f.read() # Read all content for JSON parsing
-            lines = content.splitlines() # Split for line-by-line parsing
-            
-    except FileNotFoundError:
-        logger.error(f"Charge file not found: {charge_file}")
-        raise # Re-raise for test compatibility and specific error handling
-    except Exception as e:
-        logger.error(f"Error opening or reading charge file {charge_file}: {e}")
-        return None
-
-    if not lines and not content.strip(): # Empty file
-        return [] # Return empty list for empty file
-
-    try:
-        if charge_file.endswith(".chg"):
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                parts = line.split()
-                if not parts:
-                    continue
-                
-                parsed_charge = False
-                # Try common .chg format: index symbol charge (charge at index 2)
-                if len(parts) >= 3:
-                    try:
-                        charges.append(float(parts[2]))
-                        parsed_charge = True
-                        continue
-                    except ValueError:
-                        pass # Fall through
-                
-                # Try last part as charge
-                if not parsed_charge:
-                    try:
-                        charges.append(float(parts[-1]))
-                        parsed_charge = True
-                        continue
-                    except ValueError:
-                        pass # Fall through
-                
-                # Fallback: try first part as charge (less common for structured .chg)
-                if not parsed_charge:
-                    try:
-                        charges.append(float(parts[0]))
-                    except ValueError:
-                        logger.warning(f"Could not parse charge from .chg line: {line}")
-
-        elif charge_file.endswith(".json"):
-            data = json.loads(content)
+        if charge_file.endswith(".json"):
+            with open(charge_file, 'r') as f:
+                data = json.load(f)
             if isinstance(data, list):
                 charges = [float(c) for c in data]
-            elif isinstance(data, dict):
-                found_in_dict = False
-                for key in ['esp_charges', 'charges', 'partial_charges', 'mulliken_charges']:
-                    if key in data and isinstance(data[key], list):
-                        charges = [float(c) for c in data[key]]
-                        found_in_dict = True
-                        break
-                if not found_in_dict: # Try to find any list of numbers
-                    for _key, value in data.items():
-                        if isinstance(value, list) and value and all(isinstance(x, (int, float)) for x in value):
-                            charges = [float(c) for c in value]
-                            logger.info(f"Found charges in JSON under key: {_key}")
-                            found_in_dict = True
-                            break
-                if not found_in_dict:
-                    logger.warning(f"Could not find a list of charges in JSON file: {charge_file}")
+            elif isinstance(data, dict) and "esp_charges" in data:
+                charges = [float(c) for c in data["esp_charges"]]
             else:
-                logger.warning(f"JSON charge file is not a list or dict: {charge_file}")
+                logger.error(f"Unsupported JSON structure in {charge_file}")
+                return None # Or raise ValueError
+            return charges
 
-        else:  # Generic text file (one charge per line, or first element if multiple)
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith('#'):
+        elif charge_file.endswith(".chg") or charge_file.endswith(".txt"):
+            with open(charge_file, 'r') as f:
+                lines = f.readlines()
+            
+            # Try ORCA .prop format (typically for .chg)
+            in_orca_section = False
+            parsed_orca_charges = []
+            if charge_file.endswith(".chg") and (any("MULLIKEN ATOMIC CHARGES" in line for line in lines) or \
+               any("LOEWDIN ATOMIC CHARGES" in line for line in lines)):
+                for line in lines:
+                    if "MULLIKEN ATOMIC CHARGES" in line or "LOEWDIN ATOMIC CHARGES" in line:
+                        in_orca_section = True
+                        continue
+                    if in_orca_section and line.strip() == "":
+                        in_orca_section = False
+                        # Break here as ORCA charge section is typically contiguous and then ends.
+                        # If simple list format follows, it will be caught by the next loop.
+                        break
+                    if in_orca_section and ":" in line:
+                        try:
+                            parts = line.split(':')
+                            charge_val = float(parts[1].strip())
+                            parsed_orca_charges.append(charge_val)
+                        except (IndexError, ValueError):
+                            logger.warning(f"Could not parse ORCA charge line: {line.strip()} in {charge_file}")
+                            continue # Skip malformed line
+                if parsed_orca_charges: # If ORCA parsing yielded results, use them
+                    return parsed_orca_charges
+
+            # If not ORCA, or ORCA parsing yielded no charges, or it's a .txt file, try simple list format
+            # This re-iterates 'lines' which is fine.
+            for line_content in lines:
+                line_content = line_content.strip()
+                if not line_content or line_content.startswith('#'): # Skip empty/comment
                     continue
                 try:
-                    charges.append(float(line))
+                    charges.append(float(line_content))
                 except ValueError:
-                    parts = line.split()
-                    if parts:
-                        try:
-                            charges.append(float(parts[0]))
-                        except ValueError:
-                            logger.warning(f"Could not parse charge from generic text line: {line}")
-                            
-    except json.JSONDecodeError as e:
-        logger.error(f"Could not decode JSON from charge file {charge_file}: {e}")
-        return None # JSON parsing failed
-    except Exception as e: # Catch other parsing errors
-        logger.error(f"Error parsing charges from {charge_file}: {e}")
+                    logger.warning(f"Could not parse charge from line: '{line_content}' in file {charge_file}")
+                    return None # Malformed simple format line
+            # If file was empty or only comments, charges list will be empty.
+            # For .txt, an empty list is a valid outcome if the file is empty.
+            # For .chg, if ORCA parsing failed and simple parsing also yields empty, it's also an empty list.
+            return charges
+        
+        else: # Should not be reached if extensions are .json, .chg, .txt
+            logger.warning(f"File extension not explicitly handled by charge reading logic: {charge_file}")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error reading charge file {charge_file}: {e}")
         return None
 
-    return charges # Return list (can be empty if no charges parsed but file was valid)
 
-def create_molecular_graph_json(mol_file: str,
-                               output_dir: str,
-                               charges_file_path: Optional[str] = None,
-                               config: Optional[Dict[str, Any]] = None) -> Optional[str]:
+def create_molecular_graph_json(mol_file: str, 
+                                output_dir: str, 
+                                charges_file: Optional[str] = None,
+                                use_3d_coords: bool = True,
+                                use_pfas_specific_features: bool = True,
+                                config: Optional[Dict[str, Any]] = None
+                                ) -> Optional[str]:
     """
-    Create a molecular graph from a mol file, save as JSON, and return the path.
+    Creates a JSON representation of a molecular graph from a molecule file.
+    This function is for generating a JSON file, not for creating a PyG Data object from JSON.
+    """
+    effective_config = config or {}
+    effective_config.setdefault('use_3d_coords', use_3d_coords)
+    effective_config.setdefault('use_pfas_specific_features', use_pfas_specific_features)
+    # Partial charges are not directly used by file_to_json_graph, but by mol_to_graph if it were called.
+    # This function primarily uses the MolecularGraphProcessor's file_to_json_graph method.
 
-    Args:
-        mol_file: Path to the molecule file (.mol, .sdf, .pdb).
-        output_dir: Directory to save the JSON graph.
-        charges_file_path: Optional path to a file containing partial charges.
-        config: Optional configuration dictionary for MolecularGraphProcessor.
-                Overrides default behaviors.
-                
-    Returns:
-        Path to the generated JSON graph file if successful, None otherwise.
-    """
+    processor = MolecularGraphProcessor(config=effective_config)
+    
     if not os.path.exists(mol_file):
-        logger.error(f"Molecule file not found: {mol_file}")
-        return None
-    
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Load molecule
-    loaded_mol = None
-    if mol_file.endswith((".mol", ".sdf")):
-        loaded_mol = Chem.MolFromMolFile(mol_file, removeHs=False)
-    elif mol_file.endswith(".pdb"):
-        loaded_mol = Chem.MolFromPDBFile(mol_file, removeHs=False)
-    else:
-        try:
-            loaded_mol = Chem.MolFromMolFile(mol_file, removeHs=False)
-        except Exception: pass
-        if loaded_mol is None:
-            try:
-                loaded_mol = Chem.MolFromPDBFile(mol_file, removeHs=False)
-            except Exception as e_load:
-                logger.error(f"Could not load molecule from {mol_file}. Error: {e_load}")
-                return None
-    
-    if loaded_mol is None:
-        logger.error(f"Failed to read molecule from {mol_file}")
+        logger.error(f"Input molecule file not found: {mol_file}")
         return None
 
-    # Read partial charges if provided
-    partial_charges = None
-    if charges_file_path:
-        if not os.path.exists(charges_file_path):
-            logger.warning(f"Charges file not found: {charges_file_path}, proceeding without charges.")
-        else:
-            partial_charges = read_charges_from_file(charges_file_path)
-            if partial_charges and len(partial_charges) != loaded_mol.GetNumAtoms():
-                logger.warning(
-                    f"Number of charges ({len(partial_charges)}) from {charges_file_path} "
-                    f"does not match atoms ({loaded_mol.GetNumAtoms()}). Ignoring."
-                )
-                partial_charges = None
-    
-    # Prepare processor configuration
-    processor_base_config = config or {}
-    processor_actual_config = processor_base_config.copy() # Avoid modifying input dict
-    processor_actual_config['use_partial_charges'] = (partial_charges is not None)
-    # use_3d_coords and use_pfas_specific_features will be taken from processor_base_config
-    # or default to True in MolecularGraphProcessor if not present.
-
-    processor = MolecularGraphProcessor(config=processor_actual_config)
-
-    # Add loaded partial charges to additional_features for mol_to_json_graph if it uses them
-    # Note: mol_to_json_graph itself doesn't directly take additional_features.
-    # It relies on the processor's config (use_partial_charges) and would expect
-    # charges to be handled during its internal _get_atom_features_dict if that method supported it.
-    # The current _get_atom_features_dict does not take partial_charges.
-    # For consistency with mol_to_graph, mol_to_json_graph should be enhanced,
-    # or this function should use file_to_json_graph if charges are file-based.
-    # Current processor.mol_to_json_graph does not use additional_features.
-    # However, processor.file_to_json_graph *does* handle charges internally if configured.
-
-    # Option 1: Use processor.mol_to_json_graph (current structure)
-    # This would require mol_to_json_graph to be aware of partial_charges, perhaps via an argument
-    # or by making _get_atom_features_dict accept them.
-    # For now, we rely on the processor's config for 'use_partial_charges', but
-    # _get_atom_features_dict doesn't use it. This is a gap.
-    # The most straightforward way is to use file_to_json_graph if charges are involved.
-
-    # Let's use file_to_json_graph as it's more integrated for this.
-    # It internally handles loading molecule and charges if configured.
-    # The processor passed to file_to_json_graph will use its config.
-    
     base_name = os.path.splitext(os.path.basename(mol_file))[0]
     output_filename = f"{base_name}_graph.json"
     
+    # The file_to_json_graph method of the processor handles reading the mol_file
+    # and converting it to its JSON dict representation, then saving.
+    # It does not currently take additional_features like charges directly for JSON output.
+    # If charges need to be in the JSON, mol_to_json_graph would need modification.
+    
     try:
-        # file_to_json_graph in MolecularGraphProcessor takes file_path, output_dir, output_filename
-        # It will use its own configured 'use_partial_charges' setting.
-        # If charges_file_path is provided, we should ensure the processor is configured to use them.
-        # The processor_actual_config already sets 'use_partial_charges' based on loaded charges.
-        # However, file_to_json_graph itself tries to find a charge file.
-        # This is a bit redundant.
-        # A cleaner way: if charges are pre-loaded, mol_to_json_graph should accept them.
-        # If not, file_to_json_graph should find them.
-
-        # Sticking to processor.file_to_json_graph for simplicity of this utility fn:
-        # The processor is already configured with use_partial_charges based on whether
-        # we found/loaded a charges_file_path.
-        # file_to_json_graph will then try to find a charge file again if use_partial_charges is true.
-        # This is not ideal.
-        # Let's make this function more direct: load mol, load charges, then call mol_to_json_graph.
-        # This requires mol_to_json_graph to accept charges or _get_atom_features_dict to.
-        # Given current structure, let's assume mol_to_json_graph is the target.
-        # _get_atom_features_dict needs enhancement to accept partial_charge.
-
-        # For now, this utility will create the JSON but might not include QM charges
-        # directly via this path unless _get_atom_features_dict is enhanced.
-        # The `use_partial_charges` in config for the processor in `mol_to_json_graph`
-        # is currently not used by `_get_atom_features_dict`.
-
-        json_data = processor.mol_to_json_graph(loaded_mol) # This doesn't pass charges
-        
-        # To include charges, we'd need to modify `_get_atom_features_dict`
-        # or pass `partial_charges` to `mol_to_json_graph` and have it use them.
-        # Assuming for now `mol_to_json_graph` is self-contained with its processor config.
-
-        output_path = os.path.join(output_dir, output_filename)
-        with open(output_path, 'w') as f:
-            json.dump(json_data, f, indent=4)
-        logger.info(f"Saved JSON graph to {output_path}")
+        output_path = processor.file_to_json_graph(mol_file, output_dir, output_filename)
         return output_path
-        
     except Exception as e:
-        logger.error(f"Error creating or saving JSON graph for {mol_file}: {e}")
+        logger.error(f"Failed to create JSON graph for {mol_file}: {e}")
         return None
-    
-    # Generate and save the graph
-    return processor.file_to_json_graph(mol_file, output_dir)
 
-def batch_create_graphs_from_molecules(mol_dir: str,
-                                      output_dir: str,
-                                      charges_dir: Optional[str] = None,
-                                      config: Optional[Dict[str, Any]] = None,
-                                      file_extension: str = ".mol", # Added file_extension
-                                      max_workers: Optional[int] = None) -> List[str]: # Made max_workers optional
+
+def batch_create_graphs_from_molecules(mol_dir: str, 
+                                       output_dir: str, 
+                                       file_format: str = 'sdf',
+                                       use_3d_coords: bool = True,
+                                       use_pfas_specific_features: bool = True,
+                                       max_workers: Optional[int] = None,
+                                       config: Optional[Dict[str, Any]] = None
+                                       ) -> List[str]:
     """
-    Create molecular graphs for all molecules in a directory and save as JSON.
-    Uses multiprocessing for parallel processing.
-
-    Args:
-        mol_dir: Directory containing molecule files.
-        output_dir: Directory to save the generated JSON graph files.
-        charges_dir: Optional directory to search for corresponding charge files.
-        config: Optional configuration dictionary for MolecularGraphProcessor,
-                passed to create_molecular_graph_json.
-        file_extension: Extension of molecule files to process.
-        max_workers: Maximum number of worker processes. Defaults to a capped os.cpu_count().
-        
-    Returns:
-        List of paths to the generated graph files
+    Processes multiple molecule files from a directory into PyG Data objects and saves them.
+    Returns a list of paths to the saved .pt files.
+    This is a standalone utility.
     """
-    import concurrent.futures
-    import functools # Added for functools.partial if needed, though direct submit is used here
+    effective_config = config or {}
+    effective_config.setdefault('use_3d_coords', use_3d_coords)
+    effective_config.setdefault('use_pfas_specific_features', use_pfas_specific_features)
+    processor = MolecularGraphProcessor(config=effective_config)
 
-    # Determine number of workers
-    if max_workers is None:
-        cpu_count = os.cpu_count()
-        if cpu_count is None:
-            max_workers = 1
-        else:
-            max_workers = min(4, cpu_count)
+    if not os.path.isdir(mol_dir):
+        logger.error(f"Molecule directory not found: {mol_dir}")
+        return []
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
 
-    # Check if directories exist
-    if not os.path.exists(mol_dir):
-        logger.error(f"Molecule directory does not exist: {mol_dir}")
-        return []
-    
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Get list of mol files
-    try:
-        all_files_in_dir = os.listdir(mol_dir)
-    except FileNotFoundError: # Should have been caught by earlier check, but defensive
-        logger.error(f"Molecule directory not found or inaccessible: {mol_dir}")
-        return []
-        
-    mol_files = [os.path.join(mol_dir, f) for f in all_files_in_dir if f.endswith(file_extension)]
+    mol_files = glob.glob(os.path.join(mol_dir, f"*.{file_format}"))
     if not mol_files:
-        logger.warning(f"No files with extension '{file_extension}' found in {mol_dir}")
+        logger.warning(f"No .{file_format} files found in {mol_dir}")
         return []
-    
-    logger.info(f"Processing {len(mol_files)} molecules in parallel with {max_workers} workers.")
-    
-    # Process molecules in parallel
-    graph_files = []
-    
-    # Prepare arguments for each task: (mol_file_path, charges_file_path, config_for_task)
-    # The config for create_molecular_graph_json is passed directly.
-    # create_molecular_graph_json will then instantiate its own processor with this config.
-    
-    tasks_args = []
-    for mol_f_path in mol_files:
-        charge_f_path = find_charges_file(mol_f_path, charges_dir) if charges_dir else None
-        tasks_args.append({
-            "mol_file": mol_f_path,
-            "output_dir": output_dir,
-            "charges_file_path": charge_f_path if charge_f_path else None,
-            "config": config # Pass the main config object
-        })
+
+    saved_graph_paths = []
+
+    def process_file(mol_file_path):
+        try:
+            graph_data = processor.file_to_graph(mol_file_path) # additional_features can be passed here if available
+            if graph_data:
+                base_name = os.path.splitext(os.path.basename(mol_file_path))[0]
+                output_path = os.path.join(output_dir, f"{base_name}_graph.pt")
+                torch.save(graph_data, output_path)
+                return output_path
+            return None
+        except Exception as e:
+            logger.error(f"Failed to process {mol_file_path}: {e}")
+            return None
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-        # executor.submit(fn, *args, **kwargs)
-        futures = {
-            executor.submit(create_molecular_graph_json, **task_arg_dict): task_arg_dict["mol_file"]
-            for task_arg_dict in tasks_args
-        }
-        
-        for future in concurrent.futures.as_completed(futures):
-            mol_file_path_completed = futures[future]
-            mol_id = os.path.splitext(os.path.basename(mol_file_path_completed))[0]
-            
+        future_to_mol_file = {executor.submit(process_file, mol_file): mol_file for mol_file in mol_files}
+        for future in concurrent.futures.as_completed(future_to_mol_file):
+            mol_file_path_completed = future_to_mol_file[future]
             try:
-                graph_file_result = future.result()
-                if graph_file_result:
-                    graph_files.append(graph_file_result)
-                else:
-                    logger.warning(f"Failed to create graph for {mol_id} (returned None).")
-            except Exception as e:
-                logger.error(f"Error processing {mol_id}: {str(e)}")
-                # import traceback # For more detailed debugging if needed
-                # logger.error(traceback.format_exc())
+                result_path = future.result()
+                if result_path:
+                    saved_graph_paths.append(result_path)
+                    logger.info(f"Successfully processed and saved graph for {mol_file_path_completed} to {result_path}")
+            except Exception as exc:
+                logger.error(f'{mol_file_path_completed} generated an exception: {exc}')
     
-    logger.info(f"Batch processing finished. Created {len(graph_files)} molecular graphs.")
-    return graph_files
+    return saved_graph_paths

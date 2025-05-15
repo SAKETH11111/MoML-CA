@@ -220,7 +220,7 @@ class MGNNPredictor:
         Returns:
             Dictionary with predictions
         """
-        from moml.data import collate_graphs
+        from torch_geometric.data import Batch # Changed import
         
         # Create a custom dataset for compatibility with standard DataLoader
         class GraphDataset:
@@ -239,7 +239,7 @@ class MGNNPredictor:
             dataset,
             batch_size=batch_size,
             shuffle=False,
-            collate_fn=collate_graphs
+            collate_fn=Batch.from_data_list # Use PyG Batch for collation
         )
         
         # Make predictions
