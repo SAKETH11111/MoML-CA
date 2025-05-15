@@ -9,7 +9,6 @@ using the MoML framework.
 
 import os
 import argparse
-from pathlib import Path
 import pandas as pd
 from rdkit import Chem
 
@@ -102,17 +101,16 @@ def save_and_create_graphs(df: pd.DataFrame, output_dir: str, base_name: str) ->
         # Generate 3D coordinates if needed
         try:
             mol = Chem.AddHs(mol)
-            Chem.AllChem.EmbedMolecule(mol)
+            Chem.AllChem.EmbedMolecule(mol) # type: ignore
             mol = Chem.RemoveHs(mol)
         except:
             # If 3D embedding fails, continue with 2D structure
             pass
         
         # Save the hierarchical graphs
-        coarsener.create_from_molecule(
-            mol=mol,
+        coarsener.create_from_molecule_file(
+            mol_file=mol,
             output_dir=graphs_dir,
-            base_name=f"{mol_id}"
         )
     
     output_files['molecular_graphs'] = graphs_dir

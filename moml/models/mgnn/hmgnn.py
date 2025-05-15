@@ -4,11 +4,7 @@ hmgnn.py  – Hierarchical Molecular Graph Neural Network (HMGNN)
 This file holds only the multi-scale / cross-scale machinery.  Core blocks such as
 DenseGNNBlock and JKAggregator are reused from `djmgnn.py`.
 
-Requires:
-    • torch, torch_geometric
-    • torch_scatter  (pip install torch-scatter)
 
-Author: (your name)
 """
 
 from __future__ import annotations
