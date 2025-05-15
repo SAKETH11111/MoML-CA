@@ -1,830 +1,746 @@
 #!/usr/bin/env python3
+# Copyright 2025 MoML-CA Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
 """
-ORCA PFAS Wrapper for Quantum Chemistry Calculations
+ORCA PFAS Wrapper for Quantum Chemistry Calculations.
 
-This module provides functionality to:
-1. Process PFAS compounds from input CSV files
-2. Generate ORCA input files for quantum chemistry calculations
-3. Run ORCA calculations in parallel or serial mode
-4. Extract and process results for ML model training
-5. Generate standardized output files for downstream analysis
+This module provides a command-line interface and utility functions to:
+1.  Process PFAS (Per- and Polyfluoroalkyl Substances) compounds from input CSV files.
+2.  Generate 3D molecular structures from SMILES strings.
+3.  Create ORCA input files tailored for PFAS quantum chemistry calculations.
+4.  Execute ORCA calculations, either serially or in parallel.
+5.  Orchestrate the conversion of ORCA output files to QM9-style NPZ format
+    using an external script.
+6.  Generate a summary report of the calculation outcomes.
+
+The wrapper is designed to facilitate high-throughput quantum mechanics
+calculations for PFAS, which are crucial for generating data for training
+machine learning models within the MoML-CA framework. Specific attention is
+given to the unique electronic properties of PFAS molecules.
 
 Usage:
-    python orca_pfas_wrapper.py --input_csv path/to/input.csv --output_dir path/to/output
-    
+    python moml/simulation/quantum_mechanics/orca_pfas_wrapper.py --input_csv path/to/input.csv --output_dir path/to/output
+
 For detailed help:
-    python orca_pfas_wrapper.py --help
+    python moml/simulation/quantum_mechanics/orca_pfas_wrapper.py --help
 """
 
-import os
-import sys
 import argparse
-import pandas as pd
-import json
-import logging
-from pathlib import Path
-import time
 import concurrent.futures
+import logging
+import os
+import re
 import subprocess
-from typing import Dict, List, Optional, Tuple, Union, Any
-import shutil
+import sys
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
-from rdkit import Chem
+import pandas as pd
+from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("orca_pfas_wrapper")
 
-# Suppress RDKit logging except for warnings and errors
-from rdkit import RDLogger
+# Suppress RDKit informational and debug messages, showing only warnings and errors
 RDLogger.logger().setLevel(RDLogger.WARNING)
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="ORCA PFAS Wrapper")
-    
+
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments for the ORCA wrapper script.
+
+    Returns:
+        argparse.Namespace: An object containing the parsed command-line arguments.
+    """
+    parser = argparse.ArgumentParser(
+        description="ORCA PFAS Wrapper for quantum chemistry calculations.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
     # Required arguments
-    parser.add_argument("--input_csv", type=str, required=True,
-                        help="Path to input CSV file with PFAS data")
-    parser.add_argument("--output_dir", type=str, required=True,
-                        help="Directory for output files")
-    
-    # Optional arguments
-    parser.add_argument("--smiles_col", type=str, default="canonical_smiles",
-                        help="Column name containing SMILES strings")
-    parser.add_argument("--id_col", type=str, default="common_name",
-                        help="Column name containing molecule identifiers")
-    parser.add_argument("--functional", type=str, default="B3LYP",
-                        help="Computational method/functional to use")
-    parser.add_argument("--basis_set", type=str, default="6-31G*",
-                        help="Basis set to use")
-    parser.add_argument("--num_procs", type=int, default=1,
-                        help="Number of processors to use per calculation")
-    parser.add_argument("--memory", type=int, default=2000,
-                        help="Memory allocation in MB")
-    parser.add_argument("--max_jobs", type=int, default=1,
-                        help="Maximum number of concurrent jobs")
-    parser.add_argument("--orca_path", type=str, default=None,
-                        help="Path to ORCA executable")
-    parser.add_argument("--openmpi_path", type=str, default=None,
-                        help="Path to OpenMPI binaries")
-    parser.add_argument("--optimize", action="store_true",
-                        help="Perform geometry optimization")
-    parser.add_argument("--charges", action="store_true",
-                        help="Calculate partial charges")
-    parser.add_argument("--sp_only", action="store_true",
-                        help="Run single-point calculation only (no optimization)")
-    parser.add_argument("--mock", action="store_true",
-                        help="Run in mock mode (no actual ORCA calculations)")
-    
+    parser.add_argument(
+        "--input_csv",
+        type=str,
+        required=True,
+        help="Path to the input CSV file containing PFAS data. Must include SMILES and an identifier column.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        required=True,
+        help="Directory where ORCA calculation files and results will be saved.",
+    )
+
+    # Optional arguments for data handling
+    parser.add_argument(
+        "--smiles_col",
+        type=str,
+        default="canonical_smiles",
+        help="Name of the column in the input CSV that contains the SMILES strings for PFAS molecules.",
+    )
+    parser.add_argument(
+        "--id_col",
+        type=str,
+        default="common_name",
+        help="Name of the column in the input CSV that contains unique identifiers for the PFAS molecules.",
+    )
+
+    # Optional arguments for ORCA calculation parameters
+    parser.add_argument(
+        "--functional",
+        type=str,
+        default="wB97X-D",  # Changed default to align with MoML-CA QM protocol
+        help="Density functional to be used in ORCA calculations (e.g., 'wB97X-D', 'B3LYP').",
+    )
+    parser.add_argument(
+        "--basis_set",
+        type=str,
+        default="def2-TZVP",  # Changed default to align with MoML-CA QM protocol
+        help="Basis set to be used in ORCA calculations (e.g., 'def2-TZVP', '6-31G*').",
+    )
+    parser.add_argument(
+        "--num_procs",
+        type=int,
+        default=1,
+        help="Number of processors (cores) to allocate for each individual ORCA calculation.",
+    )
+    parser.add_argument(
+        "--memory",
+        type=int,
+        default=2000,
+        help="Memory allocation in MB for each individual ORCA calculation.",
+    )
+    parser.add_argument(
+        "--orca_path",
+        type=str,
+        default=None,
+        help="Full path to the ORCA executable. If None, the script will try common paths or use 'orca' from system PATH.",
+    )
+    parser.add_argument(
+        "--openmpi_path",
+        type=str,
+        default=None,
+        help="Path to OpenMPI binaries, if required for parallel ORCA execution. If None, system defaults are used.",
+    )
+
+    # Optional arguments for calculation types
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Perform geometry optimization. This is the default unless --sp_only is specified.",
+    )
+    parser.add_argument(
+        "--charges",
+        action="store_true",
+        help="Request calculation of partial atomic charges (e.g., Mulliken, Loewdin) by ORCA.",
+    )
+    parser.add_argument(
+        "--sp_only",
+        action="store_true",
+        help="Run a single-point energy calculation only. If set, geometry optimization is skipped unless --optimize is also explicitly set.",
+    )
+    parser.add_argument(
+        "--solvent_model",
+        type=str,
+        default="CPCM(Water)",  # Added to align with MoML-CA QM protocol
+        help="Implicit solvent model to use (e.g., 'CPCM(Water)', 'SMD(Water)'). Set to None or empty string for gas phase.",
+    )
+
+    # Optional arguments for execution control
+    parser.add_argument(
+        "--max_jobs",
+        type=int,
+        default=1,
+        help="Maximum number of ORCA calculations to run concurrently. Set to 1 for serial execution.",
+    )
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Run in mock mode. Generates input files and simulates ORCA execution without actual calculations.",
+    )
+    parser.add_argument(
+        "--conversion_script_path",
+        type=str,
+        default="scripts/orca_json_to_qm9_npz.py",
+        help="Path to the Python script used for converting ORCA output to QM9 NPZ format.",
+    )
+
     return parser.parse_args()
+
 
 def generate_3d_structure(smiles: str, molecule_id: str) -> Optional[Chem.Mol]:
     """
-    Generate 3D structure from SMILES string.
-    
+    Generates a 3D molecular structure from a SMILES string.
+
+    This involves parsing the SMILES, adding explicit hydrogens, embedding the
+    molecule to generate initial 3D coordinates, and performing a quick
+    force field optimization (MMFF) to refine the geometry.
+
     Args:
-        smiles: SMILES string
-        molecule_id: Molecule identifier
-        
+        smiles: The SMILES string of the molecule.
+        molecule_id: A unique identifier for the molecule, used for logging.
+
     Returns:
-        RDKit molecule with 3D coordinates, or None if failed
+        An RDKit Mol object with 3D coordinates if successful, otherwise None.
     """
     try:
-        # Parse SMILES
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             logger.error(f"Failed to parse SMILES for {molecule_id}: {smiles}")
             return None
-        
-        # Add hydrogens
+
         mol = Chem.AddHs(mol)
-        
-        # Generate 3D coordinates
-        result = AllChem.EmbedMolecule(mol, randomSeed=42)
-        if result == -1:
-            logger.error(f"3D coordinate generation failed for {molecule_id}")
-            return None
-        
-        # Clean up the structure with force field optimization
+
+        # Embed molecule with a fixed random seed for reproducibility
+        status = AllChem.EmbedMolecule(mol, randomSeed=42)
+        if status == -1:  # Embedding failed
+            logger.warning(
+                f"Initial 3D coordinate generation failed for {molecule_id}. Trying with useRandomCoords=True."
+            )
+            status = AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True, maxAttempts=1000)
+            if status == -1:
+                logger.error(f"3D coordinate generation ultimately failed for {molecule_id} after multiple attempts.")
+                return None
+
+        # Refine the structure using MMFF94 force field
         AllChem.MMFFOptimizeMolecule(mol)
-        
+        logger.info(f"Successfully generated 3D structure for {molecule_id}")
         return mol
-    
+
     except Exception as e:
-        logger.error(f"Error generating 3D structure for {molecule_id}: {str(e)}")
+        logger.error(f"Exception during 3D structure generation for {molecule_id} (SMILES: {smiles}): {e}")
         return None
 
+
 def generate_orca_input(
-    mol: Chem.Mol, 
-    molecule_id: str, 
-    output_dir: str, 
-    functional: str = "B3LYP", 
-    basis_set: str = "6-31G*",
-    num_procs: int = 1,
-    memory: int = 2000,
-    optimize: bool = True,
-    charges: bool = True,
-    sp_only: bool = False
-) -> Tuple[bool, str]:
-    """
-    Generate ORCA input file for a molecule.
-    
-    Args:
-        mol: RDKit molecule with 3D coordinates
-        molecule_id: Molecule identifier
-        output_dir: Directory for output files
-        functional: Computational method/functional
-        basis_set: Basis set
-        num_procs: Number of processors
-        memory: Memory allocation in MB
-        optimize: Whether to perform geometry optimization
-        charges: Whether to calculate partial charges
-        sp_only: Whether to run single-point calculation only
-        
-    Returns:
-        Tuple of (success, input_file_path)
-    """
-    try:
-        # Create directory if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Configure calculation type
-        calc_type = ""
-        if sp_only:
-            # Single-point calculation only
-            calc_type = ""  # No special keywords needed
-        elif optimize:
-            # Geometry optimization
-            calc_type = "OPT"
-        
-        # Configure ORCA functional
-        orca_functional = functional
-        # Add dispersion correction to B3LYP
-        if functional == "B3LYP":
-            orca_functional = "B3LYP D3BJ"
-        
-        # Configure charge calculation
-        charge_calc = ""
-        if charges:
-            # Request both Mulliken and Löwdin charges
-            charge_calc = " MULLIKEN LOEWDIN"
-        
-        # Output file path
-        input_file = os.path.join(output_dir, f"{molecule_id}.inp")
-        
-        # Write ORCA input file
-        with open(input_file, "w") as f:
-            # Header
-            f.write(f"# ORCA Input for {molecule_id}\n")
-            f.write(f"# Generated by MoML-CA ORCA wrapper\n")
-            f.write(f"# Functional: {functional}, Basis: {basis_set}\n\n")
-            
-            # Main calculation line
-            f.write(f"! {orca_functional} {basis_set} {calc_type}{charge_calc} TIGHTSCF\n\n")
-            
-            # Parallel settings
-            if num_procs > 1:
-                f.write("%pal\n")
-                f.write(f"  nprocs {num_procs}\n")
-                f.write("end\n\n")
-            
-            # Memory settings
-            f.write(f"%maxcore {memory}\n\n")
-            
-            # SCF settings
-            f.write("%scf\n")
-            f.write("  MaxIter 250\n")
-            f.write("  Convergence Tight\n")
-            f.write("end\n\n")
-            
-            # Optimization settings if applicable
-            if optimize and not sp_only:
-                f.write("%geom\n")
-                f.write("  MaxIter 250\n")
-                f.write("  Convergence Tight\n")
-                f.write("end\n\n")
-            
-            # Molecule specification
-            # Get total molecular charge (0 for neutral molecules)
-            mol_charge = Chem.GetFormalCharge(mol)
-            # Assuming singlet spin state (multiplicity = 1)
-            multiplicity = 1
-            
-            # XYZ format
-            f.write(f"* xyz {mol_charge} {multiplicity}\n")
-            
-            # Write atom coordinates
-            conf = mol.GetConformer()
-            for atom in mol.GetAtoms():
-                idx = atom.GetIdx()
-                symbol = atom.GetSymbol()
-                pos = conf.GetAtomPosition(idx)
-                f.write(f"  {symbol} {pos.x:.6f} {pos.y:.6f} {pos.z:.6f}\n")
-            
-            f.write("*\n")
-        
-        # Also save molecule in MOL format for visualization
-        mol_file = os.path.join(output_dir, f"{molecule_id}.mol")
-        Chem.MolToMolFile(mol, mol_file)
-        
-        return True, input_file
-    
-    except Exception as e:
-        logger.error(f"Error generating ORCA input for {molecule_id}: {str(e)}")
-        return False, ""
-
-def run_orca_calculation(
-    input_file: str, 
-    orca_path: Optional[str] = None,
-    openmpi_path: Optional[str] = None,
-    mock: bool = False
-) -> Tuple[bool, str]:
-    """
-    Run ORCA calculation.
-    
-    Args:
-        input_file: Path to ORCA input file
-        orca_path: Path to ORCA executable (or None to use system default)
-        openmpi_path: Path to OpenMPI binaries (or None to use system default)
-        mock: Whether to run in mock mode (no actual calculation)
-        
-    Returns:
-        Tuple of (success, output_file_path)
-    """
-    # Get input directory and output file path
-    input_dir = os.path.dirname(input_file)
-    mol_id = os.path.basename(input_file).replace(".inp", "")
-    output_file = os.path.join(input_dir, f"{mol_id}.out")
-    
-    # Mock mode - create a fake output file
-    if mock:
-        logger.info(f"Mock mode: Simulating ORCA calculation for {mol_id}")
-        
-        # Create minimal mock output
-        with open(output_file, "w") as f:
-            f.write(f"ORCA Mockup Output for {mol_id}\n")
-            f.write("---------------------------------------------\n\n")
-            f.write("ORCA TERMINATED NORMALLY\n")
-            
-            # Add fake Mulliken charges section
-            f.write("\nMULLIKEN ATOMIC CHARGES\n")
-            f.write("---------------------------------------------\n")
-            f.write("   0 C :    0.123456\n")
-            f.write("   1 F :   -0.123456\n")
-            
-            # Add fake LOEWDIN charges section
-            f.write("\nLOEWDIN ATOMIC CHARGES\n")
-            f.write("---------------------------------------------\n")
-            f.write("   0 C :    0.098765\n")
-            f.write("   1 F :   -0.098765\n")
-            
-            # Add fake HOMO-LUMO section
-            f.write("\nHOMO-LUMO gap:     0.1234 Eh =     3.5678 eV\n")
-            
-            # Add fake dipole moment
-            f.write("\nDIPOLE MOMENT\n")
-            f.write("---------------------------------------------\n")
-            f.write("X:     1.234 Y:     2.345 Z:     3.456 Total:     4.567\n")
-            
-        time.sleep(0.5)  # Simulate calculation time
-        return True, output_file
-    
-    # Real mode - run actual ORCA calculation
-    try:
-        # Find ORCA executable
-        if orca_path is None:
-            # Try common installation paths
-            possible_paths = [
-                "/usr/local/bin/orca",
-                "/opt/orca/orca",
-                os.path.expanduser("~/Library/orca_6_0_1/orca"),
-                "orca"  # System PATH
-            ]
-            
-            for path in possible_paths:
-                if path == "orca" or os.path.exists(path):
-                    orca_path = path
-                    logger.info(f"Using ORCA: {orca_path}")
-                    break
-            
-            if orca_path is None:
-                logger.error("ORCA executable not found")
-                return False, ""
-        
-        # Set up environment variables for OpenMPI if specified
-        env = os.environ.copy()
-        if openmpi_path:
-            env["PATH"] = f"{openmpi_path}:{env.get('PATH', '')}"
-            logger.info(f"Using OpenMPI from: {openmpi_path}")
-        
-        # Run ORCA calculation
-        cmd = [orca_path, input_file]
-        logger.info(f"Running: {' '.join(cmd)} in {input_dir}")
-        
-        process = subprocess.run(
-            cmd,
-            env=env,
-            cwd=input_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False
-        )
-        
-        # Check if output file was created
-        if not os.path.exists(output_file):
-            logger.error(f"ORCA calculation failed - no output file created for {mol_id}")
-            logger.error(f"STDERR: {process.stderr}")
-            return False, ""
-        
-        # Check process return code
-        if process.returncode != 0:
-            logger.error(f"ORCA calculation failed with code {process.returncode} for {mol_id}")
-            logger.error(f"STDERR: {process.stderr}")
-            
-            # Check if we have a partial output file that might be usable
-            if os.path.getsize(output_file) > 100:
-                logger.warning(f"Using partial output file for {mol_id}")
-                return True, output_file
-            
-            return False, output_file
-        
-        logger.info(f"ORCA calculation completed successfully for {mol_id}")
-        return True, output_file
-    
-    except Exception as e:
-        logger.error(f"Error running ORCA calculation for {mol_id}: {str(e)}")
-        return False, ""
-
-def parse_orca_output(output_file: str) -> Dict[str, Any]:
-    """
-    Parse ORCA output file to extract quantum mechanical properties.
-    
-    Args:
-        output_file: Path to ORCA output file
-        
-    Returns:
-        Dictionary of extracted properties
-    """
-    if not os.path.exists(output_file):
-        logger.error(f"ORCA output file not found: {output_file}")
-        return {
-            "success": False,
-            "error": "Output file not found"
-        }
-    
-    # Initialize result dictionary
-    result = {
-        "success": False,
-        "energy": None,
-        "dipole_moment": None,
-        "homo_energy": None,
-        "lumo_energy": None,
-        "homo_lumo_gap": None,
-        "mulliken_charges": [],
-        "loewdin_charges": []
-    }
-    
-    try:
-        # Read output file
-        with open(output_file, "r") as f:
-            content = f.read()
-        
-        # Check if calculation completed successfully
-        if "ORCA TERMINATED NORMALLY" in content:
-            result["success"] = True
-        else:
-            result["error"] = "ORCA calculation did not terminate normally"
-            return result
-        
-        # Extract final energy
-        energy_match = re.search(r"FINAL SINGLE POINT ENERGY\s+([-]?\d+\.\d+)", content)
-        if energy_match:
-            result["energy"] = float(energy_match.group(1))
-        
-        # Extract dipole moment
-        dipole_match = re.search(r"DIPOLE MOMENT\s*\n.*?X\s+([-+]?\d+\.\d+).*?Y\s+([-+]?\d+\.\d+).*?Z\s+([-+]?\d+\.\d+).*?Total\s+([-+]?\d+\.\d+)", content, re.DOTALL)
-        if dipole_match:
-            result["dipole_moment"] = {
-                "x": float(dipole_match.group(1)),
-                "y": float(dipole_match.group(2)),
-                "z": float(dipole_match.group(3)),
-                "total": float(dipole_match.group(4))
-            }
-        
-        # Extract HOMO-LUMO energies
-        homo_match = re.search(r"HOMO:\s*\d+\s+([-+]?\d+\.\d+)\s*Eh", content)
-        lumo_match = re.search(r"LUMO:\s*\d+\s+([-+]?\d+\.\d+)\s*Eh", content)
-        if homo_match and lumo_match:
-            homo_energy = float(homo_match.group(1))
-            lumo_energy = float(lumo_match.group(1))
-            result["homo_energy"] = homo_energy
-            result["lumo_energy"] = lumo_energy
-            result["homo_lumo_gap"] = lumo_energy - homo_energy
-        
-        # Extract HOMO-LUMO gap directly if available
-        gap_match = re.search(r"HOMO-LUMO gap:\s*([-+]?\d+\.\d+)\s*Eh\s*=\s*([-+]?\d+\.\d+)\s*eV", content)
-        if gap_match:
-            result["homo_lumo_gap_ev"] = float(gap_match.group(2))
-        
-        # Extract Mulliken charges
-        mulliken_section = re.search(r"MULLIKEN ATOMIC CHARGES.*?\n(.*?)\n\n", content, re.DOTALL)
-        if mulliken_section:
-            lines = mulliken_section.group(1).strip().split("\n")
-            for line in lines:
-                if re.match(r"\s*\d+\s+\w+\s*:", line):
-                    parts = line.split(":")
-                    if len(parts) >= 2:
-                        charge = float(parts[1].strip())
-                        result["mulliken_charges"].append(charge)
-        
-        # Extract Loewdin charges
-        loewdin_section = re.search(r"LOEWDIN ATOMIC CHARGES.*?\n(.*?)\n\n", content, re.DOTALL)
-        if loewdin_section:
-            lines = loewdin_section.group(1).strip().split("\n")
-            for line in lines:
-                if re.match(r"\s*\d+\s+\w+\s*:", line):
-                    parts = line.split(":")
-                    if len(parts) >= 2:
-                        charge = float(parts[1].strip())
-                        result["loewdin_charges"].append(charge)
-        
-        return result
-    
-    except Exception as e:
-        logger.error(f"Error parsing ORCA output: {str(e)}")
-        return {
-            "success": False,
-            "error": f"Error parsing output: {str(e)}"
-        }
-import re
-
-def process_molecule(
-    smiles: str,
+    mol: Chem.Mol,
     molecule_id: str,
-    output_dir: str,
-    functional: str = "B3LYP",
-    basis_set: str = "6-31G*",
-    num_procs: int = 1,
-    memory: int = 2000,
-    orca_path: Optional[str] = None,
-    openmpi_path: Optional[str] = None,
-    optimize: bool = True,
-    charges: bool = True,
-    sp_only: bool = False,
-    mock: bool = False
-) -> Dict[str, Any]:
-    """
-    Process a single molecule through the ORCA workflow.
-    
-    Args:
-        smiles: SMILES string
-        molecule_id: Molecule identifier
-        output_dir: Directory for output files
-        functional: Computational method/functional
-        basis_set: Basis set
-        num_procs: Number of processors
-        memory: Memory allocation in MB
-        orca_path: Path to ORCA executable
-        openmpi_path: Path to OpenMPI binaries
-        optimize: Whether to perform geometry optimization
-        charges: Whether to calculate partial charges
-        sp_only: Whether to run single-point calculation only
-        mock: Whether to run in mock mode
-        
-    Returns:
-        Dictionary with calculation results
-    """
-    # Create clean molecule ID (remove special characters)
-    clean_id = re.sub(r'[^a-zA-Z0-9_-]', '_', molecule_id)
-    
-    # Create molecule-specific output directory
-    mol_dir = os.path.join(output_dir, clean_id)
-    os.makedirs(mol_dir, exist_ok=True)
-    
-    logger.info(f"Processing molecule: {molecule_id}")
-    
-    # Initialize result dictionary
-    result = {
-        "molecule_id": molecule_id,
-        "smiles": smiles,
-        "success": False,
-        "calculation_type": {
-            "functional": functional,
-            "basis_set": basis_set,
-            "optimize": optimize and not sp_only,
-            "charges": charges,
-            "sp_only": sp_only
-        }
-    }
-    
-    # 1. Generate 3D structure
-    logger.info(f"Generating 3D structure for {molecule_id}")
-    mol = generate_3d_structure(smiles, molecule_id)
-    if mol is None:
-        result["error"] = "Failed to generate 3D structure"
-        return result
-    
-    # 2. Generate ORCA input
-    logger.info(f"Generating ORCA input for {molecule_id}")
-    success, input_file = generate_orca_input(
-        mol, clean_id, mol_dir, 
-        functional, basis_set, 
-        num_procs, memory,
-        optimize, charges, sp_only
-    )
-    if not success:
-        result["error"] = "Failed to generate ORCA input"
-        return result
-    
-    # 3. Run ORCA calculation
-    logger.info(f"Running ORCA calculation for {molecule_id}")
-    success, output_file = run_orca_calculation(
-        input_file, orca_path, openmpi_path, mock
-    )
-    if not success:
-        result["error"] = "ORCA calculation failed"
-        return result
-    
-    # 4. Parse ORCA output
-    logger.info(f"Parsing ORCA output for {molecule_id}")
-    qm_data = parse_orca_output(output_file)
-    
-    # 5. Update result dictionary
-    result.update(qm_data)
-    
-    # 6. Save result to JSON file
-    result_file = os.path.join(mol_dir, f"{clean_id}_results.json")
-    with open(result_file, "w") as f:
-        json.dump(result, f, indent=2)
-    
-    logger.info(f"Completed processing {molecule_id}: {result['success']}")
-    return result
-
-def process_molecules_parallel(
-    df: pd.DataFrame,
     output_dir: str,
     functional: str,
     basis_set: str,
     num_procs: int,
     memory: int,
-    max_jobs: int,
+    optimize_geom: bool,
+    calculate_charges: bool,
+    sp_only: bool,
+    solvent_model: Optional[str],
+) -> Tuple[bool, str]:
+    """
+    Generates an ORCA input file for a given molecule and calculation parameters.
+
+    The input file is configured for PFAS calculations, considering typical
+    requirements like tight SCF convergence and appropriate keywords for
+    optimization or single-point calculations.
+
+    Args:
+        mol: RDKit Mol object with 3D coordinates.
+        molecule_id: Unique identifier for the molecule.
+        output_dir: Directory where the ORCA input file will be saved.
+        functional: Density functional to use (e.g., 'wB97X-D').
+        basis_set: Basis set to use (e.g., 'def2-TZVP').
+        num_procs: Number of processors for parallel execution.
+        memory: Memory allocation in MB per processor.
+        optimize_geom: Whether to perform geometry optimization.
+        calculate_charges: Whether to request partial charge calculation.
+        sp_only: If True, sets up a single-point energy calculation.
+        solvent_model: Implicit solvent model (e.g., 'CPCM(Water)'). None for gas phase.
+
+
+    Returns:
+        A tuple (success, input_file_path):
+        - success (bool): True if input file generation was successful, False otherwise.
+        - input_file_path (str): The path to the generated ORCA input file.
+    """
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        input_file_path = os.path.join(output_dir, f"{molecule_id}.inp")
+
+        keywords = [functional, basis_set, "TightSCF"]
+
+        if sp_only and not optimize_geom:  # Pure single point
+            pass  # No specific keyword, default is SP
+        elif optimize_geom:
+            keywords.append("Opt")
+            keywords.append("Freq")  # Also calculate frequencies to confirm minimum
+
+        if calculate_charges:
+            keywords.append("Mulliken")  # Request Mulliken charges
+            keywords.append("Loewdin")  # Request Loewdin charges
+            keywords.append("CHELPG")  # Request CHELPG charges, often good for PFAS
+
+        if solvent_model and solvent_model.strip():
+            keywords.append(solvent_model)
+            if (
+                "SMD" in solvent_model.upper() and "CPCM" not in solvent_model.upper()
+            ):  # ORCA needs smd true in cpcm block
+                pass  # SMD is handled differently below for ORCA syntax
+
+        input_block = f"! {' '.join(keywords)}\n\n"
+
+        if num_procs > 1:
+            input_block += f"%pal\n  nprocs {num_procs}\nend\n\n"
+
+        input_block += f"%maxcore {memory}\n\n"  # Memory per core
+
+        # SCF settings for robustness, especially with PFAS
+        input_block += "%scf\n  MaxIter 300\n  Convergence Tight\nend\n\n"
+
+        if optimize_geom and not sp_only:
+            input_block += "%geom\n  MaxIter 300\n  Convergence Tight\n  Trust -0.1\nend\n\n"  # Added trust radius
+
+        # Add CPCM/SMD block if solvent model requires it
+        if solvent_model and solvent_model.strip():
+            if "CPCM" in solvent_model.upper() or "SMD" in solvent_model.upper():
+                input_block += "%cpcm\n"
+                if "SMD" in solvent_model.upper():  # e.g. SMD(Water)
+                    solvent_name = solvent_model.split("(")[-1].split(")")[0]
+                    input_block += f'  smd true\n  smdsolvent "{solvent_name}"\n'
+                elif "CPCM" in solvent_model.upper():  # e.g. CPCM(Water)
+                    solvent_name = solvent_model.split("(")[-1].split(")")[0]
+                    input_block += f'  solvent "{solvent_name}"\n'
+                input_block += "end\n\n"
+
+        charge = Chem.GetFormalCharge(mol)
+        # Determine multiplicity (assuming singlet for closed-shell PFAS, can be parameterized)
+        num_radical_electrons = 0
+        for atom in mol.GetAtoms():
+            num_radical_electrons += atom.GetNumRadicalElectrons()
+        multiplicity = num_radical_electrons + 1
+
+        input_block += f"* xyz {charge} {multiplicity}\n"
+        conformer = mol.GetConformer()
+        for atom in mol.GetAtoms():
+            pos = conformer.GetAtomPosition(atom.GetIdx())
+            input_block += f"  {atom.GetSymbol()} {pos.x:.8f} {pos.y:.8f} {pos.z:.8f}\n"
+        input_block += "*\n"
+
+        with open(input_file_path, "w") as f:
+            f.write(f"# ORCA Input for {molecule_id}\n")
+            f.write("# Generated by MoML-CA ORCA Wrapper for PFAS Simulation\n")
+            f.write(f"# Functional: {functional}, Basis: {basis_set}, Solvent: {solvent_model}\n\n")
+            f.write(input_block)
+
+        # Save a MOL file for reference and easy visualization
+        mol_file_path = os.path.join(output_dir, f"{molecule_id}.mol")
+        Chem.MolToMolFile(mol, mol_file_path)
+
+        logger.info(f"Generated ORCA input for {molecule_id} at {input_file_path}")
+        return True, input_file_path
+
+    except Exception as e:
+        logger.error(f"Error generating ORCA input for {molecule_id}: {e}")
+        return False, ""
+
+
+def run_orca_calculation(
+    input_file_path: str, orca_executable: Optional[str], openmpi_bin_path: Optional[str], mock_run: bool
+) -> Tuple[bool, str]:
+    """
+    Runs an ORCA calculation using the specified input file.
+
+    Handles locating the ORCA executable and setting up the environment
+    for parallel execution if OpenMPI path is provided.
+
+    Args:
+        input_file_path: Path to the ORCA input file (.inp).
+        orca_executable: Full path to the ORCA executable. If None, attempts to find it.
+        openmpi_bin_path: Path to OpenMPI binaries (optional, for parallel runs).
+        mock_run: If True, simulates the ORCA run without actual execution.
+
+    Returns:
+        A tuple (success, output_file_path):
+        - success (bool): True if ORCA ran (or was mocked) successfully, False otherwise.
+        - output_file_path (str): Path to the ORCA output file (.out).
+    """
+    input_dir = os.path.dirname(input_file_path)
+    molecule_name = os.path.basename(input_file_path).replace(".inp", "")
+    output_file_path = os.path.join(input_dir, f"{molecule_name}.out")
+
+    if mock_run:
+        logger.info(f"Mock mode: Simulating ORCA calculation for {molecule_name}")
+        with open(output_file_path, "w") as f:
+            f.write(f"ORCA Mockup Output for {molecule_name}\n")
+            f.write("---------------------------------------------\n")
+            f.write("Calculation Type: Mocked for PFAS\n")
+            f.write("FINAL SINGLE POINT ENERGY     -123.456789 Eh\n")  # Mock energy
+            f.write("ORCA TERMINATED NORMALLY\n")
+        time.sleep(0.1)  # Simulate some calculation time
+        return True, output_file_path
+
+    # Find ORCA executable if not provided
+    if orca_executable is None:
+        common_paths = ["orca", "/opt/orca/orca", os.path.expanduser("~/orca/orca")]  # Add more if needed
+        for path_option in common_paths:
+            try:
+                # Check if 'orca --version' runs
+                subprocess.run([path_option, "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                orca_executable = path_option
+                logger.info(f"Using ORCA executable found at: {orca_executable}")
+                break
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                continue
+        if orca_executable is None:
+            logger.error(
+                "ORCA executable not specified and not found in common paths or system PATH. "
+                "Please provide the full path using --orca_path."
+            )
+            return False, ""
+
+    env = os.environ.copy()
+    if openmpi_bin_path:
+        env["PATH"] = f"{openmpi_bin_path}:{env.get('PATH', '')}"
+        logger.info(f"Using OpenMPI from: {openmpi_bin_path} for parallel ORCA run.")
+
+    command = [orca_executable, input_file_path]
+    logger.info(f"Running ORCA for {molecule_name}: {' '.join(command)} in {input_dir}")
+
+    try:
+        # ORCA writes its main output to stdout, which we redirect to the .out file
+        with open(output_file_path, "w") as outfile:
+            process = subprocess.run(
+                command, env=env, cwd=input_dir, stdout=outfile, stderr=subprocess.PIPE, text=True, check=False
+            )
+
+        if process.returncode != 0:
+            logger.error(f"ORCA calculation for {molecule_name} failed with return code {process.returncode}.")
+            logger.error(f"ORCA STDERR:\n{process.stderr}")
+            # Even if it fails, the output file might contain useful info for debugging
+            if os.path.exists(output_file_path):
+                logger.warning(f"Partial output file may exist at {output_file_path}")
+            return False, output_file_path  # Return path for inspection
+
+        # Verify normal termination in the output file
+        with open(output_file_path, "r") as f_out:
+            content = f_out.read()
+            if "ORCA TERMINATED NORMALLY" not in content:
+                logger.error(
+                    f"ORCA calculation for {molecule_name} did not terminate normally. Check {output_file_path}."
+                )
+                logger.error(f"ORCA STDERR (if any from subprocess):\n{process.stderr}")
+                return False, output_file_path
+
+        logger.info(f"ORCA calculation completed successfully for {molecule_name}. Output: {output_file_path}")
+        return True, output_file_path
+
+    except FileNotFoundError:
+        logger.error(f"ORCA executable not found at {orca_executable}. Please check the path.")
+        return False, ""
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while running ORCA for {molecule_name}: {e}")
+        return False, ""
+
+
+def process_molecule(
+    smiles: str,
+    molecule_id: str,
+    base_output_dir: str,
+    functional: str,
+    basis_set: str,
+    num_procs: int,
+    memory: int,
     orca_path: Optional[str],
     openmpi_path: Optional[str],
-    optimize: bool,
-    charges: bool,
+    optimize_geom: bool,
+    calculate_charges: bool,
     sp_only: bool,
-    mock: bool,
-    smiles_col: str,
-    id_col: str
+    mock_run: bool,
+    solvent_model: Optional[str],
+    conversion_script_path: str,
+) -> Dict[str, Any]:
+    """
+    Processes a single PFAS molecule through the entire ORCA workflow.
+
+    This includes 3D structure generation, ORCA input file creation,
+    ORCA calculation execution, and orchestrating the conversion of
+    results to NPZ format.
+
+    Args:
+        smiles: SMILES string of the PFAS molecule.
+        molecule_id: Unique identifier for the molecule.
+        base_output_dir: Base directory where results for all molecules are stored.
+                         A subdirectory for this specific molecule will be created here.
+        functional: Density functional for ORCA.
+        basis_set: Basis set for ORCA.
+        num_procs: Number of processors for ORCA.
+        memory: Memory (MB) for ORCA.
+        orca_path: Path to ORCA executable.
+        openmpi_path: Path to OpenMPI binaries.
+        optimize_geom: Flag to perform geometry optimization.
+        calculate_charges: Flag to calculate partial charges.
+        sp_only: Flag for single-point calculation only.
+        mock_run: Flag to run in mock mode.
+        solvent_model: Implicit solvent model for ORCA.
+        conversion_script_path: Path to the script for ORCA output to NPZ conversion.
+
+
+    Returns:
+        A dictionary containing the processing status and paths to key output files.
+        Keys: "molecule_id", "smiles", "success", "npz_file" (if successful),
+        "error" (if failed).
+    """
+    # Sanitize molecule_id to be filesystem-friendly
+    clean_molecule_id = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", str(molecule_id))
+    molecule_specific_dir = os.path.join(base_output_dir, clean_molecule_id)
+    os.makedirs(molecule_specific_dir, exist_ok=True)
+
+    logger.info(f"Starting processing for molecule: {molecule_id} (SMILES: {smiles})")
+    result_summary: Dict[str, Any] = {"molecule_id": molecule_id, "smiles": smiles, "success": False}
+
+    # Step 1: Generate 3D structure
+    mol_3d = generate_3d_structure(smiles, molecule_id)
+    if mol_3d is None:
+        result_summary["error"] = "Failed to generate 3D structure."
+        logger.error(f"Failed 3D structure generation for {molecule_id}.")
+        return result_summary
+
+    # Step 2: Generate ORCA input file
+    input_generated, orca_input_file = generate_orca_input(
+        mol_3d,
+        clean_molecule_id,
+        molecule_specific_dir,
+        functional,
+        basis_set,
+        num_procs,
+        memory,
+        optimize_geom,
+        calculate_charges,
+        sp_only,
+        solvent_model,
+    )
+    if not input_generated:
+        result_summary["error"] = "Failed to generate ORCA input file."
+        logger.error(f"Failed ORCA input generation for {molecule_id}.")
+        return result_summary
+
+    # Step 3: Run ORCA calculation
+    calc_success, orca_output_file = run_orca_calculation(orca_input_file, orca_path, openmpi_path, mock_run)
+    if not calc_success:
+        result_summary["error"] = "ORCA calculation failed or did not terminate normally."
+        logger.error(f"ORCA calculation failed for {molecule_id}. Output at: {orca_output_file}")
+        # Even if failed, provide the output file path for debugging
+        result_summary["orca_output_file"] = orca_output_file
+        return result_summary
+    result_summary["orca_output_file"] = orca_output_file
+
+    # Step 4: Convert ORCA output to QM9-style NPZ using the external script
+    # This step assumes the orca_json_to_qm9_npz.py script handles parsing and NPZ creation.
+    npz_file_path = os.path.join(molecule_specific_dir, f"{clean_molecule_id}_qm9.npz")
+    conversion_command = [
+        "python",
+        conversion_script_path,
+        orca_output_file,
+        "-o",
+        npz_file_path,
+        "--molecule_id",
+        str(molecule_id),  # Pass original molecule_id
+        "--smiles",
+        smiles,
+    ]
+
+    logger.info(f"Converting ORCA output to NPZ for {molecule_id}: {' '.join(conversion_command)}")
+    try:
+        conversion_process = subprocess.run(
+            conversion_command,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=base_output_dir,  # Run from base_output_dir if script uses relative paths
+        )
+        logger.info(f"Successfully converted ORCA output to NPZ for {molecule_id}: {npz_file_path}")
+        logger.debug(f"Conversion script STDOUT for {molecule_id}:\n{conversion_process.stdout}")
+        if conversion_process.stderr:
+            logger.warning(f"Conversion script STDERR for {molecule_id}:\n{conversion_process.stderr}")
+        result_summary["npz_file"] = npz_file_path
+        result_summary["success"] = True
+    except subprocess.CalledProcessError as e:
+        error_message = (
+            f"Error converting ORCA output to NPZ for {molecule_id}.\n"
+            f"Command: {' '.join(e.cmd)}\n"
+            f"Return Code: {e.returncode}\n"
+            f"Stdout: {e.stdout}\n"
+            f"Stderr: {e.stderr}"
+        )
+        result_summary["error"] = error_message
+        logger.error(error_message)
+        return result_summary
+    except FileNotFoundError:
+        error_message = f"Conversion script not found at {conversion_script_path} for {molecule_id}."
+        result_summary["error"] = error_message
+        logger.error(error_message)
+        return result_summary
+
+    logger.info(f"Successfully completed processing for molecule: {molecule_id}")
+    return result_summary
+
+
+def process_molecules_parallel(
+    df_molecules: pd.DataFrame,
+    output_dir_base: str,
+    cli_args: argparse.Namespace,
 ) -> List[Dict[str, Any]]:
     """
-    Process multiple molecules in parallel.
-    
+    Processes multiple PFAS molecules in parallel using a process pool.
+
+    Each molecule is processed by the `process_molecule` function.
+
     Args:
-        df: DataFrame with molecules
-        output_dir: Directory for output files
-        functional: Computational method/functional
-        basis_set: Basis set
-        num_procs: Number of processors per calculation
-        memory: Memory allocation in MB per calculation
-        max_jobs: Maximum number of concurrent jobs
-        orca_path: Path to ORCA executable
-        openmpi_path: Path to OpenMPI binaries
-        optimize: Whether to perform geometry optimization
-        charges: Whether to calculate partial charges
-        sp_only: Whether to run single-point calculation only
-        mock: Whether to run in mock mode
-        smiles_col: Column name with SMILES strings
-        id_col: Column name with molecule identifiers
-        
+        df_molecules: DataFrame containing molecule information (SMILES, ID).
+        output_dir_base: Base directory for all output files.
+        cli_args: Parsed command-line arguments containing all necessary parameters.
+
     Returns:
-        List of result dictionaries
+        A list of dictionaries, where each dictionary is the result from
+        `process_molecule` for a single PFAS compound.
     """
-    logger.info(f"Processing {len(df)} molecules with {max_jobs} concurrent jobs")
-    results = []
-    
-    # Process in parallel if max_jobs > 1
-    if max_jobs > 1 and not mock:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_jobs) as executor:
-            futures = {}
-            
-            for _, row in df.iterrows():
-                smiles = row[smiles_col]
-                molecule_id = str(row[id_col])
-                
-                future = executor.submit(
-                    process_molecule,
-                    smiles, molecule_id, output_dir,
-                    functional, basis_set,
-                    num_procs, memory,
-                    orca_path, openmpi_path,
-                    optimize, charges, sp_only, mock
-                )
-                
-                futures[future] = molecule_id
-            
-            # Collect results as they complete
-            for future in concurrent.futures.as_completed(futures):
-                molecule_id = futures[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    logger.info(f"Completed {molecule_id}: {result['success']}")
-                except Exception as e:
-                    logger.error(f"Error processing {molecule_id}: {str(e)}")
-                    results.append({
-                        "molecule_id": molecule_id,
-                        "success": False,
-                        "error": str(e)
-                    })
-    else:
-        # Process sequentially
-        for _, row in df.iterrows():
-            smiles = row[smiles_col]
-            molecule_id = str(row[id_col])
-            
+    num_molecules = len(df_molecules)
+    logger.info(f"Starting parallel processing of {num_molecules} molecules using up to {cli_args.max_jobs} worker(s).")
+    all_results: List[Dict[str, Any]] = []
+
+    # Determine if geometry optimization should be performed
+    # If sp_only is true, optimize is false, unless optimize is also explicitly true.
+    optimize_geometry = not cli_args.sp_only
+    if cli_args.optimize:  # If --optimize is explicitly given, it takes precedence
+        optimize_geometry = True
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=cli_args.max_jobs) as executor:
+        future_to_mol_id: Dict[concurrent.futures.Future, str] = {}
+        for _, row_data in df_molecules.iterrows():
+            smiles_str = row_data[cli_args.smiles_col]
+            mol_identifier = str(row_data[cli_args.id_col])
+
+            future = executor.submit(
+                process_molecule,
+                smiles_str,
+                mol_identifier,
+                output_dir_base,
+                cli_args.functional,
+                cli_args.basis_set,
+                cli_args.num_procs,
+                cli_args.memory,
+                cli_args.orca_path,
+                cli_args.openmpi_path,
+                optimize_geometry,
+                cli_args.charges,
+                cli_args.sp_only,
+                cli_args.mock,
+                cli_args.solvent_model,
+                cli_args.conversion_script_path,
+            )
+            future_to_mol_id[future] = mol_identifier
+
+        for future_item in concurrent.futures.as_completed(future_to_mol_id):
+            mol_id_completed = future_to_mol_id[future_item]
             try:
-                result = process_molecule(
-                    smiles, molecule_id, output_dir,
-                    functional, basis_set,
-                    num_procs, memory,
-                    orca_path, openmpi_path,
-                    optimize, charges, sp_only, mock
+                mol_result = future_item.result()
+                all_results.append(mol_result)
+                logger.info(f"Finished processing for {mol_id_completed}. Success: {mol_result.get('success', False)}")
+            except Exception as exc:
+                logger.error(f"Molecule {mol_id_completed} generated an exception during parallel processing: {exc}")
+                all_results.append(
+                    {
+                        "molecule_id": mol_id_completed,
+                        "smiles": df_molecules[df_molecules[cli_args.id_col].astype(str) == mol_id_completed][
+                            cli_args.smiles_col
+                        ].iloc[0],
+                        "success": False,
+                        "error": f"Unhandled exception in worker: {exc}",
+                    }
                 )
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Error processing {molecule_id}: {str(e)}")
-                results.append({
-                    "molecule_id": molecule_id,
-                    "success": False,
-                    "error": str(e)
-                })
-    
-    return results
+    return all_results
 
-def prepare_ml_data(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Prepare ML training data from ORCA results.
-    
-    Args:
-        results: List of result dictionaries
-        
-    Returns:
-        List of ML training data dictionaries
-    """
-    ml_data = []
-    
-    for result in results:
-        if not result.get("success", False):
-            continue
-        
-        # Create ML data entry
-        ml_entry = {
-            "compound_id": result["molecule_id"],
-            "smiles": result["smiles"],
-        }
-        
-        # Add quantum mechanical properties
-        if result.get("energy") is not None:
-            ml_entry["energy"] = result["energy"]
-        
-        if result.get("dipole_moment") is not None:
-            ml_entry["dipole_moment"] = result["dipole_moment"].get("total")
-            ml_entry["dipole_vector"] = [
-                result["dipole_moment"].get("x"),
-                result["dipole_moment"].get("y"),
-                result["dipole_moment"].get("z")
-            ]
-        
-        if result.get("homo_energy") is not None:
-            ml_entry["homo_energy"] = result["homo_energy"]
-        
-        if result.get("lumo_energy") is not None:
-            ml_entry["lumo_energy"] = result["lumo_energy"]
-        
-        if result.get("homo_lumo_gap") is not None:
-            ml_entry["homo_lumo_gap"] = result["homo_lumo_gap"]
-            # Convert to eV if not already
-            ml_entry["homo_lumo_gap_ev"] = result.get("homo_lumo_gap_ev", result["homo_lumo_gap"] * 27.211)
-        
-        # Add partial charges if available
-        if "mulliken_charges" in result and result["mulliken_charges"]:
-            ml_entry["mulliken_charges"] = result["mulliken_charges"]
-        
-        if "loewdin_charges" in result and result["loewdin_charges"]:
-            ml_entry["loewdin_charges"] = result["loewdin_charges"]
-        
-        ml_data.append(ml_entry)
-    
-    return ml_data
 
-def main():
-    """Main function."""
-    # Parse command line arguments
+def main() -> None:
+    """
+    Main execution function for the ORCA PFAS wrapper.
+
+    Parses arguments, loads input data, processes molecules (potentially in
+    parallel), and saves a summary of the results.
+    """
     args = parse_args()
-    
-    # Print configuration
-    logger.info("ORCA PFAS Wrapper Configuration:")
-    logger.info(f"Input CSV: {args.input_csv}")
-    logger.info(f"Output directory: {args.output_dir}")
-    logger.info(f"Functional: {args.functional}")
-    logger.info(f"Basis set: {args.basis_set}")
-    logger.info(f"Number of processors per job: {args.num_procs}")
-    logger.info(f"Memory per job: {args.memory} MB")
-    logger.info(f"Maximum concurrent jobs: {args.max_jobs}")
-    logger.info(f"SMILES column: {args.smiles_col}")
-    logger.info(f"ID column: {args.id_col}")
-    
-    if args.orca_path:
-        logger.info(f"ORCA path: {args.orca_path}")
-    
-    if args.openmpi_path:
-        logger.info(f"OpenMPI path: {args.openmpi_path}")
-    
-    if args.mock:
-        logger.info("Running in MOCK mode (no actual ORCA calculations)")
-    
-    # Create output directory
+
+    logger.info("Initializing MoML-CA ORCA PFAS Wrapper.")
+    logger.info(f"Full configuration: {vars(args)}")
+
     os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Load input data
+
     try:
-        logger.info(f"Loading input data from {args.input_csv}")
+        logger.info(f"Loading PFAS data from input CSV: {args.input_csv}")
         df = pd.read_csv(args.input_csv)
-        logger.info(f"Loaded {len(df)} compounds")
+        logger.info(f"Successfully loaded {len(df)} compounds from CSV.")
+    except FileNotFoundError:
+        logger.error(f"Input CSV file not found: {args.input_csv}")
+        sys.exit(1)
     except Exception as e:
-        logger.error(f"Error loading input data: {str(e)}")
+        logger.error(f"Error loading input CSV data: {e}")
         sys.exit(1)
-    
-    # Verify required columns
+
     if args.smiles_col not in df.columns:
-        logger.error(f"SMILES column '{args.smiles_col}' not found in input data")
-        logger.info(f"Available columns: {', '.join(df.columns)}")
+        logger.error(
+            f"SMILES column '{args.smiles_col}' not found in the input CSV. Available columns: {df.columns.tolist()}"
+        )
         sys.exit(1)
-    
     if args.id_col not in df.columns:
-        logger.warning(f"ID column '{args.id_col}' not found in input data. Using index as ID.")
-        df['compound_id'] = [f"Compound{i}" for i in range(len(df))]
-        args.id_col = 'compound_id'
-    
-    # Process molecules
-    logger.info(f"Processing {len(df)} molecules")
-    
-    # Determine optimization and charge settings
-    optimize = not args.sp_only
-    if args.optimize:
-        optimize = True
-    
-    # Process molecules
-    results = process_molecules_parallel(
-        df, args.output_dir,
-        args.functional, args.basis_set,
-        args.num_procs, args.memory, args.max_jobs,
-        args.orca_path, args.openmpi_path,
-        optimize, args.charges, args.sp_only, args.mock,
-        args.smiles_col, args.id_col
-    )
-    
-    # Prepare results summary
-    results_df = pd.DataFrame([
-        {
-            "compound_id": r["molecule_id"],
-            "smiles": r["smiles"],
-            "calculation_success": r.get("success", False),
-            "energy": r.get("energy"),
-            "dipole_moment": r.get("dipole_moment", {}).get("total") if r.get("dipole_moment") else None,
-            "homo_lumo_gap_ev": r.get("homo_lumo_gap_ev"),
-            "error": r.get("error"),
+        logger.warning(f"ID column '{args.id_col}' not found. Using DataFrame index as molecule identifier.")
+        df[args.id_col] = df.index.astype(str)
+
+    # Check if conversion script exists
+    if not os.path.isfile(args.conversion_script_path):
+        logger.error(f"ORCA to NPZ conversion script not found at: {args.conversion_script_path}")
+        logger.error("Please ensure the script exists and the path is correct via --conversion_script_path.")
+        sys.exit(1)
+
+    start_time = time.time()
+    processed_results = process_molecules_parallel(df, args.output_dir, args)
+    end_time = time.time()
+
+    # Prepare and save results summary
+    summary_data = []
+    for res in processed_results:
+        summary_entry = {
+            "molecule_id": res.get("molecule_id"),
+            "smiles": res.get("smiles"),
+            "calculation_success": res.get("success", False),
+            "npz_file_path": res.get("npz_file"),
+            "orca_output_file": res.get("orca_output_file"),
+            "error_message": res.get("error"),
             "functional": args.functional,
-            "basis_set": args.basis_set
+            "basis_set": args.basis_set,
+            "solvent_model": args.solvent_model,
         }
-        for r in results
-    ])
-    
-    # Save results summary
-    summary_file = os.path.join(args.output_dir, "orca_results_summary.csv")
-    results_df.to_csv(summary_file, index=False)
-    logger.info(f"Saved results summary to {summary_file}")
-    
-    # Prepare and save ML training data
-    ml_data = prepare_ml_data(results)
-    ml_data_file = os.path.join(args.output_dir, "ml_training_data.json")
-    with open(ml_data_file, "w") as f:
-        json.dump(ml_data, f, indent=2)
-    logger.info(f"Saved ML training data to {ml_data_file}")
-    
-    # Summary
-    success_count = sum(1 for r in results if r.get("success", False))
-    logger.info(f"Completed {len(results)} calculations")
-    logger.info(f"Success: {success_count}/{len(results)} ({success_count/len(results)*100:.1f}%)")
-    
-    logger.info("ORCA wrapper completed successfully")
+        summary_data.append(summary_entry)
+
+    results_df = pd.DataFrame(summary_data)
+    summary_csv_path = os.path.join(args.output_dir, "orca_pfas_wrapper_summary.csv")
+    try:
+        results_df.to_csv(summary_csv_path, index=False)
+        logger.info(f"Processing summary saved to: {summary_csv_path}")
+    except Exception as e:
+        logger.error(f"Failed to save summary CSV: {e}")
+
+    successful_runs = sum(1 for r in processed_results if r.get("success"))
+    total_runs = len(processed_results)
+    logger.info(f"Total molecules processed: {total_runs}")
+    logger.info(f"Successful calculations: {successful_runs}")
+    if total_runs > 0:
+        success_rate = (successful_runs / total_runs) * 100
+        logger.info(f"Success rate: {success_rate:.2f}%")
+    logger.info(f"Total processing time: {end_time - start_time:.2f} seconds.")
+    logger.info("ORCA PFAS Wrapper execution finished.")
+
 
 if __name__ == "__main__":
     main()

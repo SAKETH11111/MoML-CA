@@ -30,14 +30,11 @@ from moml.utils import (
     plot_heatmap,
     plot_scatter,
     plot_success_rate,
-    plot_count
+    plot_count,
 )
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("pfas_data_analysis")
 
 # Define paths
@@ -46,225 +43,202 @@ CLEANED_CHEMICAL_PATH = ROOT_DIR / "data" / "processed" / "chemical_list" / "PFA
 CLEANED_TREATMENT_PATH = ROOT_DIR / "data" / "processed" / "treatment_data" / "PFAS_Treatment_Data_cleaned.csv"
 RESULTS_DIR = ROOT_DIR / "experiments" / "results" / "analysis"
 
+
 def analyze_chemical_data(df):
     """Analyze the chemical dataset."""
     logger.info("=== Analyzing Chemical Dataset ===")
-    
+
     # Create results directory
     os.makedirs(RESULTS_DIR / "chemical", exist_ok=True)
-    
+
     # Analyze molecular weight distribution
-    if 'Molecular_Weight' in df.columns:
+    if "Molecular_Weight" in df.columns:
         plot_distribution(
-            df, 
-            'Molecular_Weight',
-            'Molecular Weight (g/mol)',
+            df,
+            "Molecular_Weight",
+            "Molecular Weight (g/mol)",
             RESULTS_DIR / "chemical" / "molecular_weight_dist.png",
-            log_scale=True
+            log_scale=True,
         )
-    
+
     # Analyze fluorine content
-    if 'Fluorine_Percent' in df.columns:
+    if "Fluorine_Percent" in df.columns:
         plot_distribution(
-            df,
-            'Fluorine_Percent',
-            'Fluorine Content (%)',
-            RESULTS_DIR / "chemical" / "fluorine_content_dist.png"
+            df, "Fluorine_Percent", "Fluorine Content (%)", RESULTS_DIR / "chemical" / "fluorine_content_dist.png"
         )
-    
+
     # Analyze chain length distribution
-    if 'Chain_Length' in df.columns:
-        plot_count(
-            df,
-            'Chain_Length',
-            'Chain Length',
-            RESULTS_DIR / "chemical" / "chain_length_dist.png"
-        )
-    
+    if "Chain_Length" in df.columns:
+        plot_count(df, "Chain_Length", "Chain Length", RESULTS_DIR / "chemical" / "chain_length_dist.png")
+
     # Analyze structural features
-    feature_columns = [
-        'Is_Aromatic',
-        'Has_Rings',
-        'Is_Cyclic',
-        'Has_Branching',
-        'High_Fluorine_Content'
-    ]
-    
+    feature_columns = ["Is_Aromatic", "Has_Rings", "Is_Cyclic", "Has_Branching", "High_Fluorine_Content"]
+
     for feature in feature_columns:
         if feature in df.columns:
             plot_pie_chart(
                 df,
                 feature,
-                [f'Has {feature}', f'No {feature}'],
-                RESULTS_DIR / "chemical" / f"{feature.lower()}_distribution.png"
+                [f"Has {feature}", f"No {feature}"],
+                RESULTS_DIR / "chemical" / f"{feature.lower()}_distribution.png",
             )
-    
+
     logger.info("Chemical dataset analysis completed")
+
 
 def analyze_treatment_data(df):
     """Analyze the treatment dataset."""
     logger.info("=== Analyzing Treatment Dataset ===")
-    
+
     # Create results directory
     os.makedirs(RESULTS_DIR / "treatment", exist_ok=True)
-    
+
     # Analyze effectiveness distribution
-    if 'Effectiveness_Percent_Numeric' in df.columns:
+    if "Effectiveness_Percent_Numeric" in df.columns:
         plot_distribution(
             df,
-            'Effectiveness_Percent_Numeric',
-            'Treatment Effectiveness (%)',
-            RESULTS_DIR / "treatment" / "effectiveness_dist.png"
+            "Effectiveness_Percent_Numeric",
+            "Treatment Effectiveness (%)",
+            RESULTS_DIR / "treatment" / "effectiveness_dist.png",
         )
-    
+
     # Analyze treatment processes
-    if 'Treatment_Process' in df.columns:
+    if "Treatment_Process" in df.columns:
         plot_top_types(
-            df,
-            'Treatment_Process',
-            'Top Treatment Processes',
-            RESULTS_DIR / "treatment" / "treatment_processes.png"
+            df, "Treatment_Process", "Top Treatment Processes", RESULTS_DIR / "treatment" / "treatment_processes.png"
         )
-    
+
     # Analyze success rate by process
-    if 'Treatment_Process' in df.columns and 'Treatment_Success' in df.columns:
+    if "Treatment_Process" in df.columns and "Treatment_Success" in df.columns:
         plot_success_rate(
-            df,
-            'Treatment_Process',
-            'Treatment_Success',
-            RESULTS_DIR / "treatment" / "success_by_process.png"
+            df, "Treatment_Process", "Treatment_Success", RESULTS_DIR / "treatment" / "success_by_process.png"
         )
-    
+
     # Analyze temperature impact
-    if 'Treatment_Temp_C' in df.columns and 'Effectiveness_Percent_Numeric' in df.columns:
+    if "Treatment_Temp_C" in df.columns and "Effectiveness_Percent_Numeric" in df.columns:
         plot_scatter(
             df,
-            'Treatment_Temp_C',
-            'Effectiveness_Percent_Numeric',
-            'Temperature (°C)',
-            'Effectiveness (%)',
+            "Treatment_Temp_C",
+            "Effectiveness_Percent_Numeric",
+            "Temperature (°C)",
+            "Effectiveness (%)",
             RESULTS_DIR / "treatment" / "temp_vs_effectiveness.png",
-            hue='Treatment_Process'
+            hue="Treatment_Process",
         )
-    
+
     logger.info("Treatment dataset analysis completed")
+
 
 def create_correlation_analysis(chem_df, treat_df):
     """Create correlation analysis between chemical and treatment data."""
     logger.info("=== Creating Correlation Analysis ===")
-    
+
     # Create results directory
     os.makedirs(RESULTS_DIR / "correlations", exist_ok=True)
-    
+
     # Merge datasets on CASRN
-    merged_df = pd.merge(
-        chem_df,
-        treat_df,
-        on='CASRN',
-        how='inner',
-        suffixes=('_chem', '_treat')
-    )
-    
+    merged_df = pd.merge(chem_df, treat_df, on="CASRN", how="inner", suffixes=("_chem", "_treat"))
+
     # Select numeric columns for correlation
     numeric_columns = [
-        'Molecular_Weight',
-        'Fluorine_Percent',
-        'Chain_Length',
-        'Treatment_Temp_C',
-        'Treatment_Time_Minutes',
-        'Effectiveness_Percent_Numeric'
+        "Molecular_Weight",
+        "Fluorine_Percent",
+        "Chain_Length",
+        "Treatment_Temp_C",
+        "Treatment_Time_Minutes",
+        "Effectiveness_Percent_Numeric",
     ]
-    
+
     # Filter to columns that exist in the merged dataset
     numeric_columns = [col for col in numeric_columns if col in merged_df.columns]
-    
+
     if numeric_columns:
         # Calculate correlation matrix
         corr_matrix = merged_df[numeric_columns].corr()
-        
+
         # Plot correlation heatmap
-        plot_heatmap(
-            corr_matrix,
-            'Feature Correlations',
-            RESULTS_DIR / "correlations" / "feature_correlations.png"
-        )
-    
+        plot_heatmap(corr_matrix, "Feature Correlations", RESULTS_DIR / "correlations" / "feature_correlations.png")
+
     logger.info("Correlation analysis completed")
+
 
 def align_datasets(chem_df, treat_df):
     """Align chemical and treatment datasets."""
     logger.info("=== Aligning Datasets ===")
-    
+
     # Get CASRNs from both datasets
-    chem_casrns = set(chem_df['CASRN'])
-    treat_casrns = set(treat_df['CASRN'])
-    
+    chem_casrns = set(chem_df["CASRN"])
+    treat_casrns = set(treat_df["CASRN"])
+
     # Find common CASRNs
     common_casrns = chem_casrns.intersection(treat_casrns)
     logger.info(f"Found {len(common_casrns)} common CASRNs between datasets")
-    
+
     # Create aligned datasets
-    aligned_chem = chem_df[chem_df['CASRN'].isin(common_casrns)]
-    aligned_treat = treat_df[treat_df['CASRN'].isin(common_casrns)]
-    
+    aligned_chem = chem_df[chem_df["CASRN"].isin(common_casrns)]
+    aligned_treat = treat_df[treat_df["CASRN"].isin(common_casrns)]
+
     logger.info(f"Aligned chemical dataset: {len(aligned_chem)} records")
     logger.info(f"Aligned treatment dataset: {len(aligned_treat)} records")
-    
+
     return aligned_chem, aligned_treat
+
 
 def check_class_imbalance(df):
     """Check for class imbalance in treatment outcomes."""
     logger.info("=== Checking Class Imbalance ===")
-    
-    if 'Treatment_Success' in df.columns:
+
+    if "Treatment_Success" in df.columns:
         # Calculate class distribution
-        class_dist = df['Treatment_Success'].value_counts(normalize=True)
+        class_dist = df["Treatment_Success"].value_counts(normalize=True)
         logger.info(f"Class distribution:\n{class_dist}")
-        
+
         # Plot class distribution
         plot_pie_chart(
             df,
-            'Treatment_Success',
-            ['Successful', 'Unsuccessful'],
-            RESULTS_DIR / "treatment" / "class_distribution.png"
+            "Treatment_Success",
+            ["Successful", "Unsuccessful"],
+            RESULTS_DIR / "treatment" / "class_distribution.png",
         )
-        
+
         # Calculate imbalance ratio
-        imbalance_ratio = class_dist[True] / class_dist[False] if False in class_dist else float('inf')
+        imbalance_ratio = class_dist[True] / class_dist[False] if False in class_dist else float("inf")
         logger.info(f"Class imbalance ratio: {imbalance_ratio:.2f}")
-    
+
     logger.info("Class imbalance check completed")
+
 
 def main():
     """Main function to execute the analysis pipeline."""
     logger.info("Starting PFAS data analysis...")
-    
+
     # Load data
     chem_df = load_data(CLEANED_CHEMICAL_PATH)
     treat_df = load_data(CLEANED_TREATMENT_PATH)
-    
+
     # Inspect data
     inspect_data(chem_df)
     inspect_data(treat_df)
-    
+
     # Handle missing values
     chem_df = handle_missing_values(chem_df)
     treat_df = handle_missing_values(treat_df)
-    
+
     # Analyze datasets
     analyze_chemical_data(chem_df)
     analyze_treatment_data(treat_df)
-    
+
     # Create correlation analysis
     create_correlation_analysis(chem_df, treat_df)
-    
+
     # Align datasets
     aligned_chem, aligned_treat = align_datasets(chem_df, treat_df)
-    
+
     # Check class imbalance
     check_class_imbalance(aligned_treat)
-    
+
     logger.info("PFAS data analysis completed successfully!")
 
+
 if __name__ == "__main__":
-    main() 
+    main()

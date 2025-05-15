@@ -1,12 +1,13 @@
 from rdkit import Chem
 
+
 def validate_smiles(smiles: str) -> tuple:
     """
     Validate a SMILES string and convert to canonical form.
-    
+
     Args:
         smiles: The SMILES string to validate
-    
+
     Returns:
         Tuple containing:
             - Boolean indicating if SMILES is valid

@@ -15,40 +15,36 @@ import pytest
 import os
 
 # Setup logging (pytest handles its own verbose output, this is for the script itself)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("run_all_tests_pytest")
 
 # Add project root to the Python path if necessary for pytest discovery
 # This might not be strictly needed if tests are run from the project root
 # or if pytest is configured correctly (e.g., via pytest.ini or pyproject.toml)
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Run tests using pytest.')
+    parser = argparse.ArgumentParser(description="Run tests using pytest.")
     parser.add_argument(
-        'modules',
-        nargs='*',
-        help='Optional list of test files or directories to run (e.g., tests/test_specific_module.py or tests/). '
-             'If not provided, pytest will discover tests in the current directory (usually "tests/").'
+        "modules",
+        nargs="*",
+        help="Optional list of test files or directories to run (e.g., tests/test_specific_module.py or tests/). "
+        'If not provided, pytest will discover tests in the current directory (usually "tests/").',
     )
     parser.add_argument(
-        '--verbose', '-v',
-        action='count',  # Allows for -v, -vv, etc.
+        "--verbose",
+        "-v",
+        action="count",  # Allows for -v, -vv, etc.
         default=0,
-        help='Enable verbose output (can be used multiple times for more verbosity).'
+        help="Enable verbose output (can be used multiple times for more verbosity).",
     )
     # Add any other common pytest arguments you want to expose
     parser.add_argument(
-        '--pytest-args',
-        nargs=argparse.REMAINDER,
-        help='Additional arguments to pass directly to pytest.'
+        "--pytest-args", nargs=argparse.REMAINDER, help="Additional arguments to pass directly to pytest."
     )
     return parser.parse_args()
 
@@ -74,7 +70,7 @@ if __name__ == "__main__":
         # We can explicitly tell it to run tests in the 'tests' directory.
         # This assumes the script is run from the project root or that 'tests' is discoverable.
         # If run_all_tests.py is in tests/, then pytest will discover from tests/ by default.
-        pass # Pytest default behavior is usually fine here.
+        pass  # Pytest default behavior is usually fine here.
 
     # Add any extra pytest arguments
     if args.pytest_args:
@@ -100,7 +96,6 @@ if __name__ == "__main__":
         # if not args.modules and not any(arg.startswith(current_script_dir) or arg == "." for arg in pytest_args):
         # pytest_args.insert(0, current_script_dir) # Run all tests in the directory of this script
         pass
-
 
     # Execute pytest
     # The exit code from pytest.main() indicates success (0) or failure (non-zero).
