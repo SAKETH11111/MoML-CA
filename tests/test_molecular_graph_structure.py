@@ -79,7 +79,7 @@ class TestMolecularGraphProcessor:
         assert found_carboxylic, "Carboxylic group not detected in PFOA"
         
         # Find CF3 groups
-        cf3_groups = processor._find_cf3_groups(mol)
+        cf3_groups = processor.functional_group_detector.find_cf3_groups(mol)
         assert len(cf3_groups) > 0, "CF3 groups not detected in PFOA"
     
     def test_mol_to_graph_basic(self):

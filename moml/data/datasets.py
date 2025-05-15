@@ -87,36 +87,52 @@ class MolecularGraphDataset(Dataset):
         else:
             # Fallback to individual processing
             for file_path in tqdm(self.mol_files, desc="Processing molecular graphs"):
+                graph = None  # Initialize graph to None for each file
                 try:
-                    graph = None # Initialize graph to None at the start of try block
                     # Check if we already have a processed graph file
-                    cache_path = file_path + '.pt'
+                    cache_path = file_path + '.pt' # Potential .pt for graph object
                     if os.path.exists(cache_path):
-                        graph = torch.load(cache_path, weights_only=False)
+                        graph = torch.load(cache_path, weights_only=False) # Not specifying map_location
+                        logger.debug(f"Loaded graph from cache: {cache_path}")
                     else:
-                        # Process the molecule file
-                        graph = self.graph_processor.file_to_graph(file_path)
+                        # Process the molecule file using the graph processor
+                        graph = self.graph_processor.file_to_graph(file_path) # This can raise FileNotFoundError
                         
-                        # Add labels if available
-                        if self.labels is not None and file_path in self.labels:
-                            graph.y = torch.tensor([self.labels[file_path]], dtype=torch.float)
-                        elif self.labels is None: # No labels provided to dataset
-                            if hasattr(graph, 'y'):
-                                del graph.y
-                            if hasattr(graph, 'label'): # 'label' might also be used by processor
-                                del graph.label
-                    
-                    # Apply transform if available
-                    if self.transform is not None:
-                        graph = self.transform(graph)
-                    
-                    if graph is not None: # Ensure graph is not None before appending
-                        self.graphs.append(graph)
-                    else:
-                        logger.warning(f"Graph for {file_path} was None after processing and transform, not adding to dataset.")
+                        if graph is not None:
+                            # Add labels if available (only if graph was successfully created)
+                            if self.labels is not None and file_path in self.labels:
+                                graph.y = torch.tensor([self.labels[file_path]], dtype=torch.float)
+                            elif self.labels is None: # No labels provided to dataset
+                                if hasattr(graph, 'y'): del graph.y
+                                if hasattr(graph, 'label'): del graph.label
+                            # Potentially save to cache if successfully processed
+                            # torch.save(graph, cache_path) # Optional: cache successful processing
+                        # If graph is None from file_to_graph (e.g. unsupported format, RDKit error), it remains None
                 
+                except FileNotFoundError as fnf_error:
+                    logger.error(str(fnf_error)) # Logs "Molecule file not found: <path>"
+                    # graph remains None
                 except Exception as e:
-                    print(f"Error processing {file_path}: {e}")
+                    logger.error(f"Unexpected error processing file {file_path} before transform: {e}")
+                    # graph remains None
+
+                # Apply transform if graph exists and transform is defined
+                if graph is not None and self.transform is not None:
+                    try:
+                        graph = self.transform(graph)
+                    except Exception as te:
+                        logger.error(f"Error applying transform to graph from {file_path}: {te}")
+                        graph = None # Set graph to None if transform fails
+                
+                # Append graph if it's not None after all processing steps
+                if graph is not None:
+                    self.graphs.append(graph)
+                else:
+                    # This warning will be logged if:
+                    # 1. file_to_graph raised FileNotFoundError (and logger.error was called)
+                    # 2. file_to_graph returned None (e.g., unsupported format, RDKit error)
+                    # 3. Transform failed and set graph to None
+                    logger.warning(f"Graph for {file_path} was None after all processing steps, not adding to dataset.")
     
     def __len__(self):
         """Return the number of graphs in the dataset."""

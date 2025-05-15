@@ -289,14 +289,64 @@ class TestGraphCoarsener:
         
         # Patch the _create_structural_mapping method to return a simple mapping
         with patch.object(coarsener, '_create_structural_mapping') as mock_create_mapping:
-            # Create a simple mapping: 0=head, 1=tail for all atoms
-            mock_create_mapping.return_value = {
-                node_idx: 0 if node_idx < 2 else 1 
-                for node_idx in range(mock_functional_group_graph.num_nodes)
-            }
+            # To make the mock for _create_structural_mapping robust, we need to know
+            # what fg_cluster_ids it will receive. These come from atom_to_fg_mapping.
+            # Let's compute atom_to_fg_mapping first.
+            # This requires atom_level_graph_for_test_molecule to be defined before this block,
+            # or compute it inside here just for determining the mock.
             
+            # Create atom_level_graph_for_test_molecule once before the patch context
+            # This is already done outside and before this 'with' block in the refactored code.
+            # Let's assume atom_level_graph_for_test_molecule is available here.
+            # No, it's better to calculate it inside the test function scope before this patch.
+            # The current structure of the test has atom_level_graph_for_test_molecule defined *after* this mock setup.
+            # This needs to be reordered.
+
+            # Reordering: Define atom_level_graph_for_test_molecule first.
+            # This change is already part of the previous diff for this file.
+            # Assuming atom_level_graph_for_test_molecule is defined from the previous diff.
+            
+            # For the mock, we need the set of unique FG cluster IDs that _create_structural_mapping will see.
+            # These are the values in the atom_to_fg_mapping.
+            # The atom_to_fg_mapping is created inside create_functional_group_graph.
+            # So, we need to call it to get the mapping.
+            temp_fg_graph = coarsener.create_functional_group_graph(
+                coarsener.graph_processor.mol_to_graph(test_molecule), # Ensure fresh atom graph
+                test_molecule
+            )
+            actual_atom_to_fg_mapping = temp_fg_graph.cluster_mapping
+            unique_fg_cluster_ids = sorted(list(set(actual_atom_to_fg_mapping.values())))
+
+            # Create a mock return value for _create_structural_mapping
+            # This mock should map the actual unique_fg_cluster_ids to motif_ids (e.g., 0 or 1)
+            mock_map_val = {}
+            if unique_fg_cluster_ids:
+                # Ensure at least two motifs if possible for the test's later assertion (num_nodes == 2)
+                # Simple strategy: map first half to 0, second half to 1
+                # Or, more simply, map all but one to 0, and one to 1 if there are at least two.
+                # If only one fg_cluster_id, map it to 0. The test might need adjustment if it expects 2 motifs.
+                split_point = len(unique_fg_cluster_ids) // 2
+                if len(unique_fg_cluster_ids) == 1: # Only one FG type
+                    mock_map_val = {uid: 0 for uid in unique_fg_cluster_ids}
+                else: # At least two FG types
+                    for i, fg_id in enumerate(unique_fg_cluster_ids):
+                        mock_map_val[fg_id] = 0 if i < split_point or split_point == 0 else 1
+                    # Ensure at least one '1' if there are multiple unique_fg_cluster_ids and split_point was 0
+                    if len(unique_fg_cluster_ids) > 1 and all(v == 0 for v in mock_map_val.values()):
+                         mock_map_val[unique_fg_cluster_ids[-1]] = 1
+
+
+            mock_create_mapping.return_value = mock_map_val
+            
+            # First, get an actual atom-level graph for test_molecule
+            # The coarsener has a graph_processor instance initialized within it.
+            atom_level_graph_for_test_molecule = coarsener.graph_processor.mol_to_graph(test_molecule)
+            assert atom_level_graph_for_test_molecule is not None, \
+                f"Failed to create atom-level graph for test_molecule: {Chem.MolToSmiles(test_molecule)}"
+
+            # Now call create_structural_motif_graph with the correct atom-level graph
             structural_motif_graph = coarsener.create_structural_motif_graph(
-                mock_functional_group_graph, test_molecule
+                atom_level_graph_for_test_molecule, test_molecule
             )
         
         # Check that the coarsened graph has the right structure

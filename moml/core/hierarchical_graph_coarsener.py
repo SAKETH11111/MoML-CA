@@ -90,30 +90,47 @@ class GraphCoarsener:
             Dictionary mapping atom indices to cluster indices
         """
         # Identify functional groups
-        functional_groups = self.functional_group_detector.identify_all_functional_groups(mol)
+        cf_group_definitions, non_cf_functional_groups = self.functional_group_detector.identify_all_functional_groups(mol)
         
+        logger.info(f"[_create_cluster_mapping] Molecule: {Chem.MolToSmiles(mol)}")
+        logger.info(f"[_create_cluster_mapping] Identified non_cf_functional_groups type: {type(non_cf_functional_groups)}")
+        logger.info(f"[_create_cluster_mapping] Identified non_cf_functional_groups content: {non_cf_functional_groups}")
+
         # Create initial mapping with each atom as its own cluster
         cluster_mapping = {i: i for i in range(mol.GetNumAtoms())}
         next_cluster_id = mol.GetNumAtoms()
         
-        # Assign cluster IDs to functional groups (excluding CF groups)
-        for group in functional_groups:
-            # Ensure group is a collection of atom indices (ints), not a set of sets
-            if isinstance(group, (set, list, tuple)):
-                # Flatten if group is a set of sets (should not happen, but guard against it)
-                for atom_idx in group:
-                    if isinstance(atom_idx, (set, list, tuple)):
-                        for idx in atom_idx:
-                            cluster_mapping[idx] = next_cluster_id
+        # Assign cluster IDs to non-CF functional groups
+        # non_cf_functional_groups is a List[Set[int]]
+        logger.debug(f"[_create_cluster_mapping] Full non_cf_functional_groups before loop: {non_cf_functional_groups}")
+        for i, group_atom_indices in enumerate(non_cf_functional_groups):
+            logger.debug(f"[_create_cluster_mapping] Loop iteration {i}, group_atom_indices type: {type(group_atom_indices)}, content: {group_atom_indices}")
+            logger.info(f"[_create_cluster_mapping] Processing group {i}, type: {type(group_atom_indices)}, content: {group_atom_indices}")
+            if isinstance(group_atom_indices, (set, list, tuple)):
+                # This is expected: group_atom_indices is a set of atom indices
+                current_group_cluster_id = next_cluster_id
+                for atom_idx in group_atom_indices:
+                    if isinstance(atom_idx, int): # Ensure atom_idx is an integer
+                        cluster_mapping[atom_idx] = current_group_cluster_id
                     else:
-                        cluster_mapping[atom_idx] = next_cluster_id
-            elif isinstance(group, int):
-                cluster_mapping[group] = next_cluster_id
+                        logger.warning(f"Unexpected item {atom_idx} (type {type(atom_idx)}) in functional group set {group_atom_indices}. Skipping.")
+                next_cluster_id += 1
             else:
-                raise TypeError(f"Unexpected group type: {type(group)}")
-            next_cluster_id += 1
-        
-        # Handle CF groups - they're already identified at the atom level
+                err_msg = f"Unexpected type for a functional group element: {type(group_atom_indices)}. Content: {group_atom_indices}. Expected set, list, or tuple of atom indices."
+                logger.error(err_msg)
+                raise TypeError(err_msg)
+
+        # CF groups (CF, CF2, CF3) are typically handled at the atom feature level
+        # or as individual nodes if they are not part of a larger clustered functional group.
+        # The current clustering logic aims to group multiple atoms (like COOH) into one supernode.
+        # For CFx, the carbon atom itself is the "group".
+        # If CFx groups (e.g., the C of a CF3) should also form their own distinct clusters
+        # separate from other atoms, that logic would need to be added here.
+        # However, the original code's comment "excluding CF groups" and "Handle CF groups - they're already identified at the atom level"
+        # suggests they are not clustered in this step.
+        # The cf_group_definitions (Dict[int, str]) maps C atom index to 'CF', 'CF2', 'CF3'.
+        # We are not using cf_group_definitions to create new clusters here, aligning with the idea
+        # that these are atom-level properties or single-atom "groups" for coarsening purposes.
         
         return cluster_mapping
     
@@ -321,62 +338,108 @@ class GraphCoarsener:
         )
         
         # Transfer any custom attributes from the original graph
-        for key in data.keys():
+        keys_to_iterate_fg = []
+        if hasattr(data, 'keys'):
+            if callable(data.keys): # For dict-like objects
+                keys_to_iterate_fg = list(data.keys())
+            else: # For PyG Data objects where data.keys is a list/property
+                keys_to_iterate_fg = data.keys
+        
+        for key in keys_to_iterate_fg:
             if key not in ['x', 'edge_index', 'edge_attr', 'pos', 'y', 'num_nodes']:
-                coarsened_data[key] = data[key]
+                if hasattr(data, key): # Ensure the key actually exists on data
+                    coarsened_data[key] = data[key]
         
         return coarsened_data
     
-    def create_structural_motif_graph(self, data: Data, mol: Chem.Mol) -> Data:
+    def create_structural_motif_graph(self, atom_level_data: Data, mol: Chem.Mol) -> Data:
         """
-        Create a coarsened graph at the structural motif level.
+        Create a coarsened graph at the structural motif level from an atom-level graph.
         
         Args:
-            data: Original PyTorch Geometric Data object (can be atom-level or functional group level)
-            mol: RDKit molecule
+            atom_level_data: Original atom-level PyTorch Geometric Data object.
+            mol: RDKit molecule corresponding to atom_level_data.
             
         Returns:
-            PyTorch Geometric Data object for the coarsened graph
+            PyTorch Geometric Data object for the structural motif level graph.
         """
-        # If input is atom-level, first create functional group level
-        if not hasattr(data, 'cluster_mapping'):
-            data = self.create_functional_group_graph(data, mol)
+        # 1. Create Functional Group (FG) graph from the atom-level graph.
+        # This step also computes the mapping from original atom indices to FG cluster IDs.
+        functional_group_graph = self.create_functional_group_graph(atom_level_data, mol)
         
-        # Get the cluster mapping from the functional group level
-        # Does Data have cluster_mapping attribute?
-        cluster_mapping = data.cluster_mapping
+        # This mapping is from original atom indices to the nodes (FGs) of the functional_group_graph.
+        # It's stored as 'cluster_mapping' on the functional_group_graph.
+        atom_to_fg_mapping = functional_group_graph.cluster_mapping
+        if not isinstance(atom_to_fg_mapping, dict):
+            raise TypeError(f"Internal error: atom_to_fg_mapping should be a dict, got {type(atom_to_fg_mapping)}")
+
+        # 2. Create mapping from FG cluster IDs to structural motif IDs.
+        # _create_structural_mapping uses the RDKit molecule and the atom_to_fg_mapping
+        # to determine head/tail motifs for each FG cluster.
+        # It returns a dict: {fg_cluster_id: motif_id}
+        fg_to_motif_mapping = self._create_structural_mapping(mol, atom_to_fg_mapping)
+        if not isinstance(fg_to_motif_mapping, dict):
+            raise TypeError(f"Internal error: fg_to_motif_mapping should be a dict, got {type(fg_to_motif_mapping)}")
+
+        # 3. Create a combined mapping from original atom indices directly to structural motif IDs.
+        atom_to_motif_mapping = {}
+        for atom_idx, fg_cluster_id in atom_to_fg_mapping.items():
+            motif_id = fg_to_motif_mapping.get(fg_cluster_id)
+            if motif_id is not None:
+                atom_to_motif_mapping[atom_idx] = motif_id
+            else:
+                logger.warning(
+                    f"FG cluster ID {fg_cluster_id} (derived from atom {atom_idx}) "
+                    f"was not found in fg_to_motif_mapping. This atom/group will not be mapped to a motif."
+                )
+                # Optionally, assign to a default "unmapped" motif ID or skip.
+                # For now, atoms belonging to such FG clusters won't be included in motif graph nodes
+                # if _compute_coarsened_features relies on keys present in atom_to_motif_mapping.
+                # Let's ensure _compute_coarsened_features handles this gracefully or all atoms are mapped.
+                # For now, we will map them to a special motif ID if needed, or ensure all are covered.
+                # The current _compute_coarsened_features iterates sorted(clusters.keys()),
+                # where clusters are built from the mapping. So unmapped atoms are excluded.
+
+        # 4. Compute features, edges, and positions for the structural motif graph.
+        # These computations MUST use the original atom_level_data and the atom_to_motif_mapping.
+        motif_x = self._compute_coarsened_features(atom_level_data, atom_to_motif_mapping)
+        motif_edge_index, motif_edge_attr = self._compute_coarsened_edges(atom_level_data, atom_to_motif_mapping)
+        motif_pos = self._compute_coarsened_positions(atom_level_data, atom_to_motif_mapping) if self.use_3d_coords else None
         
-        # Create mapping from functional groups to structural motifs
-        structural_mapping = self._create_structural_mapping(mol, cluster_mapping)
-        
-        # Create a combined mapping from atoms to structural motifs
-        combined_mapping = {atom_idx: structural_mapping[cluster_id] 
-                           for atom_idx, cluster_id in cluster_mapping.items()}
-        
-        # Compute features, edges, and positions for the structural motif graph
-        motif_x = self._compute_coarsened_features(data, combined_mapping)
-        motif_edge_index, motif_edge_attr = self._compute_coarsened_edges(data, combined_mapping)
-        motif_pos = self._compute_coarsened_positions(data, combined_mapping) if self.use_3d_coords else None
-        
-        # Create the structural motif graph
+        # Create the structural motif graph Data object
         motif_data = Data(
             x=motif_x,
             edge_index=motif_edge_index,
             edge_attr=motif_edge_attr,
             pos=motif_pos,
-            y=data.y,  # Keep the same global features
-            num_nodes=motif_x.shape[0],
-            # Store the mappings for reference
-            cluster_mapping=cluster_mapping,
-            structural_mapping=structural_mapping,
-            combined_mapping=combined_mapping
+            y=atom_level_data.y,  # Global features from the original atom-level graph
+            num_nodes=motif_x.shape[0] if motif_x is not None and motif_x.dim() > 0 else 0, # Handle empty motif_x
+            # Store relevant mappings for potential downstream use or debugging
+            atom_to_fg_mapping=atom_to_fg_mapping,
+            fg_to_motif_mapping=fg_to_motif_mapping,
+            atom_to_motif_mapping=atom_to_motif_mapping # This is the direct atom-to-motif map
         )
         
-        # Transfer any custom attributes from the original graph
-        for key in data.keys():
-            if key not in ['x', 'edge_index', 'edge_attr', 'pos', 'y', 'num_nodes', 
-                          'cluster_mapping', 'structural_mapping', 'combined_mapping']:
-                motif_data[key] = data[key]
+        # Transfer any other custom attributes from the original atom-level graph
+        keys_to_iterate_motif = []
+        if hasattr(atom_level_data, 'keys'):
+            if callable(atom_level_data.keys): # For dict-like objects
+                keys_to_iterate_motif = list(atom_level_data.keys())
+            else: # For PyG Data objects where data.keys is a list/property
+                keys_to_iterate_motif = atom_level_data.keys
+        
+        # Prepare an iterable for motif_data's keys as well for the 'in' check
+        motif_data_keys_iterable = []
+        if hasattr(motif_data, 'keys'):
+            if callable(motif_data.keys):
+                motif_data_keys_iterable = list(motif_data.keys())
+            else:
+                motif_data_keys_iterable = motif_data.keys
+
+        for key in keys_to_iterate_motif:
+            if key not in motif_data_keys_iterable: # Use the prepared iterable
+                if hasattr(atom_level_data, key): # Ensure the key actually exists on atom_level_data
+                    motif_data[key] = atom_level_data[key]
         
         return motif_data
     

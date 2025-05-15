@@ -1,3 +1,4 @@
+from typing import Union, List, Dict, Any, Optional
 #!python
 """
 Test script for the PFAS Pipeline Orchestrator
@@ -174,7 +175,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         logger.info("Testing preprocessing stage...")
         
         # Run preprocessing
-        df = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True)
+        df = self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=True)
         
         # Verify results
         self.assertIsNotNone(df)
@@ -210,7 +211,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         
         # Run preprocessing again without force_rerun
         start_time = time.time()
-        df = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=False) # Updated method name
+        df = self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=False) # Updated method name
         end_time = time.time()
         
         # Verify results
@@ -222,7 +223,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         
         # Force rerun and verify it takes longer
         start_time = time.time()
-        df = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True) # Updated method name
+        df = self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=True) # Updated method name
         end_time = time.time()
         
         # This should take longer as it's not using the cache, but be reasonable with timing threshold
@@ -242,10 +243,10 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         if not os.path.exists(processed_csv_path) and self.orchestrator.cache.get("processed_dataframe") is None:
              # Run preprocessing if not done, to ensure the input for QM stage is present
             logger.info("Preprocessing data for ORCA test setup as processed file not found.")
-            self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True) # Use True if state is unknown
+            self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=True) # Use True if state is unknown
 
         # Now, the processed_csv_path should exist or its data be in cache
-        orca_results = self.orchestrator.run_qm_stage(input_processed_csv_path=processed_csv_path)
+        orca_results = self.orchestrator.run_orca_calculations(input_file=processed_csv_path) # Use input_file
         
         # Should return empty DataFrame when skipped
         self.assertIsInstance(orca_results, pd.DataFrame)
@@ -263,7 +264,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         self.orchestrator.config["execution"]["skip_graph_generation"] = True
         
         # Run full pipeline
-        results = self.orchestrator.execute_pipeline(input_csv_path=self.test_dataset, force_rerun=True)
+        results = self.orchestrator.execute_pipeline(input_file=self.test_dataset, force_rerun=True)
         
         # Verify results
         self.assertIsNotNone(results)
@@ -286,7 +287,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         processed_csv_path = os.path.join(self.orchestrator.dirs["processed_data"], "molecules_processed.csv")
 
         # Run preprocessing first with force_rerun to establish a baseline and save state
-        self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True)
+        self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=True)
         self.assertTrue(os.path.exists(processed_csv_path))
         timestamp_run1 = os.path.getmtime(processed_csv_path)
         state_run1 = self.orchestrator.state.copy()
@@ -306,7 +307,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         
         # Run preprocessing again, force_rerun is False (default for run_preprocessing_stage if not specified)
         # The orchestrator should see that preprocessing is complete from its loaded state.
-        df_run2 = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=False)
+        df_run2 = self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=False)
         
         self.assertTrue(os.path.exists(processed_csv_path))
         timestamp_run2 = os.path.getmtime(processed_csv_path)

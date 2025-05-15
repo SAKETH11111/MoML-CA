@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Union
 import torch
+from sklearn.utils.multiclass import type_of_target
 from sklearn.metrics import (
     mean_squared_error,
     mean_absolute_error,
@@ -111,110 +112,227 @@ def calculate_classification_metrics(
     threshold: float = 0.5
 ) -> Dict[str, float]:
     """
-    Calculate classification metrics.
-    
-    Args:
-        true_values: Ground truth values
-        pred_values: Predicted values (probabilities for binary classification)
-        threshold: Threshold for binary classification
-        
-    Returns:
-        Dictionary with classification metrics
-    """
-    # Handle binary classification case
-    if len(true_values.shape) == 1 or true_values.shape[1] == 1:
-        # Convert probability predictions to binary using threshold
-        if pred_values.max() <= 1.0 and pred_values.min() >= 0.0:
-            # Predictions are probabilities
-            binary_preds = (pred_values > threshold).astype(int)
-            
-            # Calculate metrics
-            accuracy = accuracy_score(true_values, binary_preds)
-            precision = precision_score(true_values, binary_preds, zero_division=0)
-            recall = recall_score(true_values, binary_preds, zero_division=0)
-            f1 = f1_score(true_values, binary_preds, zero_division=0)
-            
-            # ROC AUC is calculated on probabilities
-            try:
-                auc = roc_auc_score(true_values, pred_values)
-            except Exception:
-                auc = 0.5  # Default value when ROC AUC calculation fails
-            
-            return {
-                'accuracy': accuracy,
-                'precision': precision,
-                'recall': recall,
-                'f1': f1,
-                'auc': auc
-            }
-        else:
-            # Predictions are already binary
-            accuracy = accuracy_score(true_values, pred_values)
-            # Check if true_values (and pred_values) are actually multiclass despite being 1D
-            unique_labels_true = np.unique(true_values)
-            
-            # If more than 2 unique labels, or labels are not exclusively {0,1}
-            # (e.g., contains 2 but not 0 or 1, or contains 0,1,2)
-            is_multiclass_1d = len(unique_labels_true) > 2 or \
-                               not np.all(np.isin(unique_labels_true, [0, 1]))
+    Calculate classification metrics. Handles binary and multiclass tasks.
 
-            if is_multiclass_1d:
-                # This is actually multiclass, use macro averaging
-                precision = precision_score(true_values, pred_values, average='macro', zero_division=0)
-                recall = recall_score(true_values, pred_values, average='macro', zero_division=0)
-                f1 = f1_score(true_values, pred_values, average='macro', zero_division=0)
-            else:
-                # This is truly binary with 0/1 labels
-                precision = precision_score(true_values, pred_values, zero_division=0)
-                recall = recall_score(true_values, pred_values, zero_division=0)
-                f1 = f1_score(true_values, pred_values, zero_division=0)
-            
-            metrics_dict = {
-                'accuracy': accuracy,
-                'precision': precision,
-                'recall': recall,
-                'f1': f1
-            }
-            # AUC can be calculated if both true and pred are binary 0/1 labels
-            # and true_values are not all one class (roc_auc_score handles this)
-            if not is_multiclass_1d and len(unique_labels_true) > 1 and \
-               np.all(np.isin(np.unique(pred_values), [0,1])):
-                try:
-                    # For roc_auc_score, pred_values should be scores/probabilities if available.
-                    # Here, pred_values are labels. It will still compute, but might not be ideal.
-                    # The original code path for probabilities (lines 137-141) is preferred for AUC.
-                    # This path (pred_values are already binary) implies we don't have original probas.
-                    auc = roc_auc_score(true_values, pred_values)
-                    metrics_dict['auc'] = auc
-                except ValueError: # e.g. if only one class in true_values
-                    metrics_dict['auc'] = 0.5
-            
-            return metrics_dict
-    
-    # Handle multi-class classification
-    else:
-        # Convert to class indices if predictions are probabilities
-        if pred_values.shape == true_values.shape:
-            pred_classes = np.argmax(pred_values, axis=1)
-            true_classes = np.argmax(true_values, axis=1)
+    Args:
+        true_values: Ground truth values. Expected as 1D array of class labels
+                     (e.g., [0, 1, 0] for binary; [0, 1, 2, 1] for multiclass)
+                     or 2D one-hot encoded array for multiclass.
+        pred_values: Predicted values.
+                     For binary: 1D array of probabilities or direct labels.
+                     For multiclass: 2D array of probabilities per class (n_samples, n_classes)
+                                     or 1D array of direct class labels.
+        threshold: Threshold for converting probabilities to binary labels.
+
+    Returns:
+        Dictionary with classification metrics.
+    """
+    metrics: Dict[str, float] = {}
+
+    # Validate inputs for common issues before proceeding
+    if true_values.size == 0 or pred_values.size == 0:
+        raise ValueError("Input arrays true_values and pred_values must not be empty.")
+    if np.isnan(true_values).any() or np.isinf(true_values).any():
+        raise ValueError("true_values contains NaN or Inf values.")
+    if np.isnan(pred_values).any() or np.isinf(pred_values).any():
+        raise ValueError("pred_values contains NaN or Inf values.")
+
+    # 1. Standardize true_values to 1D class labels (_true_labels_1d)
+    _true_labels_1d: np.ndarray
+    if true_values.ndim == 2:
+        if true_values.shape[1] == 1:  # e.g., [[0], [1]]
+            _true_labels_1d = true_values.flatten().astype(int)
+        else:  # Assume one-hot encoded, e.g., [[1,0,0], [0,1,0]]
+            _true_labels_1d = np.argmax(true_values, axis=1)
+    else:  # Already 1D
+        _true_labels_1d = true_values.astype(int)
+
+    # 2. Determine target type and appropriate averaging method based on number of unique true classes
+    _unique_true_classes = np.unique(_true_labels_1d)
+    _num_true_classes = len(_unique_true_classes)
+    _target_type: str  # To be explicitly set
+    _sklearn_avg_method: str
+
+    if _num_true_classes > 2:
+        _target_type = 'multiclass'
+        _sklearn_avg_method = 'macro'
+    elif _num_true_classes == 2:
+        _target_type = 'binary'
+        _sklearn_avg_method = 'binary'
+    elif _num_true_classes <= 1:
+        # Handle single class case (metrics are defaulted)
+        # This logic is to get some accuracy value if possible, other metrics are ill-defined.
+        _pred_labels_1d_for_accuracy_only: np.ndarray
+        if pred_values.ndim == 1: # Check if pred_values are probabilities or labels
+            is_proba_heuristic_single_class = np.issubdtype(pred_values.dtype, np.floating) and \
+                                              not np.all(np.isin(np.unique(pred_values), [0, 1]))
+            _pred_labels_1d_for_accuracy_only = (pred_values > threshold).astype(int) if is_proba_heuristic_single_class else pred_values.astype(int)
+        elif pred_values.ndim == 2 and pred_values.shape[1] == 1: # (N,1) shape
+            flat_preds_single_class = pred_values.flatten()
+            is_proba_heuristic_single_class = np.issubdtype(flat_preds_single_class.dtype, np.floating) and \
+                                              not np.all(np.isin(np.unique(flat_preds_single_class), [0, 1]))
+            _pred_labels_1d_for_accuracy_only = (flat_preds_single_class > threshold).astype(int) if is_proba_heuristic_single_class else flat_preds_single_class.astype(int)
+        elif pred_values.ndim == 2: # Assumed (N, C) probabilities for multiclass, take argmax
+            _pred_labels_1d_for_accuracy_only = np.argmax(pred_values, axis=1)
+        else: # Fallback for unexpected shapes
+            _pred_labels_1d_for_accuracy_only = pred_values.astype(int).flatten()
+
+        if _pred_labels_1d_for_accuracy_only.shape == _true_labels_1d.shape:
+             metrics['accuracy'] = accuracy_score(_true_labels_1d, _pred_labels_1d_for_accuracy_only)
         else:
-            pred_classes = pred_values
-            true_classes = true_values
+             metrics['accuracy'] = 0.0 # Shape mismatch, cannot compute accuracy
+        # For single class in true labels, other metrics are typically 0 or undefined.
+        # AUC is conventionally 0.5 if only one class present. If zero classes (empty true_labels), then 0.0.
+        metrics.update({'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'auc': 0.5 if _num_true_classes == 1 else 0.0})
+        return metrics
+    else: # Should ideally not be reached if _num_true_classes is always non-negative.
+          # This case implies _num_true_classes is 0, which should have been caught by the empty array check earlier.
+        raise ValueError(f"Internal logic error: Unexpected number of true classes: {_num_true_classes}")
+
+    # 3. Determine predicted class labels (_pred_labels_1d)
+    #    and identify if binary probabilities were provided for AUC.
+    _pred_labels_1d: np.ndarray
+    _binary_probas_for_auc: Optional[np.ndarray] = None
+    _multiclass_probas_for_auc: Optional[np.ndarray] = None
+
+
+    if _target_type == 'binary':
+        if pred_values.ndim == 1:
+            is_proba_heuristic = np.issubdtype(pred_values.dtype, np.floating) and \
+                                 not np.all(np.isin(np.unique(pred_values), [0, 1]))
+            if is_proba_heuristic and np.all(pred_values >= 0) and np.all(pred_values <= 1):
+                _pred_labels_1d = (pred_values > threshold).astype(int)
+                _binary_probas_for_auc = pred_values
+            else:
+                _pred_labels_1d = pred_values.astype(int)
+        elif pred_values.ndim == 2 and pred_values.shape[1] == 1: # (N,1)
+            flat_preds = pred_values.flatten()
+            is_proba_heuristic = np.issubdtype(flat_preds.dtype, np.floating) and \
+                                 not np.all(np.isin(np.unique(flat_preds), [0, 1]))
+            if is_proba_heuristic and np.all(flat_preds >= 0) and np.all(flat_preds <= 1):
+                _pred_labels_1d = (flat_preds > threshold).astype(int)
+                _binary_probas_for_auc = flat_preds
+            else:
+                _pred_labels_1d = flat_preds.astype(int)
+        elif pred_values.ndim == 2 and pred_values.shape[1] == 2: # (N,2) probabilities
+            _pred_labels_1d = np.argmax(pred_values, axis=1)
+            # Determine positive class index for AUC. Assume class '1' is positive if present.
+            positive_class_idx = 1
+            if _num_true_classes == 2: # Ensure we have two unique classes
+                 sorted_unique_classes = np.sort(_unique_true_classes)
+                 # If labels are not 0 and 1, map to 0 and 1 for roc_auc_score or pick one as positive
+                 # For simplicity, if 1 is present, use its probas. Otherwise, use probas of the larger label.
+                 if 1 in sorted_unique_classes:
+                     # Find which column in pred_values corresponds to class 1
+                     # This assumes pred_values columns are ordered like sorted unique classes,
+                     # or that the second column is for the positive class if labels are 0,1.
+                     # A common convention is [prob_class_0, prob_class_1].
+                     _binary_probas_for_auc = pred_values[:, 1] # Default to second column for class 1
+                 else: # e.g. classes are -1, 1 or other pairs. Use prob of the class considered positive.
+                       # This part might need more robust handling if classes are not {0,1}
+                       # For now, if not {0,1}, AUC might be tricky without knowing positive label.
+                       # Defaulting to prob of the second class if not 0,1.
+                     _binary_probas_for_auc = pred_values[:, 1]
+
+
+        else: # Assumed to be direct binary labels if shape is unexpected for probabilities
+            _pred_labels_1d = pred_values.astype(int).flatten()
+    
+    elif _target_type == 'multiclass':
+        if pred_values.ndim == 2 and pred_values.shape[1] == _num_true_classes: # Probas (N, C)
+            _pred_labels_1d = np.argmax(pred_values, axis=1)
+            _multiclass_probas_for_auc = pred_values
+        elif pred_values.ndim == 1: # Direct class labels (N,)
+            _pred_labels_1d = pred_values.astype(int)
+        else:
+            raise ValueError(
+                f"Unsupported pred_values shape {pred_values.shape} for multiclass target "
+                f"with {_num_true_classes} classes."
+            )
+    else: # Should be caught by the initial _target_type check
+        _pred_labels_1d = pred_values.astype(int).flatten() # Fallback
+
+    # Ensure _pred_labels_1d is 1D
+    if _pred_labels_1d.ndim > 1 and _pred_labels_1d.shape[1] == 1:
+        _pred_labels_1d = _pred_labels_1d.flatten()
+    
+    if _true_labels_1d.shape != _pred_labels_1d.shape:
+        raise ValueError(
+            f"Shape mismatch after processing: "
+            f"true_labels_1d shape {_true_labels_1d.shape} != "
+            f"pred_labels_1d shape {_pred_labels_1d.shape}"
+        )
+
+    # 4. Calculate metrics
+    y_true_sklearn_type = type_of_target(_true_labels_1d) # 'binary', 'multiclass', etc.
+    
+    # Determine the effective average method for precision, recall, f1
+    if y_true_sklearn_type == 'binary':
+        effective_average_for_scores = 'binary'
+    elif y_true_sklearn_type == 'multiclass':
+        # For multiclass, 'macro' computes the metric independently for each class and then takes the average.
+        # 'weighted' accounts for class imbalance. 'macro' is a common default.
+        effective_average_for_scores = 'macro'
+    else:
+        # This case should ideally not be reached if inputs are validated classification labels
+        # and the single-class case (len(unique_labels) <= 1) is handled earlier.
+        logger.warning(
+            f"Unexpected y_true_sklearn_type '{y_true_sklearn_type}' encountered. "
+            f"Defaulting 'average' parameter for scores to 'macro'. "
+            f"True labels: {np.unique(_true_labels_1d)}"
+        )
+        effective_average_for_scores = 'macro'
         
-        # Calculate metrics
-        accuracy = accuracy_score(true_classes, pred_classes)
+    metrics['accuracy'] = accuracy_score(_true_labels_1d, _pred_labels_1d)
+    metrics['precision'] = precision_score(
+        _true_labels_1d, _pred_labels_1d, average=effective_average_for_scores, zero_division=0
+    )
+    metrics['recall'] = recall_score(
+        _true_labels_1d, _pred_labels_1d, average=effective_average_for_scores, zero_division=0
+    )
+    metrics['f1'] = f1_score(
+        _true_labels_1d, _pred_labels_1d, average=effective_average_for_scores, zero_division=0
+    )
+
+    # 5. AUC Calculation
+    if _target_type == 'binary' and _binary_probas_for_auc is not None:
+        # Ensure _binary_probas_for_auc is 1D
+        if _binary_probas_for_auc.ndim > 1:
+            if _binary_probas_for_auc.shape[1] == 1:
+                _binary_probas_for_auc = _binary_probas_for_auc.flatten()
+            else: # Should not happen if logic above is correct for binary probas
+                _binary_probas_for_auc = None
         
-        # Multi-class metrics with macro averaging
-        precision = precision_score(true_classes, pred_classes, average='macro', zero_division=0)
-        recall = recall_score(true_classes, pred_classes, average='macro', zero_division=0)
-        f1 = f1_score(true_classes, pred_classes, average='macro', zero_division=0)
-        
-        return {
-            'accuracy': accuracy,
-            'precision': precision,
-            'recall': recall,
-            'f1': f1
-        }
+        if _binary_probas_for_auc is not None and _binary_probas_for_auc.shape == _true_labels_1d.shape:
+            if len(np.unique(_true_labels_1d)) < 2:
+                metrics['auc'] = 0.5
+            else:
+                try:
+                    auc_val = roc_auc_score(_true_labels_1d, _binary_probas_for_auc)
+                    metrics['auc'] = 0.5 if np.isnan(auc_val) else auc_val
+                except ValueError:  # Catches "Only one class present in y_true" or other issues
+                    metrics['auc'] = 0.5
+                except Exception: # General catch
+                    metrics['auc'] = 0.5
+        # else: Cannot calculate AUC if suitable probabilities are not found or shape mismatch
+
+    elif _target_type == 'multiclass' and _multiclass_probas_for_auc is not None:
+        if _num_true_classes > 1 and _multiclass_probas_for_auc.shape == (_true_labels_1d.shape[0], _num_true_classes):
+            try:
+                auc_val = roc_auc_score(
+                    _true_labels_1d,
+                    _multiclass_probas_for_auc,
+                    multi_class='ovr', # or 'ovo'
+                    average=_sklearn_avg_method if _sklearn_avg_method != 'binary' else 'macro' # Ensure valid average for roc_auc
+                )
+                metrics[f'auc_{_sklearn_avg_method}_ovr'] = 0.5 if np.isnan(auc_val) else auc_val
+            except ValueError: # e.g. "Only one class present in y_true"
+                metrics[f'auc_{_sklearn_avg_method}_ovr'] = 0.5
+            except Exception:
+                metrics[f'auc_{_sklearn_avg_method}_ovr'] = 0.5
+        # else: Cannot calculate multiclass AUC
+
+    return metrics
 
 
 def calculate_node_level_metrics(
