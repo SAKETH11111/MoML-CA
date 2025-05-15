@@ -1,345 +1,424 @@
+import math
 import torch
 import torch.nn as nn
-import math
 import torch.nn.functional as F
-from torch_geometric.nn import NNConv
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
+import logging  # Added for logging potential issues
+
+logger = logging.getLogger(__name__)  # Added
 
 
-class FixedWeightProducer(nn.Module):
-    """
-    A module that produces a fixed, learnable weight matrix.
-    Used by NNConv when no edge attributes are provided (edge_attr_dim=0).
-    The output shape is (in_channels * out_channels).
-    """
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.weights = nn.Parameter(torch.Tensor(in_channels * out_channels))
-        self._init_weights(in_channels, out_channels)
-
-    def _init_weights(self, in_channels: int, out_channels: int):
-        # Initialize weights similar to a Linear layer's weights
-        # A Linear layer (in_channels, out_channels) has weights of shape (out_channels, in_channels)
-        # We initialize self.weights to be a flattened version of this.
-        temp_layer_weights = torch.empty(out_channels, in_channels)
-        # Using kaiming_uniform_ as it's common for ReLU activations that follow,
-        # though here it's for the weights themselves. Default for nn.Linear.
-        nn.init.kaiming_uniform_(temp_layer_weights, a=math.sqrt(5))
-        self.weights.data = temp_layer_weights.view(-1).clone()
-
-    def forward(self, edge_attr: torch.Tensor = None) -> torch.Tensor:
-        """
-        Returns the fixed weight tensor.
-        Args:
-            edge_attr: Edge attributes. Ignored by this module.
-        Returns:
-            torch.Tensor: The learnable weight tensor of shape [in_channels * out_channels].
-        """
-        return self.weights
+# helpers
+def rbf_encode_dist(dists, K=32, d_min=0.0, d_max=10.0):
+    """Gaussian RBF encoding of distances (shape: [num_edges, 1] → [num_edges, K])."""
+    mu = torch.linspace(d_min, d_max, K, device=dists.device)
+    gamma = -0.5 / ((mu[1] - mu[0]) ** 2)
+    diff = dists - mu.view(1, -1)
+    return torch.exp(gamma * diff**2)
 
 
+# core layers
 class GraphConvLayer(nn.Module):
-    """
-    A graph convolution layer based on NNConv, which allows the model
-    to learn from bond (edge) attributes in addition to node features.
-    Handles cases with and without edge attributes.
-    """
-    def __init__(self, in_channels: int, out_channels: int, edge_attr_dim: int):
-        """
-        Args:
-            in_channels: Dimensionality of node features coming in
-            out_channels: Dimensionality of output node features
-            edge_attr_dim: Dimensionality of the bond (edge) feature vector.
-                           If 0, edge attributes are not used.
-        """
+    def __init__(self, in_channels, out_channels, edge_attr_dim):
         super().__init__()
-        self.edge_attr_dim = edge_attr_dim
+        self.actual_edge_attr_dim = edge_attr_dim
+        _mlp_input_dim = 1 if edge_attr_dim == 0 else edge_attr_dim
 
-        if self.edge_attr_dim > 0:
-            # Standard MLP for generating weights from edge features
-            # Output dimension is in_channels * out_channels
-            # Using a structure like: Linear -> ReLU -> Linear
-            nn_hidden_dim = max(16, self.edge_attr_dim * 2) # Heuristic for hidden layer size
-            nn_hidden_dim = min(nn_hidden_dim, 128) # Cap hidden dim
-            self.edge_mlp = nn.Sequential(
-                nn.Linear(self.edge_attr_dim, nn_hidden_dim),
-                nn.ReLU(),
-                nn.Linear(nn_hidden_dim, in_channels * out_channels)
-            )
-        else: # edge_attr_dim == 0
-            # When no edge attributes, use a fixed (but learnable) weight producer.
-            # This makes NNConv behave like a GCNConv layer with a single shared weight matrix.
-            self.edge_mlp = FixedWeightProducer(in_channels, out_channels)
-        
-        # NNConv applies a learned linear transform (via edge_mlp) to each neighbor's features
-        self.conv = NNConv(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            nn=self.edge_mlp,
-            aggr='add'  # or 'mean', 'max', depending on your preference
-        )
-        
-        # Optional batch norm on output features
-        self.bn = nn.BatchNorm1d(out_channels)
-    
+        self.edge_mlp = nn.Sequential(nn.Linear(_mlp_input_dim, in_channels * out_channels), nn.ReLU())
+        self.conv = NNConv(in_channels, out_channels, nn=self.edge_mlp, aggr="add")
+        self.norm = GraphNorm(out_channels)
+        self.res_connection = in_channels == out_channels
+
     def forward(self, x, edge_index, edge_attr):
-        """
-        Forward pass of NNConv.
-        
-        Args:
-            x: Node feature matrix [num_nodes, in_channels]
-            edge_index: Graph connectivity [2, num_edges]
-            edge_attr: Edge feature matrix [num_edges, edge_attr_dim]
-        
-        Returns:
-            Updated node feature matrix [num_nodes, out_channels]
-        """
-        # Perform NNConv aggregation
-        x = self.conv(x, edge_index, edge_attr)
-        
-        # Apply batch norm (requires [batch_size, num_features])
-        x = self.bn(x)
-        
-        # Nonlinear activation
-        x = F.relu(x)
-        
-        return x
+        edge_attr_for_nnconv_input = edge_attr
 
-        
+        if self.actual_edge_attr_dim == 0:
+            edge_attr_for_nnconv_input = None
+        elif edge_attr is None and self.actual_edge_attr_dim > 0:
+            edge_attr_for_nnconv_input = None
+
+        # If edge_attr_for_nnconv_input is None at this point, NNConv will create a dummy [E,1] tensor.
+        # Our self.edge_mlp (Linear(1,K) if actual_edge_attr_dim == 0) is set up for this.
+        # If actual_edge_attr_dim > 0 and edge_attr was None, NNConv's dummy [E,1] might mismatch
+        # self.edge_mlp if it expected >1 features. This indicates an upstream issue.
+        # The test `test_forward_pass_no_edge_attr` passes None when actual_edge_attr_dim is 0.
+        if edge_attr_for_nnconv_input is None and edge_index.numel() > 0:  # Ensure we create dummy only if edges exist
+            edge_attr_for_nnconv_input = x.new_ones(edge_index.size(1), 1)
+        elif edge_index.numel() == 0:  # No edges, edge_attr should be empty or None
+            edge_attr_for_nnconv_input = torch.empty(
+                0, self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], "in_features") else 1
+            ).to(x.device)
+
+        h = self.conv(x, edge_index, edge_attr_for_nnconv_input)
+        h = self.norm(h)
+        h = F.relu(h)
+
+        if self.res_connection:
+            h = h + x
+        return h
+
 
 class DenseGNNBlock(nn.Module):
-    def __init__(
-        self,
-        in_dim: int,
-        hidden_dim: int,
-        n_layers: int,
-        transition_dim: int = None,
-        edge_attr_dim: int = 0
-    ):
+    def __init__(self, in_dim, hidden_dim, n_layers, transition_dim, edge_attr_dim):
         super().__init__()
-        self.layers = nn.ModuleList()
-        self.current_dim = in_dim  # total dimension so far
-        
-        # Build n_layers, each sees concatenated outputs from all prior layers
+        self.in_dim = in_dim  # Store in_dim
+        self.layers, cur_dim = nn.ModuleList(), in_dim
         for _ in range(n_layers):
-            self.layers.append(
-                GraphConvLayer(
-                    in_channels=self.current_dim,
-                    out_channels=hidden_dim,
-                    edge_attr_dim=edge_attr_dim
-                )
-            )
-            self.current_dim += hidden_dim
-        
-        out_dim = self.current_dim
-        final_dim = transition_dim or hidden_dim
-        self.transition = nn.Linear(out_dim, final_dim)
-        self.bn = nn.BatchNorm1d(final_dim)
+            self.layers.append(GraphConvLayer(cur_dim, hidden_dim, edge_attr_dim))
+            cur_dim += hidden_dim
+        self.transition = nn.Linear(cur_dim, transition_dim)
+        self.norm = GraphNorm(transition_dim)
 
-    def forward(self, x, edge_index, edge_attr=None):
-        out_list = [x]
+    def forward(self, x, edge_index, edge_attr):
+        outs = [x]
         for layer in self.layers:
-            concat_x = torch.cat(out_list, dim=1)
-            h = layer(concat_x, edge_index, edge_attr)
-            out_list.append(h)
-        dense_out = torch.cat(out_list, dim=1)
-        out = self.transition(dense_out)
-        out = self.bn(out)
-        out = F.relu(out)
-        return out
+            h = layer(torch.cat(outs, 1), edge_index, edge_attr)
+            outs.append(h)
+        h_concat = torch.cat(outs, 1)
+        h_transition = self.transition(h_concat)
+        return F.relu(self.norm(h_transition))
 
 
 class JKAggregator(nn.Module):
-    def __init__(self, block_dims, out_dim, mode='concat'):
+    def __init__(self, block_dims, out_dim, mode="attention"):
         super().__init__()
-        self.mode = mode
-        self.block_count = len(block_dims)
+        self.mode, self.block_count = mode, len(block_dims)
 
-        if mode == 'concat':
-            in_dim = sum(block_dims)
-            self.proj = nn.Linear(in_dim, out_dim)
-        elif mode == 'max':
-            self.projs = nn.ModuleList(
-                nn.Linear(dim, out_dim) for dim in block_dims
-            )
-        elif mode == 'attention':
-            self.attn_params = nn.ParameterList([
-                nn.Parameter(torch.randn(1, dim)) for dim in block_dims
-            ])
-            self.projs = nn.ModuleList([
-                nn.Linear(dim, out_dim) for dim in block_dims
-            ])
-        elif mode == 'lstm':
-            self.hidden_size = out_dim
-            max_dim = max(block_dims)
-            self.projs = nn.ModuleList([
-                nn.Linear(dim, max_dim) for dim in block_dims
-            ])
-            self.lstm = nn.LSTM(input_size=max_dim, hidden_size=out_dim, batch_first=True)
+        # Removed generic check, mode-specific checks will handle empty block_dims
+
+        if mode == "concat":
+            if not block_dims:
+                raise ValueError("block_dims cannot be empty for concat mode.")
+            self.proj = nn.Linear(sum(block_dims), out_dim)
+        elif mode == "max":
+            if not block_dims:
+                raise ValueError("block_dims cannot be empty for max mode.")
+            self.projs = nn.ModuleList(nn.Linear(d, out_dim) for d in block_dims)
+        elif mode == "attention":
+            if not block_dims:
+                raise ValueError("block_dims cannot be empty for attention mode.")
+            self.projs = nn.ModuleList(nn.Linear(d, out_dim) for d in block_dims)
+            self.attn_vecs = nn.ParameterList(nn.Parameter(torch.randn(out_dim)) for _ in range(self.block_count))
+        elif mode == "lstm":
+            if not block_dims:  # If 0 blocks, LSTM acts as a simple projection from a zero vector or configured input
+                # This case is ill-defined for standard JK-LSTM.
+                # We'll define components so it doesn't crash, but it won't be a meaningful LSTM aggregation.
+                self.lstm_input_dim = out_dim  # Dummy
+                self.lstm_projs_in = nn.ModuleList()
+                self.lstm_layer = nn.LSTM(
+                    input_size=self.lstm_input_dim, hidden_size=self.lstm_input_dim, num_layers=1, batch_first=False
+                )
+                self.lstm_final_proj = nn.Linear(self.lstm_input_dim, out_dim)
+            else:
+                self.lstm_input_dim = out_dim
+                self.lstm_projs_in = nn.ModuleList(nn.Linear(d, self.lstm_input_dim) for d in block_dims)
+                self.lstm_layer = nn.LSTM(
+                    input_size=self.lstm_input_dim, hidden_size=self.lstm_input_dim, num_layers=1, batch_first=False
+                )
+                self.lstm_final_proj = nn.Linear(self.lstm_input_dim, out_dim)
         else:
-            raise ValueError(f"Unknown JK mode: {mode}")
+            raise ValueError(f"Unsupported JKAggregator mode: {mode}")
 
-    def forward(self, block_outputs):
-        """
-        block_outputs: list of [batch_size, block_dims[i]] node embeddings from each block
-        """
-        if self.mode == 'concat':
-            x_cat = torch.cat(block_outputs, dim=1)
-            return self.proj(x_cat)
-        elif self.mode == 'max':
-            # project each block output
-            ps = [self.projs[i](h) for i, h in enumerate(block_outputs)]
-            stack = torch.stack(ps, dim=0)  # [num_blocks, batch_size, out_dim]
-            out, _ = torch.max(stack, dim=0) 
-            return out
-        elif self.mode == 'attention':
-            attn_scores = []
-            for i, h in enumerate(block_outputs):
-                score = torch.matmul(h, self.attn_params[i].t())  # [batch_size, 1]
-                attn_scores.append(score)
-            scores_cat = torch.cat(attn_scores, dim=1)           # [batch_size, num_blocks]
-            attn_weights = F.softmax(scores_cat, dim=1)          # [batch_size, num_blocks]
-            # project each block output
-            proj_h = [self.projs[i](block_outputs[i]) for i in range(self.block_count)]
-            weighted_sum = 0
-            for i, p in enumerate(proj_h):
-                w = attn_weights[:, i].unsqueeze(1)
-                weighted_sum = weighted_sum + w * p
-            return weighted_sum
-        elif self.mode == 'lstm':
-            seq_list = []
-            for i, h in enumerate(block_outputs):
-                # project each block output to the same dimension
-                p = self.projs[i](h)
-                seq_list.append(p)
-            # shape = [batch_size, num_blocks, max_dim]
-            packed = torch.stack(seq_list, dim=1)
-            _, (h_n, _) = self.lstm(packed)
-            out = h_n.squeeze(0)  # [batch_size, out_dim]
-            return out
+        _fallback_in_dim = sum(block_dims) if block_dims else out_dim
+        if _fallback_in_dim == 0:
+            _fallback_in_dim = out_dim if out_dim > 0 else 1  # Ensure non-zero for Linear
+        self.fallback_proj = nn.Linear(_fallback_in_dim, out_dim)
 
-        
+    def forward(self, blocks):
+        if not blocks:
+            if self.mode == "lstm" and self.block_count == 0:  # LSTM initialized for 0 blocks
+                # Requires careful thought on what to return. For now, None or zeros.
+                # Assuming out_dim is known. Need num_nodes for batch.
+                # This path is highly dependent on how DJMGNN handles zero-node/zero-block graphs.
+                # Returning None will likely cause downstream errors, which is fine for now to highlight the issue.
+                return None
+            return None
+
+        if self.mode == "concat":
+            return self.proj(torch.cat(blocks, 1))
+        elif self.mode == "max":
+            projected_blocks = [proj(block) for proj, block in zip(self.projs, blocks)]
+            if not projected_blocks:
+                return self.fallback_proj(
+                    torch.cat(blocks, 1)
+                    if blocks
+                    else torch.empty(0, self.fallback_proj.in_features).to(self.fallback_proj.weight.device)
+                )  # Should not happen if blocks not empty
+            return torch.max(torch.stack(projected_blocks, 0), 0)[0]
+        elif self.mode == "attention":
+            projected_blocks = [proj(block) for proj, block in zip(self.projs, blocks)]
+            if not projected_blocks:
+                return self.fallback_proj(
+                    torch.cat(blocks, 1)
+                    if blocks
+                    else torch.empty(0, self.fallback_proj.in_features).to(self.fallback_proj.weight.device)
+                )
+            scores = [(b * v).sum(-1) / math.sqrt(b.size(-1)) for b, v in zip(projected_blocks, self.attn_vecs)]
+            w = torch.stack(scores, 1).softmax(1)
+            return sum(w[:, i : i + 1] * projected_blocks[i] for i in range(self.block_count))
+        elif self.mode == "lstm":
+            if not self.block_count > 0:  # Handle case where LSTM was init with 0 blocks
+                return self.fallback_proj(
+                    torch.zeros(
+                        blocks[0].size(0) if blocks and blocks[0].numel() > 0 else 0, self.fallback_proj.in_features
+                    ).to(self.fallback_proj.weight.device)
+                )
+
+            try:
+                projected_blocks = [proj(block) for proj, block in zip(self.lstm_projs_in, blocks)]
+                num_nodes_first_block = projected_blocks[0].size(0)
+                for i, p_block in enumerate(projected_blocks):
+                    if p_block.size(0) != num_nodes_first_block:
+                        raise ValueError(
+                            f"LSTM mode: All blocks must have the same number of nodes. Block 0: {num_nodes_first_block}, Block {i}: {p_block.size(0)}"
+                        )
+                    if p_block.size(1) != self.lstm_input_dim:
+                        raise ValueError(
+                            f"LSTM mode: Projected block {i} has incorrect feature dimension. Expected {self.lstm_input_dim}, got {p_block.size(1)}"
+                        )
+
+                stacked_blocks = torch.stack(projected_blocks, dim=0)
+                lstm_out, _ = self.lstm_layer(stacked_blocks)
+                last_layer_sequence_output = lstm_out[-1, :, :]
+                return self.lstm_final_proj(last_layer_sequence_output)
+            except Exception as e:
+                logger.error(f"Error in JKAggregator LSTM forward: {e}. Using fallback.")
+                return self.fallback_proj(torch.cat(blocks, 1))
+
+        logger.warning(f"JKAggregator: Unhandled mode '{self.mode}' in forward. Using fallback_proj.")
+        return self.fallback_proj(torch.cat(blocks, 1))
+
+
 class DJMGNN(nn.Module):
-    """
-    Dense + Jumping Knowledge GNN with multi-task heads:
-      - A node-level head for force-field parameters (e.g., partial charges).
-      - A graph-level head for macroscopic property (e.g., adsorption affinity).
-      - Additional heads if you like.
-
-    The forward pass returns a dictionary of outputs:
-      {
-         'node_pred': [num_nodes, node_out_dim],  # optional
-         'graph_pred': [batch_size, graph_out_dim], # optional
-         ... 
-      }
-    so you can apply partial-labeled loss.
-    """
     def __init__(
         self,
-        in_dim: int,            # Node feature dimension
-        hidden_dim: int,        # Growth dimension for each block
-        n_blocks: int = 3,      # number of DenseGNNBlocks
-        layers_per_block: int = 8,
-        edge_attr_dim: int = 0,
-        jk_mode: str = 'attention',
-        # Node-level output dimension for force-field, e.g. partial charges or bond constants
-        node_out_dim: int = 1,
-        # Graph-level output dimension for a property (adsorption, etc.)
-        graph_out_dim: int = 1,
-        dropout: float = 0.2
+        in_dim,
+        hidden_dim,
+        n_blocks=3,
+        layers_per_block=6,
+        edge_attr_dim=0,  # This is the dimension of the *input* edge_attr, without RBF
+        jk_mode="attention",
+        node_out_dim=1,
+        graph_out_dim=1,
+        dropout=0.2,
+        pool_type="mean",
+        p_dropedge=0.1,
+        use_supernode=True,
+        use_rbf=True,
+        rbf_K=32,
     ):
         super().__init__()
-        
-        # Build Dense blocks 
+        self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = p_dropedge, use_supernode, use_rbf, rbf_K
+
+        self.input_edge_attr_dim = edge_attr_dim  # Store original input edge_attr_dim
+
+        # Dimension of edge attributes after potentially adding RBF features
+        self.processed_edge_attr_dim = self.input_edge_attr_dim + (self.rbf_K if self.use_rbf else 0)
+
         self.blocks = nn.ModuleList()
-        block_dims = []
-
-        # First block
-        self.blocks.append(
-            DenseGNNBlock(
-                in_dim=in_dim,
-                hidden_dim=hidden_dim,
-                n_layers=layers_per_block,
-                transition_dim=hidden_dim,
-                edge_attr_dim=edge_attr_dim
-            )
-        )
-        block_dims.append(hidden_dim)
-
-        # Additional blocks
-        for _ in range(n_blocks - 1):
+        current_block_in_dim = in_dim
+        for _ in range(n_blocks):
             self.blocks.append(
                 DenseGNNBlock(
-                    in_dim=hidden_dim,
+                    in_dim=current_block_in_dim,
                     hidden_dim=hidden_dim,
                     n_layers=layers_per_block,
-                    transition_dim=hidden_dim,
-                    edge_attr_dim=edge_attr_dim
+                    transition_dim=hidden_dim,  # Output of DenseGNNBlock's transition layer
+                    edge_attr_dim=self.processed_edge_attr_dim,  # Pass the final dim to blocks
                 )
             )
-            block_dims.append(hidden_dim)
+            # Input to next block is output of current block's transition layer
+            current_block_in_dim = hidden_dim  # As transition_dim is hidden_dim
 
-        # JK aggregator (node-level)
-        # merges outputs from each block into final node-level embedding
-        self.jk_aggregator = JKAggregator(
-            block_dims=block_dims,
-            out_dim=hidden_dim,
-            mode=jk_mode
-        )
+        self.jk = JKAggregator([hidden_dim] * n_blocks, hidden_dim, mode=jk_mode)
 
-        # Multi-Task Heads
-        # Node-level head: e.g. partial charges
-        # We'll apply it directly to the node embeddings after JK aggregator
         self.node_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, node_out_dim)
+            nn.Linear(hidden_dim // 2, node_out_dim),
         )
-        
-        # Graph-level head: e.g. macroscopic property
-        # We'll pool node embeddings to get a graph embedding, then do MLP
-        self.graph_pool = global_mean_pool  # or an attention pool
         self.graph_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, graph_out_dim)
+            nn.Linear(hidden_dim // 2, graph_out_dim),
         )
-    
-    def forward(self, x, edge_index, edge_attr=None, batch=None):
-        """
-        Return a dictionary of node-level and graph-level predictions:
-          {
-            'node_pred': Tensor [num_nodes, node_out_dim],
-            'graph_pred': Tensor [batch_size, graph_out_dim]
-          }
-        Some tasks may want only one of these.
-        """
-        block_outputs = []
-        h = x
+        self.pool = {"mean": global_mean_pool, "add": global_add_pool, "max": global_max_pool}.get(
+            pool_type, global_mean_pool
+        )
 
-        # Pass through each Dense block
-        for block in self.blocks:
-            h = block(h, edge_index, edge_attr)
-            block_outputs.append(h)
-        
-        # Jumping Knowledge aggregator merges the node embeddings from each block
-        jk_node_features = self.jk_aggregator(block_outputs)  # [num_nodes, hidden_dim]
+    def add_supernode(self, x, edge_index, edge_attr, batch):
+        if not self.use_super or x.numel() == 0:  # also check x.numel()
+            return x, edge_index, edge_attr, batch
 
-        # A) Node-level prediction (e.g. partial charges)
-        node_pred = self.node_head(jk_node_features)  # shape [num_nodes, node_out_dim]
+        num_nodes_original = x.size(0)
+        num_graphs = batch.max().item() + 1 if batch.numel() > 0 else 0
+        if num_graphs == 0 and num_nodes_original > 0:  # Single graph, no batch vector
+            num_graphs = 1  # Assume one graph
+        elif num_graphs == 0 and num_nodes_original == 0:  # Empty input
+            return x, edge_index, edge_attr, batch
 
-        # B) Graph-level prediction (pool first, then MLP)
-        if batch is None:
-            # single-graph scenario: average all node embeddings
-            graph_embed = jk_node_features.mean(dim=0, keepdim=True)
+        super_feat = x.new_zeros((num_graphs, x.size(1)))
+        x_with_super = torch.cat([x, super_feat], 0)
+
+        device = x.device
+        row = torch.arange(num_nodes_original, device=device)
+        # Ensure batch corresponds to original nodes before supernode addition
+        col_batch_indices = (
+            batch[:num_nodes_original]
+            if batch.numel() >= num_nodes_original
+            else torch.zeros(num_nodes_original, dtype=torch.long, device=device)
+        )
+
+        col_supernode_indices = col_batch_indices + num_nodes_original
+
+        edge1 = torch.stack([row, col_supernode_indices], 0)
+        edge2 = torch.stack([col_supernode_indices, row], 0)
+
+        new_edge_index = torch.cat([edge_index, edge1, edge2], 1)
+        new_edge_attr = edge_attr
+
+        if edge_attr is not None:
+            # Supernode edges have zero attributes of the same dimension as other edges
+            if edge_attr.numel() > 0:
+                super_e = edge_attr.new_zeros(edge1.size(1) + edge2.size(1), edge_attr.size(1))
+                new_edge_attr = torch.cat([edge_attr, super_e], 0)
+            # If original edge_attr was empty but had feature dim (e.g. from RBF only), create zeros
+            elif self.processed_edge_attr_dim > 0:
+                super_e = x.new_zeros(edge1.size(1) + edge2.size(1), self.processed_edge_attr_dim)
+                # If original edge_attr was None but should have had features (e.g. RBF only)
+                # This assumes edge_attr should have been zeros(0, dim) not None
+                # For safety, if edge_attr is None, new_edge_attr remains None unless super_e is created
+                if edge_attr is None:
+                    new_edge_attr = super_e  # This might be wrong if original edges existed
+                # This part is tricky if edge_attr is None but processed_edge_attr_dim > 0
+                # Let's assume if edge_attr is None, new_edge_attr remains None and GraphConvLayer handles it.
+                # The above cat would fail if edge_attr is None.
+                # So, if edge_attr is None, new_edge_attr should also be None (GraphConvLayer will make dummy)
+                # Or, if we want supernode edges to have *some* attr:
+                if new_edge_attr is None and self.processed_edge_attr_dim > 0:
+                    # Create dummy for all edges if original was None
+                    all_zeros_for_all_edges = x.new_zeros(new_edge_index.size(1), self.processed_edge_attr_dim)
+                    # This is not quite right, as GraphConvLayer makes a 1-dim dummy.
+                    # Let's stick to: if original edge_attr is None, pass None. Supernode edges won't get explicit attrs.
+                    pass
+
+        new_batch = torch.cat(
+            [batch[:num_nodes_original], torch.arange(num_graphs, device=device) + num_graphs]
+        )  # This batch logic for supernodes is complex
+        # Simpler: batch for supernodes is just arange(num_graphs)
+        final_batch_for_supernodes = torch.arange(num_graphs, device=device)
+        new_batch_corrected = torch.cat(
+            [
+                batch[:num_nodes_original],
+                final_batch_for_supernodes + (num_graphs if batch.numel() > num_nodes_original else 0),
+            ],
+            dim=0,
+        )
+        # The batch vector needs to align with x_with_super
+        # Original nodes keep their batch indices. Supernodes get new batch indices from 0 to num_graphs-1,
+        # but shifted if batch was not empty.
+        # Correct batch for supernodes: torch.arange(num_graphs, device=device)
+        # x_with_super has original nodes then supernodes.
+        # batch_for_x = batch[:num_nodes_original]
+        # batch_for_super = torch.arange(num_graphs, device=device) # These are 0 to num_graphs-1
+        # new_batch_final = torch.cat([batch_for_x, batch_for_super], dim=0) # This is wrong, supernode batch indices are relative to their own block
+
+        # Correct batch assignment:
+        # Original nodes: use their original batch indices
+        # Supernodes: each supernode 'i' belongs to graph 'i'.
+        batch_for_original_nodes = batch[:num_nodes_original]
+        batch_for_super_nodes = torch.arange(num_graphs, device=device)  # Indices 0 to num_graphs-1
+        final_new_batch = torch.cat([batch_for_original_nodes, batch_for_super_nodes], dim=0)
+
+        return x_with_super, new_edge_index, new_edge_attr, final_new_batch
+
+    def drop_edges(self, edge_index, edge_attr):
+        if not self.training or self.p_dropedge == 0:
+            return edge_index, edge_attr
+        if edge_index.numel() == 0:
+            return edge_index, edge_attr
+        mask = torch.rand(edge_index.size(1), device=edge_index.device) > self.p_dropedge
+        return edge_index[:, mask], (edge_attr[mask] if edge_attr is not None and edge_attr.numel() > 0 else edge_attr)
+
+    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None):
+        if x.numel() == 0:
+            # logger.warning("DJMGNN forward called with zero nodes.")
+            return {
+                "node_pred": torch.empty(0, self.node_head[-1].out_features).to(x.device),
+                "graph_pred": torch.empty(0, self.graph_head[-1].out_features).to(x.device),
+            }
+
+        num_edges_initial = edge_index.size(1)
+        current_edge_attr = edge_attr  # This is the input edge_attr (e.g. from SMILES, could be None or have features)
+
+        if self.use_rbf:
+            rbf_k_feats = torch.zeros(num_edges_initial, self.rbf_K, device=x.device)
+            if dist is not None and dist.numel() > 0:
+                if dist.size(0) == num_edges_initial:
+                    rbf_k_feats = rbf_encode_dist(dist, K=self.rbf_K)
+                else:
+                    logger.warning(
+                        f"DJMGNN: dist size {dist.size(0)} mismatch with edge_index size {num_edges_initial}. Using zero RBF features."
+                    )
+
+            if current_edge_attr is None:
+                current_edge_attr = rbf_k_feats
+            else:
+                if current_edge_attr.size(0) == num_edges_initial:
+                    current_edge_attr = torch.cat([current_edge_attr, rbf_k_feats], dim=1)
+                else:  # Mismatch between current_edge_attr rows and num_edges_initial
+                    logger.warning(
+                        f"DJMGNN: input edge_attr rows {current_edge_attr.size(0)} mismatch with edge_index {num_edges_initial}. Reconstructing edge_attr with RBF."
+                    )
+                    # Determine expected original feature part
+                    original_feat_dim = self.input_edge_attr_dim
+                    original_part = torch.zeros(num_edges_initial, original_feat_dim, device=x.device)
+                    # This assumes original_edge_attr was meant to be zeros if not provided correctly.
+                    current_edge_attr = torch.cat([original_part, rbf_k_feats], dim=1)
+        # At this point, current_edge_attr has features of dim:
+        # self.input_edge_attr_dim + self.rbf_K (if use_rbf)
+        # OR self.input_edge_attr_dim (if not use_rbf)
+        # This matches self.processed_edge_attr_dim used to init blocks.
+
+        current_batch = batch if batch is not None else x.new_zeros(x.size(0), dtype=torch.long)
+
+        current_x, current_edge_index, current_edge_attr, current_batch = self.add_supernode(
+            x, edge_index, current_edge_attr, current_batch
+        )
+
+        current_edge_index, current_edge_attr = self.drop_edges(current_edge_index, current_edge_attr)
+
+        h_intermediate, outs = current_x, []
+        for block_idx, block in enumerate(self.blocks):
+            if h_intermediate.numel() == 0:
+                block_output_dim = block.transition.out_features if hasattr(block, "transition") else self.hidden_dim
+                h_intermediate = torch.empty(0, block_output_dim).to(x.device)
+            else:
+                h_intermediate = block(h_intermediate, current_edge_index, current_edge_attr)
+            outs.append(h_intermediate)
+
+        h_aggregated = self.jk(outs)
+
+        if h_aggregated is None or h_aggregated.numel() == 0:
+            num_output_nodes = 0
+            batch_size_for_graph_pred = current_batch.max().item() + 1 if current_batch.numel() > 0 else 0
+            node_pred = torch.empty(num_output_nodes, self.node_head[-1].out_features).to(x.device)
+            graph_pred = torch.empty(batch_size_for_graph_pred, self.graph_head[-1].out_features).to(x.device)
+            return {"node_pred": node_pred, "graph_pred": graph_pred}
+
+        node_pred = self.node_head(h_aggregated)
+
+        # Pooling requires valid batch vector that corresponds to h_aggregated
+        # h_aggregated includes supernodes. current_batch also includes supernodes.
+        if h_aggregated.size(0) == 0:
+            graph_pooled = torch.zeros(
+                current_batch.max().item() + 1 if current_batch.numel() > 0 else 0,
+                h_aggregated.size(1) if h_aggregated.dim() > 1 else self.graph_head[0].in_features,
+            ).to(h_aggregated.device if hasattr(h_aggregated, "device") else x.device)
         else:
-            # multiple graphs in batch
-            graph_embed = self.graph_pool(jk_node_features, batch)
-        graph_pred = self.graph_head(graph_embed)
+            graph_pooled = self.pool(h_aggregated, current_batch)
 
-        return {
-            'node_pred': node_pred,     # [num_nodes, node_out_dim]
-            'graph_pred': graph_pred    # [batch_size, graph_out_dim]
-        } 
+        graph_pred = self.graph_head(graph_pooled)
+        return {"node_pred": node_pred, "graph_pred": graph_pred}

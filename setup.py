@@ -10,7 +10,7 @@ from setuptools import setup, find_packages
 import os
 
 # Get the long description from the README file
-with open(os.path.join(os.path.dirname(__file__), 'README.md'), encoding='utf-8') as f:
+with open(os.path.join(os.path.dirname(__file__), "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
@@ -62,7 +62,7 @@ setup(
         "pytest>=6.2.5",
         "black>=21.12b0",
         "flake8>=4.0.0",
-        "isort>=5.10.0"
+        "isort>=5.10.0",
     ],
     extras_require={
         "dev": [
@@ -81,4 +81,4 @@ setup(
         "Bug Reports": "https://github.com/saketh/MoML-CA_PFAS/issues",
         "Source": "https://github.com/saketh/MoML-CA_PFAS",
     },
-) 
+)
