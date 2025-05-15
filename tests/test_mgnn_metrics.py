@@ -112,13 +112,13 @@ class TestCalculateClassificationMetrics:
 
     def test_binary_good_proba(self, binary_clf_data):
         metrics = calculate_classification_metrics(binary_clf_data["true"], binary_clf_data["pred_proba_good"])
-        assert 0.0 < metrics['accuracy'] < 1.0
+        assert 0.0 < metrics['accuracy'] <= 1.0 # Allow for perfect accuracy
         assert 0.0 <= metrics['auc'] <= 1.0
 
     def test_binary_direct_labels(self, binary_clf_data):
         metrics = calculate_classification_metrics(binary_clf_data["true"], binary_clf_data["pred_binary_good"])
         assert 'auc' not in metrics # AUC not calculated for direct binary labels
-        assert 0.0 < metrics['accuracy'] < 1.0
+        assert 0.0 < metrics['accuracy'] <= 1.0 # Allow for perfect accuracy
     
     def test_binary_zero_division(self):
         true = np.array([0, 0, 0])

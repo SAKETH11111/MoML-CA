@@ -178,8 +178,8 @@ class TestSmilesValidation:
         ]
         
         for smiles in valid_smiles:
-            is_valid, canonical, mol = validate_smiles(smiles)
-            assert is_valid, f"SMILES string {smiles} should be valid"
+            is_valid, canonical, mol, error_msg = validate_smiles(smiles) # Unpack 4
+            assert is_valid, f"SMILES string {smiles} should be valid. Error: {error_msg}"
             assert canonical is not None, f"Canonical form should not be None for {smiles}"
             assert mol is not None, f"RDKit mol should not be None for {smiles}"
     
@@ -194,16 +194,17 @@ class TestSmilesValidation:
         ]
         
         for smiles in invalid_smiles:
-            is_valid, canonical, mol = validate_smiles(smiles)
-            assert not is_valid, f"SMILES string {smiles} should be invalid"
+            is_valid, canonical, mol, error_msg = validate_smiles(smiles) # Unpack 4
+            assert not is_valid, f"SMILES string {smiles} should be invalid. Canonical: {canonical}, Mol: {mol}"
     
     def test_descriptor_calculation(self):
         """Test calculation of molecular descriptors for valid SMILES."""
         test_smiles = "CC(=O)O"  # Acetic acid
         
         # Validate SMILES and get mol object
-        is_valid, canonical, mol = validate_smiles(test_smiles)
-        assert is_valid, f"SMILES string {test_smiles} should be valid"
+        is_valid, canonical, mol, error_msg = validate_smiles(test_smiles) # Unpack 4
+        assert is_valid, f"SMILES string {test_smiles} should be valid. Error: {error_msg}"
+        assert mol is not None, "Mol object should not be None for descriptor calculation"
         
         # Calculate descriptors
         descriptors = calculate_molecular_descriptors(mol)

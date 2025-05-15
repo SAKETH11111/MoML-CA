@@ -355,7 +355,13 @@ class TestBatchPredictFromFiles:
         yield input_dir
 
     def test_batch_predict_files_success(self, mock_create_pred, temp_input_dir_for_batch, dummy_model_path, temp_model_files_dir):
+        # Create a mock for the MGNNPredictor instance
         mock_predictor_instance = MagicMock(spec=MGNNPredictor)
+        
+        # Explicitly create a mock for the 'processor' attribute
+        # MolecularGraphProcessor is imported at the top of the file
+        mock_processor_attr = MagicMock(spec=MolecularGraphProcessor)
+        mock_predictor_instance.processor = mock_processor_attr
         
         # Simulate 3 good graphs and one error for the corrupted file
         good_graphs = [Data(x=torch.randn(i+1,10)) for i in range(3)]
@@ -371,6 +377,7 @@ class TestBatchPredictFromFiles:
             else: # for mol_i_bad.mol if Chem.MolFromSmiles failed
                 raise ValueError("Bad SMILES in test setup")
 
+        # Now assign side_effect to the mocked processor's file_to_graph
         mock_predictor_instance.processor.file_to_graph.side_effect = file_to_graph_side_effect
         
         mock_predictor_instance.batch_predict.return_value = {

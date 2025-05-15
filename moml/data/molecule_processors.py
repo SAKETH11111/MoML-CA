@@ -256,14 +256,14 @@ def process_dataset(csv_path: str, smiles_col: str = "SMILES", id_col: str = Non
         valid_count = 0
         for idx, row in df.iterrows():
             smiles = row[smiles_col]
-            is_valid, canonical_smiles, error = validate_smiles(smiles)
+            is_valid, canonical_smiles, mol_obj, error = validate_smiles(smiles)
             
             df.at[idx, 'is_valid_smiles'] = is_valid
             df.at[idx, 'smiles_error'] = error
             
             if is_valid:
                 df.at[idx, 'canonical_smiles'] = canonical_smiles
-                df.at[idx, 'rdkit_mol'] = Chem.MolFromSmiles(canonical_smiles)
+                df.at[idx, 'rdkit_mol'] = mol_obj
                 valid_count += 1
             
         logger.info(f"Successfully processed {valid_count}/{len(df)} compounds")
