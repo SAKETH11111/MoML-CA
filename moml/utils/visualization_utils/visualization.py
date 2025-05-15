@@ -30,6 +30,9 @@ from typing import Dict, List, Optional, Union, Tuple
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw, rdDepictor
 from rdkit.Chem.Draw import rdMolDraw2D
+from moml.core import MolecularGraphProcessor
+from moml.core.molecular_feature_extraction import FunctionalGroupDetector # Added for advanced highlighting
+from torch_geometric.data import Data as PyGData
 
 # Set up logging
 logging.basicConfig(
@@ -477,14 +480,27 @@ def visualize_molecular_graph(graph, output_file: Optional[str] = None, highligh
     except ImportError:
         logger.error("Visualization requires networkx and PyTorch Geometric.")
         return
+
+    # Check if the input is an RDKit Mol object and convert if necessary
+    if isinstance(graph, Chem.Mol):
+        processor = MolecularGraphProcessor() # Assuming default config is okay for visualization
+        pyg_graph = processor.mol_to_graph(graph)
+        if pyg_graph is None:
+            logger.error("Failed to convert RDKit Mol to PyG Data for visualization.")
+            return
+    elif isinstance(graph, PyGData):
+        pyg_graph = graph
+    else:
+        logger.error(f"Unsupported graph type for visualization: {type(graph)}. Expected RDKit Mol or PyG Data.")
+        return
     
-    G = to_networkx(graph, to_undirected=True)
+    G = to_networkx(pyg_graph, to_undirected=True)
     
     plt.figure(figsize=(12, 10))
     
     # Use 3D positions for layout if available
-    if hasattr(graph, 'pos') and graph.pos is not None:
-        pos = {i: (graph.pos[i][0].item(), graph.pos[i][1].item()) for i in range(graph.num_nodes)}
+    if hasattr(pyg_graph, 'pos') and pyg_graph.pos is not None:
+        pos = {i: (pyg_graph.pos[i][0].item(), pyg_graph.pos[i][1].item()) for i in range(pyg_graph.num_nodes)}
     else:
         pos = nx.spring_layout(G, seed=42)
     
@@ -492,79 +508,100 @@ def visualize_molecular_graph(graph, output_file: Optional[str] = None, highligh
     node_colors = []
     node_sizes = []
     
-    for i in range(graph.num_nodes):
+    # Determine atomic numbers for each node, preferring original RDKit mol if available
+    atomic_nums = []
+    original_rdkit_mol_available = isinstance(graph, Chem.Mol)
+    
+    for i in range(pyg_graph.num_nodes):
+        if original_rdkit_mol_available:
+            atomic_nums.append(graph.GetAtomWithIdx(i).GetAtomicNum())
+        elif hasattr(pyg_graph, 'x') and pyg_graph.x is not None and pyg_graph.x.shape[1] > 0:
+            # Assuming the first feature in pyg_graph.x is atomic_number or a one-hot encoding of it.
+            # This part is fragile and depends on MolecularGraphProcessor's feature generation.
+            # For simplicity, let's assume if not RDKit Mol, we can't reliably get atomic_num for highlighting here
+            # without knowing the exact feature vector structure.
+            # A more robust way would be to ensure 'atomic_num' is stored in pyg_graph nodes if not RDKit mol.
+            # For now, let's try to get it from G.nodes if populated by to_networkx, else default to 0.
+            node_data = G.nodes[i]
+            if 'atomic_num' in node_data: # if to_networkx added it
+                 atomic_nums.append(node_data['atomic_num'])
+            elif pyg_graph.x[i][0].item() < 20: # Crude check if first element is atomic_num like
+                 atomic_nums.append(int(pyg_graph.x[i][0].item()))
+            else: # Fallback
+                 atomic_nums.append(0) # Unknown
+        else:
+            atomic_nums.append(0) # Unknown
+
+    for i in range(pyg_graph.num_nodes): # Use pyg_graph here
         size = 500  # Default node size
+        atom_idx = i # current atom index
         
+        is_f_atom = False
+        is_c_bonded_to_f = False
+
         if highlight_feature == 'fluorine':
-            # Highlight fluorine atoms and carbons bonded to fluorine
-            is_f = graph.x[i][8].item() > 0.5  # Fluorine flag
-            is_cf = graph.x[i][9].item() > 0.5  # Carbon-fluorine flag
+            current_atomic_num = atomic_nums[atom_idx]
+            is_f_atom = (current_atomic_num == 9)
+
+            if current_atomic_num == 6: # If it's a Carbon atom
+                if original_rdkit_mol_available:
+                    rdkit_atom = graph.GetAtomWithIdx(atom_idx)
+                    for neighbor in rdkit_atom.GetNeighbors():
+                        if neighbor.GetAtomicNum() == 9:
+                            is_c_bonded_to_f = True
+                            break
+                # Else (if only PyG graph), determining C-F bonds from pyg_graph.x is complex
+                # without knowing specific feature indices for C-F bonds or neighbor types.
+                # For now, is_c_bonded_to_f will remain False if not an RDKit Mol.
             
-            if is_f:
-                node_colors.append('green')  # Fluorine atoms
+            if is_f_atom:
+                node_colors.append('red')
                 size = 700
-            elif is_cf:
-                node_colors.append('orange')  # Carbon atoms bonded to fluorine
+            elif is_c_bonded_to_f:
+                node_colors.append('lightcoral')
                 size = 600
             else:
                 node_colors.append('lightblue')  # Other atoms
         
         elif highlight_feature == 'partial_charge':
-            # Color based on partial charge (if available)
-            charge_idx = -1
-            if graph.x.shape[1] > 10:  # Check if we have enough features
-                charge = graph.x[i][charge_idx].item()
-                # Use a red-white-blue colormap for charges
-                if charge > 0:
-                    intensity = min(1.0, charge / 0.5)  # Scale to [0, 1]
-                    node_colors.append((1.0, 1.0 - intensity, 1.0 - intensity))  # Red for positive
-                else:
-                    intensity = min(1.0, abs(charge) / 0.5)  # Scale to [0, 1]
-                    node_colors.append((1.0 - intensity, 1.0 - intensity, 1.0))  # Blue for negative
-            else:
-                node_colors.append('gray')  # Default if no charge info
+            # Placeholder: This section requires partial charge data to be present in pyg_graph.x
+            # or accessible from the original RDKit molecule if it has charges.
+            # For now, it will default to lightblue.
+            # This part needs actual partial charge data.
+            # For now, it will default to lightblue.
+            node_colors.append('lightblue') # Default color for this placeholder
         
         elif highlight_feature == 'functional_group':
-            # Highlight functional groups if PFAS features are available
-            idx_offset = 11  # Index where PFAS-specific features start
-            
-            if graph.x.shape[1] > idx_offset + 2:
-                is_carboxylic = graph.x[i][idx_offset].item() > 0.5
-                is_sulfonic = graph.x[i][idx_offset + 1].item() > 0.5
-                is_phosphonic = graph.x[i][idx_offset + 2].item() > 0.5
-                
-                if is_carboxylic:
-                    node_colors.append('red')
-                    size = 800
-                elif is_sulfonic:
-                    node_colors.append('purple')
-                    size = 800
-                elif is_phosphonic:
-                    node_colors.append('brown')
-                    size = 800
-                else:
-                    node_colors.append('lightgray')
-            else:
-                node_colors.append('lightgray')
-        
+            # Placeholder: This requires functional group information.
+            # If original RDKit mol is available, FunctionalGroupDetector could be used.
+            # If PyG graph, specific features for COOH, SO3H etc. would be needed.
+            node_colors.append('lightblue') # Default color for this placeholder
+
         elif highlight_feature == 'head_group':
-            # Highlight head group vs fluorinated tail
-            idx_offset = 14  # Index where head_group feature is expected
-            
-            if graph.x.shape[1] > idx_offset:
-                is_head_group = graph.x[i][idx_offset].item() > 0.5
-                
-                if is_head_group:
-                    node_colors.append('blue')
-                    size = 600
-                else:
-                    node_colors.append('yellow')
-            else:
-                node_colors.append('lightgray')
+            # Placeholder: This requires head group vs tail information.
+            node_colors.append('lightblue') # Default color for this placeholder
         
-        else:
-            # Default coloring
-            node_colors.append('lightblue')
+        else: # Default coloring if no specific highlight_feature matches or for non-PFAS highlights
+            current_atomic_num = atomic_nums[atom_idx]
+            if current_atomic_num == 9: # Fluorine
+                node_colors.append('red')
+                size = 700
+            elif current_atomic_num == 6: # Carbon
+                is_c_bonded_to_f_default = False
+                if original_rdkit_mol_available:
+                    rdkit_atom = graph.GetAtomWithIdx(atom_idx)
+                    for neighbor in rdkit_atom.GetNeighbors():
+                        if neighbor.GetAtomicNum() == 9:
+                            is_c_bonded_to_f_default = True
+                            break
+                if is_c_bonded_to_f_default:
+                    node_colors.append('lightcoral')
+                else:
+                    node_colors.append('gray')
+            elif current_atomic_num == 8: # Oxygen
+                node_colors.append('skyblue')
+            else:
+                node_colors.append('lightgrey') # Default for other atoms
         
         node_sizes.append(size)
     
@@ -581,13 +618,19 @@ def visualize_molecular_graph(graph, output_file: Optional[str] = None, highligh
     plt.title(f'Molecular Graph - {highlight_feature.replace("_", " ").title()} Highlight', fontsize=16)
     
     # Save or display the visualization
+    # fig was defined earlier by fig = plt.figure(...)
+    # Explicitly get the current figure to ensure 'fig_to_return' is correctly assigned.
+    fig_to_return = plt.gcf()
+    
     if output_file:
         plt.savefig(output_file, bbox_inches='tight', dpi=300)
         logger.info(f"Graph visualization saved to {output_file}")
+        plt.close(fig_to_return) # Close the specific figure instance after saving
+        return fig_to_return
     else:
-        plt.show()
-    
-    plt.close()
+        # If not saving to file, return the figure object.
+        # The caller is responsible for plt.show() or plt.close(fig_to_return).
+        return fig_to_return
 
 def print_graph_statistics(graph):
     """Print statistics about a molecular graph.

@@ -13,6 +13,7 @@ import numpy as np
 from rdkit import Chem
 from typing import Union, List, Dict, Optional, Tuple
 import logging
+from moml.core.molecular_feature_extraction import FunctionalGroupDetector # Added import
 
 # Set up logging
 logging.basicConfig(
@@ -45,7 +46,14 @@ def create_rdkit_mols(df: pd.DataFrame,
         raise ValueError(f"SMILES column '{smiles_col}' not found in dataframe")
     
     # Create RDKit molecules and validity flags
-    df[mol_col] = df[smiles_col].apply(lambda x: Chem.MolFromSmiles(str(x)) if pd.notna(x) else None)
+    def smiles_to_mol_with_hs(s):
+        if pd.notna(s):
+            mol = Chem.MolFromSmiles(str(s))
+            if mol:
+                return Chem.AddHs(mol)
+        return None
+        
+    df[mol_col] = df[smiles_col].apply(smiles_to_mol_with_hs)
     df[valid_col] = df[mol_col].notna()
     
     # Log statistics
@@ -150,8 +158,16 @@ def calculate_molecular_complexity(df: pd.DataFrame,
     
     # Calculate F percentage
     df['F_Percentage'] = df.apply(lambda x: calc_f_percentage(x[mol_col], x['F_Count']), axis=1)
-    
-    logger.info("Added molecular complexity features")
+
+    # Calculate F/C ratio
+    # Ensure C_Count is not zero to avoid division by zero errors.
+    # If C_Count is 0, F_to_C_Ratio can be 0 if F_Count is also 0, or undefined (e.g., np.nan) if F_Count > 0.
+    # For simplicity, if C_Count is 0, F_to_C_Ratio will be 0.
+    df['f_to_c_ratio'] = df.apply(lambda row: row['F_Count'] / row['C_Count'] if row['C_Count'] and row['C_Count'] > 0 else 0, axis=1)
+    # avg_f_per_c is assumed to be the same as f_to_c_ratio for now
+    df['avg_f_per_c'] = df['f_to_c_ratio']
+
+    logger.info("Added molecular complexity features, including F/C ratio.")
     return df
 
 def categorize_molecular_features(df: pd.DataFrame, 
@@ -207,4 +223,42 @@ def categorize_molecular_features(df: pd.DataFrame,
     )
     
     logger.info("Added molecular feature categories")
-    return df 
+    return df
+
+def add_fluorinated_group_counts(df: pd.DataFrame, mol_col: str = 'ROMol') -> pd.DataFrame:
+    """
+    Adds counts of CF3, CF2, and CF groups to the DataFrame.
+
+    Args:
+        df: DataFrame containing RDKit molecules.
+        mol_col: Name of the column containing RDKit molecules.
+
+    Returns:
+        DataFrame with added columns: 'num_cf3_groups', 'num_cf2_groups', 'num_cf_groups'.
+    """
+    logger.info("=== Adding Fluorinated Group Counts ===")
+    if mol_col not in df.columns:
+        raise ValueError(f"Molecule column '{mol_col}' not found in DataFrame.")
+
+    detector = FunctionalGroupDetector()
+
+    num_cf3_groups = []
+    num_cf2_groups = []
+    num_cf_groups = []
+
+    for mol in df[mol_col]:
+        if mol:
+            num_cf3_groups.append(len(detector.find_cf3_groups(mol)))
+            num_cf2_groups.append(len(detector.find_cf2_groups(mol)))
+            num_cf_groups.append(len(detector.find_cf1_groups(mol))) # Assuming find_cf1_groups for single C-F
+        else:
+            num_cf3_groups.append(0)
+            num_cf2_groups.append(0)
+            num_cf_groups.append(0)
+
+    df['num_cf3_groups'] = num_cf3_groups
+    df['num_cf2_groups'] = num_cf2_groups
+    df['num_cf_groups'] = num_cf_groups
+    
+    logger.info("Added num_cf3_groups, num_cf2_groups, num_cf_groups columns.")
+    return df

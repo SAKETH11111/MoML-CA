@@ -1,3 +1,4 @@
+from typing import Union, List, Dict, Any, Optional
 #!python
 """
 Test script for the Unified Graph Generator
@@ -81,10 +82,11 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         self.mol_files = []
         
         for i, smiles in enumerate(self.test_smiles):
-            is_valid, canonical_smi, error_msg = validate_smiles(smiles) # Corrected unpacking
-            if is_valid:
-                mol = Chem.MolFromSmiles(canonical_smi) # Create mol from canonical SMILES
-                if mol is not None: # Further check if mol creation was successful
+            is_valid, canonical_smi, mol_obj, error_msg = validate_smiles(smiles) # Unpack 4
+            if is_valid and mol_obj is not None: # Check if valid and mol_obj is created
+                mol = mol_obj # Use the mol_obj directly
+                # mol = Chem.MolFromSmiles(canonical_smi) # Or recreate if preferred, but mol_obj should be fine
+                if mol is not None: # This check might be redundant if mol_obj is already checked
                     mol = Chem.AddHs(mol)
                     AllChem.EmbedMolecule(mol, randomSeed=42)
                     AllChem.MMFFOptimizeMolecule(mol)
@@ -184,21 +186,25 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         self.assertTrue(os.path.exists(mol_file), f"Mol file not found: {mol_file}")
         
         # Load the molecule from file
-        mol = Chem.MolFromMolFile(mol_file)
-        self.assertIsNotNone(mol, "Failed to load molecule from MOL file")
-        
+        mol_from_file_raw = Chem.MolFromMolFile(mol_file, removeHs=False)
+        self.assertIsNotNone(mol_from_file_raw, "Failed to load molecule from MOL file")
+
+        # Ensure the comparison molecule also has explicit hydrogens for GetNumAtoms(),
+        # consistent with how graph_processor.mol_to_graph would process it (it calls AddHs).
+        mol_for_comparison = Chem.AddHs(mol_from_file_raw)
+
         # Convert molecule to graph using the processor's file_to_graph method
         graph = self.graph_processor.file_to_graph(mol_file)
         self.assertIsInstance(graph, PyGData)
         
         # Check basic properties
-        self.assertEqual(graph.num_nodes, mol.GetNumAtoms())
+        self.assertEqual(graph.num_nodes, mol_for_comparison.GetNumAtoms())
         self.assertTrue(hasattr(graph, 'x'))
-        self.assertEqual(graph.x.shape[0], mol.GetNumAtoms())
+        self.assertEqual(graph.x.shape[0], mol_for_comparison.GetNumAtoms())
         self.assertEqual(graph.x.shape[1], self.graph_processor.atom_feature_dim)
         
         self.assertTrue(hasattr(graph, 'edge_index'))
-        if mol.GetNumBonds() > 0:
+        if mol_for_comparison.GetNumBonds() > 0:
             self.assertTrue(hasattr(graph, 'edge_attr'))
             self.assertEqual(graph.edge_attr.shape[1], self.graph_processor.bond_feature_dim)
             self.assertEqual(graph.edge_attr.shape[0], graph.edge_index.shape[1])

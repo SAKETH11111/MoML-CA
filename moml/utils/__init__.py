@@ -30,6 +30,7 @@ from .data_utils.molecular import (
     extract_fluorine_count,
     calculate_molecular_complexity,
     categorize_molecular_features,
+    add_fluorinated_group_counts, # Added import
 )
 
 # Visualization utilities
@@ -68,6 +69,7 @@ __all__ = [
     'extract_fluorine_count',
     'calculate_molecular_complexity',
     'categorize_molecular_features',
+    'add_fluorinated_group_counts', # Added to __all__
     'plot_distribution',
     'plot_top_types',
     'plot_pie_chart',

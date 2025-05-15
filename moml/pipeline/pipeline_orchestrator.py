@@ -722,7 +722,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         
         logger.info(f"PFAS Pipeline Orchestrator initialized")
     
-    def preprocess_pfas_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
+    def run_preprocessing_stage(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
         """
         Preprocess PFAS data with specialized PFAS-specific features.
         
@@ -735,21 +735,55 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         Returns:
             Processed DataFrame with PFAS-specific features
         """
-        # Use common processing from parent class first
-        df = super().preprocess_data(input_file, smiles_col, id_col, force_rerun)
+        logger.info(f"Starting PFAS-specific preprocessing for {input_file} (run_preprocessing_stage), force_rerun={force_rerun}")
         
-        # Add PFAS-specific processing here
-        # Instead of reimplementing descriptor calculation, call the shared method
+        # Define the expected output path for this stage
+        # Note: The filename construction should be consistent with how it's saved later.
+        base_name = os.path.splitext(os.path.basename(input_file))[0]
+        processed_file_path = os.path.join(self.dirs["processed_data"], f"{base_name}_pfas_processed.csv") # Consistent naming
+
+        # Check if already processed and not forcing rerun
+        # The state "preprocessed" might be too general if multiple input files can be processed.
+        # A more robust check would be against a specific output file or a more detailed state.
+        # For now, using self.state.get("preprocessed") and existence of a conventionally named file.
+        if not force_rerun and os.path.exists(processed_file_path) and self.state.get("preprocessed_files", {}).get(input_file) == processed_file_path :
+            logger.info(f"Loading existing processed data from {processed_file_path} for {input_file} as force_rerun is False and state indicates completion.")
+            try:
+                df = pd.read_csv(processed_file_path)
+                self.cache["processed_df"] = df # Update cache
+                return df
+            except Exception as e:
+                logger.warning(f"Could not load existing processed file {processed_file_path}: {e}. Re-processing.")
         
-        self._save_state() # Ensure state is saved after preprocessing
-        return df
+        # If not resuming, proceed with actual processing:
+        # This was previously: df = super().preprocess_data(input_file, smiles_col, id_col, force_rerun)
+        # The PFAS orchestrator seems to want to do its own specific sequence.
+        logger.info(f"Performing full preprocessing for {input_file}")
+        df_initial_processed = process_dataset(input_file, smiles_col=smiles_col, id_col=id_col)
+        df_with_descriptors = self._process_molecule_features(df_initial_processed, molecule_id_column=id_col)
+        
+        # Placeholder for PFAS-specific feature engineering or analysis
+        # df_final = add_fluorinated_group_counts(df_with_descriptors, smiles_col='canonical_smiles')
+        df_final = df_with_descriptors # Assuming no extra PFAS steps for now beyond base descriptors
+
+        df_final.to_csv(processed_file_path, index=False)
+        logger.info(f"PFAS-specific processed data saved to {processed_file_path}")
+        
+        self.state["preprocessed"] = True # General flag
+        if "preprocessed_files" not in self.state:
+            self.state["preprocessed_files"] = {}
+        self.state["preprocessed_files"][input_file] = processed_file_path # Track specific file
+        self.state["molecules_processed"] = len(df_final) # This might need to be cumulative or per file
+        self.cache["processed_df"] = df_final # Update cache
+        self._save_state()
+        return df_final
 
     # Reuse parent class implementation instead of redefining
     def preprocess_data(self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> pd.DataFrame:
         """
         Preprocess data, delegating to the PFAS-specific method.
         """
-        return self.preprocess_pfas_data(input_file, smiles_col, id_col, force_rerun)
+        return self.run_preprocessing_stage(input_file, smiles_col, id_col, force_rerun)
 
     def run_orca_calculations(self, df=None, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
         """
@@ -802,7 +836,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
             return df[df["is_pfas"] == True].copy()
         return pd.DataFrame()
     
-    def run_full_pipeline(self, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
+    def execute_pipeline(self, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
         """
         Run the complete PFAS analysis pipeline.
         

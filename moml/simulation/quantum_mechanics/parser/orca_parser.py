@@ -56,16 +56,17 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
     if not os.path.exists(orca_output_path):
         raise FileNotFoundError(f"ORCA output file not found: {orca_output_path}")
     
-    # Initialize result dictionary
+    # Initialize result dictionary - only status is guaranteed.
     result = {
         'status': 'incomplete',  # Default status
-        'mulliken_charges': [],
-        'loewdin_charges': [],
-        'dipole_moment': None,
-        'homo_lumo_gap': None,
-        'homo_lumo_contributions': {'homo': [], 'lumo': []},
-        'electrostatic_potential': [],
-        'optimized_geometry': []
+        'mulliken_charges': [],   # Initialize as empty list
+        'loewdin_charges': [],    # Initialize as empty list
+        'dipole_moment': None,    # Remains None if not found
+        'homo_lumo_gap': None,    # Remains None if not found
+        'optimized_geometry': [], # Initialize as empty list
+        'error_message': None,
+        'homo_lumo_contributions': {'homo': [], 'lumo': []}, # Initialize for consistency
+        'electrostatic_potential': [] # Initialize for consistency
     }
     
     # Regex patterns for all data types we need to extract
@@ -74,10 +75,11 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         'error': r".*(ERROR|Error):.*",
         'mulliken_charges': r"MULLIKEN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+).*?\n)+",
         'loewdin_charges': r"LOEWDIN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+).*?\n)+",
-        'dipole_moment': r"DIPOLE MOMENT\s*\n.*?X\s+([-+]?\d*\.\d+).*?Y\s+([-+]?\d*\.\d+).*?Z\s+([-+]?\d*\.\d+).*?Total\s+([-+]?\d*\.\d+)",
+        'dipole_moment': r"DIPOLE MOMENT(?:.|\n)*?Total\s+([-+]?\d+\.\d+)\s+([-+]?\d+\.\d+)\s+([-+]?\d+\.\d+)\s+([-+]?\d+\.\d+)",
         'homo_lumo_gap_direct': r"HOMO-LUMO gap:\s*([-+]?\d*\.\d+)\s*Eh\s*=\s*([-+]?\d*\.\d+)\s*eV",
-        'homo_energy': r"HOMO:\s*[-+]?\d+\s+([-+]?\d*\.\d+)\s*Eh",
-        'lumo_energy': r"LUMO:\s*[-+]?\d+\s+([-+]?\d*\.\d+)\s*Eh",
+        # More flexible HOMO/LUMO patterns to match lines like "   0  -10.0... 2.0... (HOMO)"
+        'homo_energy': r"^\s*\d+\s+([-+]?\d+\.\d+)\s+[\d\.]+\s+\(HOMO\)", # Group 1 is energy
+        'lumo_energy': r"^\s*\d+\s+([-+]?\d+\.\d+)\s+[\d\.]+\s+\(LUMO\)", # Group 1 is energy
         'geometry': r"CARTESIAN COORDINATES \(ANGSTROEM\).*?\n(.*?)\n\n",
     }
     
@@ -89,22 +91,83 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         # Check calculation status
         if re.search(patterns['calculation_completed'], content, re.DOTALL):
             result['status'] = 'completed'
-        elif re.search(patterns['error'], content, re.DOTALL):
+        # Check for explicit error messages or abnormal termination
+        elif re.search(patterns['error'], content, re.DOTALL) or \
+             "ORCA TERMINATED ABNORMALLY" in content:
             result['status'] = 'error'
+        # If neither completed nor explicitly error/abnormal, it remains 'incomplete'
+        # unless a parsing exception occurs later, which will set it to 'error'.
         
         # Extract Mulliken charges
-        mulliken_match = re.search(patterns['mulliken_charges'], content, re.DOTALL)
-        if mulliken_match:
-            charges_text = mulliken_match.group(0)
-            charge_pattern = r"\d+\s+\w+\s+([-+]?\d*\.\d+)"
-            result['mulliken_charges'] = [float(charge) for charge in re.findall(charge_pattern, charges_text)]
+        mulliken_header_match = re.search(r"MULLIKEN ATOMIC CHARGES", content)
+        if mulliken_header_match:
+            start_index = mulliken_header_match.end()
+            # Define a pattern for a single charge line: number, symbol, optional colon, charge
+            charge_line_pattern = re.compile(r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d+\.\d+)")
+            
+            temp_mulliken_charges = []
+            
+            # Heuristic to find end of block: two newlines, or start of another common section
+            end_pattern_search_str = content[start_index:]
+            end_match = re.search(r"\n\s*\n|[A-Z\s]{10,}\n-{5,}", end_pattern_search_str)
+            
+            block_limit = len(end_pattern_search_str)
+            if end_match:
+                block_limit = end_match.start()
+            
+            relevant_block = end_pattern_search_str[:block_limit]
+
+            for line in relevant_block.splitlines():
+                line_strip = line.strip()
+                if not line_strip: # Skip empty lines that might be before the actual end
+                    continue
+                
+                match = charge_line_pattern.match(line_strip)
+                if match:
+                    try:
+                        temp_mulliken_charges.append(float(match.group(1)))
+                    except ValueError:
+                        logger.warning(f"Could not parse float from Mulliken charge line: '{line_strip}'")
+                # Stop if a line doesn't match and isn't empty, likely end of charge data or junk
+                elif temp_mulliken_charges and line_strip and not line_strip.startswith("-"): # Allow for "---" separator lines
+                    break
+            
+            if temp_mulliken_charges: # Only update if we found some
+                result['mulliken_charges'] = temp_mulliken_charges
         
         # Extract Loewdin charges
-        loewdin_match = re.search(patterns['loewdin_charges'], content, re.DOTALL)
-        if loewdin_match:
-            charges_text = loewdin_match.group(0)
-            charge_pattern = r"\d+\s+\w+\s+([-+]?\d*\.\d+)"
-            result['loewdin_charges'] = [float(charge) for charge in re.findall(charge_pattern, charges_text)]
+        loewdin_header_match = re.search(r"LOEWDIN ATOMIC CHARGES", content)
+        if loewdin_header_match:
+            start_index = loewdin_header_match.end()
+            charge_line_pattern = re.compile(r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d+\.\d+)") # Symbol can be 1-3 chars e.g. Cl, Br
+            
+            temp_loewdin_charges = []
+
+            end_pattern_search_str = content[start_index:]
+            end_match = re.search(r"\n\s*\n|[A-Z\s]{10,}\n-{5,}", end_pattern_search_str)
+            
+            block_limit = len(end_pattern_search_str)
+            if end_match:
+                block_limit = end_match.start()
+            
+            relevant_block = end_pattern_search_str[:block_limit]
+
+            for line in relevant_block.splitlines():
+                line_strip = line.strip()
+                if not line_strip:
+                    continue
+                
+                match = charge_line_pattern.match(line_strip)
+                if match:
+                    try:
+                        temp_loewdin_charges.append(float(match.group(1)))
+                    except ValueError:
+                        logger.warning(f"Could not parse float from Loewdin charge line: '{line_strip}'")
+                elif temp_loewdin_charges and line_strip and not line_strip.startswith("-"):
+                    break
+            
+            if temp_loewdin_charges:
+                result['loewdin_charges'] = temp_loewdin_charges
         
         # Extract dipole moment
         dipole_match = re.search(patterns['dipole_moment'], content, re.DOTALL)
@@ -121,8 +184,8 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
             result['homo_lumo_gap'] = float(homo_lumo_gap_match.group(2))  # Use the gap in eV
         else:
             # If not found directly, try to calculate from HOMO and LUMO energies
-            homo_match = re.search(patterns['homo_energy'], content)
-            lumo_match = re.search(patterns['lumo_energy'], content)
+            homo_match = re.search(patterns['homo_energy'], content, re.MULTILINE)
+            lumo_match = re.search(patterns['lumo_energy'], content, re.MULTILINE)
             
             if homo_match and lumo_match:
                 homo_energy = float(homo_match.group(1))
@@ -134,6 +197,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         # Extract optimized geometry
         geometry_match = re.search(patterns['geometry'], content, re.DOTALL)
         if geometry_match:
+            result['optimized_geometry'] = [] # Initialize as list
             geometry_text = geometry_match.group(1)
             atom_pattern = r"(\w+)\s+([-+]?\d*\.\d+)\s+([-+]?\d*\.\d+)\s+([-+]?\d*\.\d+)"
             

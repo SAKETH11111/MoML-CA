@@ -1,3 +1,4 @@
+from typing import Union, List, Dict, Any, Optional, Tuple
 """
 Unit tests for the MGNNTrainer class and related functions
 in moml.models.mgnn.training.trainer.
@@ -194,7 +195,7 @@ class TestMGNNTrainerInit:
         with pytest.raises(ValueError, match="Unsupported task type"):
             MGNNTrainer(model=mock_model, config=config_err)
     
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available for this specific test")
     @patch('torch.cuda.is_available', return_value=True) # Keep patch to simulate for logic if test runs
     def test_init_device_auto_cuda(self, mock_cuda_available, mock_model, dummy_config):
         config_no_device = dummy_config.copy()
@@ -304,7 +305,16 @@ class TestMGNNTrainerExecution:
     def test_save_model(self, mock_torch_save, trainer, temp_trainer_files_dir):
         filepath = os.path.join(temp_trainer_files_dir, "model.pt")
         trainer.save_model(filepath)
-        mock_torch_save.assert_called_once_with(trainer.model.state_dict(), filepath)
+        
+        mock_torch_save.assert_called_once()
+        args, _ = mock_torch_save.call_args
+        saved_state_dict = args[0]
+        saved_filepath = args[1]
+        
+        assert saved_filepath == filepath
+        assert saved_state_dict.keys() == trainer.model.state_dict().keys()
+        for key in saved_state_dict:
+            assert torch.equal(saved_state_dict[key], trainer.model.state_dict()[key])
 
     @patch('torch.save')
     def test_save_checkpoint(self, mock_torch_save, trainer, temp_trainer_files_dir):
@@ -352,7 +362,14 @@ class TestMGNNTrainerExecution:
 
     @patch('torch.load')
     def test_load_checkpoint_no_history_or_best_loss(self, mock_torch_load, trainer):
-        dummy_checkpoint = {'model_state_dict': {'key': torch.tensor(1.0)}}
+        # Create a state_dict that matches MockSimpleModel structure
+        model_state = trainer.model.state_dict() # Get the correct keys and tensor shapes
+        # Modify a value to ensure we are loading something potentially different
+        # For simplicity, we can just use the current model's state dict
+        # or create one with the same keys.
+        # Using current model's state dict for simplicity in this test.
+        dummy_checkpoint = {'model_state_dict': model_state.copy()}
+        
         mock_torch_load.return_value = dummy_checkpoint
         original_history = trainer.history.copy()
         original_best_loss = trainer.best_val_loss
@@ -420,6 +437,9 @@ class TestStandaloneTrainEpoch:
 @patch('moml.models.mgnn.training.trainer.MGNNTrainer') 
 class TestCreateTrainerFactory:
     def test_create_trainer_new_model(self, MockMGNNTrainer, MockDJMGNN, dummy_config, mock_train_loader):
+        # Configure the mock DJMGNN's parameters method to return a list with a dummy parameter
+        MockDJMGNN.return_value.parameters.return_value = [nn.Parameter(torch.randn(1))]
+        
         create_trainer(config=dummy_config, train_loader=mock_train_loader)
         
         MockDJMGNN.assert_called_once_with(
@@ -458,6 +478,8 @@ class TestCreateTrainerFactory:
         MockMGNNTrainer.reset_mock()
 
         # Test create_trainer (which will ignore 'model_instance' in config and make a new DJMGNN)
+        # Configure the mock DJMGNN's parameters method for this call too
+        MockDJMGNN.return_value.parameters.return_value = [nn.Parameter(torch.randn(1))]
         create_trainer(config=config_with_model)
         MockDJMGNN.assert_called_once() # create_trainer will make a new DJMGNN
         args_ct, kwargs_ct = MockMGNNTrainer.call_args
@@ -470,21 +492,21 @@ class TestCreateTrainerFactory:
         
         # DJMGNN has default values for these if not provided.
         # The create_trainer function will pass whatever is in config (or not pass if missing).
+        # Configure the mock DJMGNN's parameters method for this call too
+        MockDJMGNN.return_value.parameters.return_value = [nn.Parameter(torch.randn(1))]
         create_trainer(config=config_no_dims)
         
         MockDJMGNN.assert_called_once_with(
-            # in_dim will be missing, DJMGNN should use its default or error if no default
-            # For this test, we assume DJMGNN handles it or has defaults.
-            # The key is that create_trainer passes what it's given.
+            # Matching the "Actual" call from the error log, which omits in_dim
             hidden_dim=config_no_dims['hidden_dim'],
             n_blocks=config_no_dims.get('n_blocks', 3),
             layers_per_block=config_no_dims.get('layers_per_block', 2),
-            edge_attr_dim=config_no_dims['edge_attr_dim'], # Might be 0
+            # Order from error log's "Actual" call for remaining kwargs
             jk_mode=config_no_dims.get('jk_mode', 'cat'),
             node_out_dim=config_no_dims['node_out_dim'],
             graph_out_dim=config_no_dims['graph_out_dim'],
-            dropout=config_no_dims.get('dropout', 0.2)
-            # in_dim is not passed as it's not in config_no_dims
+            dropout=config_no_dims.get('dropout', 0.2),
+            edge_attr_dim=config_no_dims['edge_attr_dim'] # Might be 0
         )
         # Check that in_dim was NOT in the kwargs for DJMGNN
         _, djmgnn_kwargs = MockDJMGNN.call_args
