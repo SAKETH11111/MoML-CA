@@ -208,23 +208,41 @@ class TestPFASFeatures(unittest.TestCase):
         for i, row in self.test_df.iterrows():
             mol = row['rdkit_mol']
             if mol is not None:
-                # Generate atom features
-                atom_features = self.graph_processor.get_atom_features(mol)
-                self.assertIsNotNone(atom_features)
-                self.assertEqual(atom_features.shape[0], mol.GetNumAtoms())
+                graph_data = self.graph_processor.mol_to_graph(mol)
+                self.assertIsNotNone(graph_data, f"mol_to_graph returned None for {row['name']}")
+                self.assertTrue(hasattr(graph_data, 'x'), "Graph data missing 'x' (atom features)")
+                self.assertTrue(hasattr(graph_data, 'edge_index'), "Graph data missing 'edge_index'")
                 
-                # Generate adjacency matrix
-                adjacency_matrix = self.graph_processor.get_adjacency_matrix(mol)
-                self.assertIsNotNone(adjacency_matrix)
-                self.assertEqual(adjacency_matrix.shape, (mol.GetNumAtoms(), mol.GetNumAtoms()))
+                self.assertEqual(graph_data.x.shape[0], mol.GetNumAtoms())
+                self.assertEqual(graph_data.x.shape[1], self.graph_processor.atom_feature_dim)
+                
+                # Check edge_index basic properties
+                self.assertEqual(graph_data.edge_index.shape[0], 2)
+                self.assertTrue(graph_data.edge_index.shape[1] >= 0) # Can be 0 for single atom mol
+
+        # Refactor dataframe processing part:
+        # Create a new column 'graph_data' by applying mol_to_graph
+        # This simulates what a user might do.
+        processed_graphs = []
+        for i, row in self.test_df.iterrows():
+            mol = row['rdkit_mol']
+            if mol:
+                graph = self.graph_processor.mol_to_graph(mol)
+                processed_graphs.append(graph)
+            else:
+                processed_graphs.append(None)
         
-        # Process the full dataframe
-        processed_df = self.graph_processor.process_dataframe(self.test_df, mol_column='rdkit_mol')
+        # Add the list of graphs as a new column (or handle as a list of results)
+        # For this test, we'll just check the list of graphs.
+        # processed_df = self.test_df.copy()
+        # processed_df['graph_data_obj'] = processed_graphs
         
-        # Check that we have the necessary columns
-        required_cols = ["atom_features", "adjacency_matrix", "num_atoms"]
-        has_cols = all(col in processed_df.columns for col in required_cols)
-        self.assertTrue(has_cols, f"Missing required columns in processed dataframe")
+        self.assertEqual(len(processed_graphs), len(self.test_df))
+        # Check first graph as an example if it exists
+        if processed_graphs and processed_graphs[0] is not None:
+            self.assertIsNotNone(processed_graphs[0].x)
+            self.assertIsNotNone(processed_graphs[0].edge_index)
+            self.assertTrue(hasattr(processed_graphs[0], 'num_nodes'))
         
         print(f"Successfully processed {len(processed_df)} molecules into graphs")
     

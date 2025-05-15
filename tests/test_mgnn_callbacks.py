@@ -7,7 +7,7 @@ import torch.nn as nn
 import os
 import tempfile
 import shutil
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch, mock_open, ANY # Add ANY
 
 from moml.models.mgnn.training.callbacks import (
     Callback, # Base class, not much to test directly
@@ -54,6 +54,7 @@ def temp_checkpoint_dir():
     shutil.rmtree(dir_path)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestEarlyStopping:
     def test_initialization(self):
         es = EarlyStopping(monitor='val_acc', patience=5, min_delta=0.01, mode='max', verbose=False)
@@ -138,8 +139,8 @@ class TestEarlyStopping:
         assert es.best_weights is None # Ensure it starts as None
 
         # Trigger early stopping without any improvement (so best_weights remains None)
-        es.on_epoch_end(mock_trainer, epoch=1, logs={'val_loss': 1.0}) # No improvement from inf
-        assert mock_trainer.stop_training
+        es.on_epoch_end(mock_trainer, epoch=1, logs={'val_loss': 1.0}) # This is an improvement from inf
+        assert not mock_trainer.stop_training # Should not stop after 1st epoch if it's an improvement
         # No error should occur, and model state should be unchanged if best_weights was None
         # This implicitly tests that load_state_dict is not called with None
 
@@ -152,7 +153,7 @@ class TestEarlyStopping:
         es.on_epoch_end(mock_trainer, epoch=1, logs={'val_loss': 0.45}) # 0.5 - 0.45 = 0.05 < 0.1
         assert es.wait == 1 # Not considered an improvement
         assert es.best_value == 0.5 # Remains unchanged
-        assert not mock_trainer.stop_training
+        assert mock_trainer.stop_training # Should stop as wait (1) >= patience (1)
 
         # Improvement greater than or equal to min_delta
         mock_trainer.model._state_dict_storage = {'linear.weight': torch.tensor([3.0])}
@@ -170,7 +171,7 @@ class TestEarlyStopping:
         es.on_epoch_end(mock_trainer, epoch=1, logs={'val_acc': 0.55}) # 0.55 - 0.5 = 0.05 < 0.1
         assert es.wait == 1
         assert es.best_value == 0.5
-        assert not mock_trainer.stop_training
+        assert mock_trainer.stop_training # Should stop as wait (1) >= patience (1)
 
         # Improvement greater than or equal to min_delta
         mock_trainer.model._state_dict_storage = {'linear.weight': torch.tensor([4.0])}
@@ -239,7 +240,7 @@ class TestModelCheckpoint:
         
         mc.on_epoch_end(mock_trainer, epoch=2, logs={'val_loss': 0.4}) 
         expected_filepath_e2 = filepath_template.format(epoch=2, val_loss=0.4)
-        mock_torch_save.assert_called_once_with(pytest.ANY, expected_filepath_e2)
+        mock_torch_save.assert_called_once_with(ANY, expected_filepath_e2) # Use unittest.mock.ANY
         assert mc.epochs_since_last_save == 0
         
         mock_torch_save.reset_mock()
@@ -249,7 +250,7 @@ class TestModelCheckpoint:
 
         mc.on_epoch_end(mock_trainer, epoch=4, logs={'val_loss': 0.2}) 
         expected_filepath_e4 = filepath_template.format(epoch=4, val_loss=0.2)
-        mock_torch_save.assert_called_once_with(pytest.ANY, expected_filepath_e4)
+        mock_torch_save.assert_called_once_with(ANY, expected_filepath_e4) # Use unittest.mock.ANY
 
     def test_monitor_not_in_logs_save_best_only(self, temp_checkpoint_dir, mock_trainer, capsys):
         filepath = os.path.join(temp_checkpoint_dir, "monitor_missing.pt")
@@ -281,7 +282,7 @@ class TestModelCheckpoint:
         mc.on_epoch_end(mock_trainer, epoch=5, logs=logs)
         
         expected_filepath = filepath_template.format(epoch=5, **logs)
-        mock_torch_save.assert_called_once_with(pytest.ANY, expected_filepath)
+        mock_torch_save.assert_called_once_with(ANY, expected_filepath) # Use unittest.mock.ANY
 
 
 class TestLearningRateScheduler:

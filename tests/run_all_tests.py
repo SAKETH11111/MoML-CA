@@ -1,148 +1,116 @@
 #!python
 """
-Runs all the test scripts in the tests directory
+Runs all the test scripts in the tests directory using pytest.
 
 This script:
-1. Finds all test modules in the tests directory
-2. Runs each test module and collects results
-3. Provides a detailed summary of test results
-4. Supports running specific test modules via command line arguments
+1. Uses pytest to discover and run all test modules in the tests directory.
+2. Supports running specific test modules or all tests.
+3. Supports pytest's verbosity options.
 """
 
-import os
 import sys
-import importlib
 import argparse
 import logging
-from datetime import datetime
+import pytest
+import os
 
-# Setup logging
+# Setup logging (pytest handles its own verbose output, this is for the script itself)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger("run_all_tests")
+logger = logging.getLogger("run_all_tests_pytest")
 
-# Add project root to the Python path
+# Add project root to the Python path if necessary for pytest discovery
+# This might not be strictly needed if tests are run from the project root
+# or if pytest is configured correctly (e.g., via pytest.ini or pyproject.toml)
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(project_root)
-
-
-def find_test_modules():
-    """Find all test modules in the tests directory."""
-    test_dir = os.path.dirname(os.path.abspath(__file__))
-    test_files = []
-    
-    for file in os.listdir(test_dir):
-        if file.startswith("test_") and file.endswith(".py"):
-            # Skip this file itself
-            if file == os.path.basename(__file__):
-                continue
-            
-            # Get the module name without .py
-            module_name = file[:-3]
-            test_files.append(module_name)
-    
-    return sorted(test_files)
-
-
-def run_test_module(module_name):
-    """Run the specified test module."""
-    logger.info(f"Running test module: {module_name}")
-    
-    try:
-        # Import the module
-        module = importlib.import_module(module_name)
-        
-        # Call the run_tests function if it exists
-        if hasattr(module, 'run_tests'):
-            success = module.run_tests()
-        else:
-            # Try to find other commonly used test runner functions
-            runner_found = False
-            for runner_name in ['run_all_tests', 'run_graph_generation_tests', 'run_dataset_processing_tests', 
-                               'run_pipeline_tests', 'run_validation_tests']:
-                if hasattr(module, runner_name):
-                    success = getattr(module, runner_name)()
-                    runner_found = True
-                    break
-            
-            # If no runner function found, assume test passed
-            if not runner_found:
-                logger.warning(f"No test runner function found in {module_name}")
-                success = True
-        
-        return success
-    
-    except Exception as e:
-        logger.error(f"Error running test module {module_name}: {e}")
-        return False
-
-
-def run_all_tests(modules=None):
-    """Run all test modules or the specified ones."""
-    if modules is None:
-        modules = find_test_modules()
-    
-    logger.info(f"Found {len(modules)} test modules: {', '.join(modules)}")
-    
-    results = {}
-    all_passed = True
-    start_time = datetime.now()
-    
-    for module_name in modules:
-        module_start = datetime.now()
-        success = run_test_module(module_name)
-        module_duration = datetime.now() - module_start
-        
-        results[module_name] = {
-            "status": "PASSED" if success else "FAILED",
-            "duration": module_duration
-        }
-        
-        if not success:
-            all_passed = False
-    
-    # Print summary
-    total_duration = datetime.now() - start_time
-    logger.info("\n===== Test Results =====")
-    logger.info(f"Total duration: {total_duration}")
-    logger.info("\nModule Results:")
-    
-    for module_name, result in results.items():
-        status = result["status"]
-        duration = result["duration"]
-        logger.info(f"{module_name:30} {status:8} ({duration})")
-    
-    if all_passed:
-        logger.info("\nAll tests PASSED! ✨")
-    else:
-        logger.error("\nSome tests FAILED! ❌")
-    
-    return all_passed
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Run test modules.')
-    parser.add_argument('--modules', nargs='+', help='List of test modules to run.')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output.')
+    parser = argparse.ArgumentParser(description='Run tests using pytest.')
+    parser.add_argument(
+        'modules',
+        nargs='*',
+        help='Optional list of test files or directories to run (e.g., tests/test_specific_module.py or tests/). '
+             'If not provided, pytest will discover tests in the current directory (usually "tests/").'
+    )
+    parser.add_argument(
+        '--verbose', '-v',
+        action='count',  # Allows for -v, -vv, etc.
+        default=0,
+        help='Enable verbose output (can be used multiple times for more verbosity).'
+    )
+    # Add any other common pytest arguments you want to expose
+    parser.add_argument(
+        '--pytest-args',
+        nargs=argparse.REMAINDER,
+        help='Additional arguments to pass directly to pytest.'
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    # Parse arguments
     args = parse_arguments()
-    
-    # Set logging level based on verbosity
-    if args.verbose:
-        logger.setLevel(logging.DEBUG)
-    
-    # If specific modules are provided, run only those
-    modules = args.modules
-    
-    # Run the tests
-    success = run_all_tests(modules)
-    
-    # Exit with appropriate code
-    sys.exit(0 if success else 1) 
+
+    pytest_args = []
+
+    # Handle verbosity
+    if args.verbose > 0:
+        pytest_args.append("-" + "v" * args.verbose)
+
+    # Handle specific modules/paths to test
+    if args.modules:
+        # Pytest expects paths to files or directories.
+        # The old script took module names like 'test_datasets'.
+        # We'll assume the user will now provide paths like 'tests/test_datasets.py'.
+        pytest_args.extend(args.modules)
+    else:
+        # If no modules are specified, pytest will typically search the current
+        # directory or a configured testpaths directory.
+        # We can explicitly tell it to run tests in the 'tests' directory.
+        # This assumes the script is run from the project root or that 'tests' is discoverable.
+        # If run_all_tests.py is in tests/, then pytest will discover from tests/ by default.
+        pass # Pytest default behavior is usually fine here.
+
+    # Add any extra pytest arguments
+    if args.pytest_args:
+        pytest_args.extend(args.pytest_args)
+
+    logger.info(f"Running pytest with arguments: {pytest_args}")
+
+    # Ensure the 'tests' directory is the target if no specific modules are given
+    # and the script is run from within the tests directory itself.
+    # If run from project root `python tests/run_all_tests.py`, pytest will collect from `tests/`
+    # If `cd tests` and then `python run_all_tests.py`, it will also collect from `.` (which is `tests/`)
+    # If no specific modules are passed and pytest_args is empty,
+    # explicitly add 'tests' or '.' to ensure collection from the tests directory.
+    if not args.modules and not any(arg.startswith("tests") or arg == "." for arg in pytest_args):
+        # If the script is in tests/ and run from tests/, '.' is fine.
+        # If run from root, 'tests' is better.
+        # Let's assume this script is in the 'tests' directory.
+        # If no specific modules are given, pytest will search from the directory it's invoked in.
+        # If this script is `tests/run_all_tests.py`, and we run `python tests/run_all_tests.py`,
+        # pytest's default collection from the `tests` dir should work.
+        # If we want to be explicit:
+        # current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        # if not args.modules and not any(arg.startswith(current_script_dir) or arg == "." for arg in pytest_args):
+        # pytest_args.insert(0, current_script_dir) # Run all tests in the directory of this script
+        pass
+
+
+    # Execute pytest
+    # The exit code from pytest.main() indicates success (0) or failure (non-zero).
+    exit_code = pytest.main(pytest_args)
+
+    if exit_code == 0:
+        logger.info("All tests PASSED! ✨")
+    elif exit_code == 5:
+        logger.warning("No tests were collected. 🚫")
+    else:
+        logger.error(f"Some tests FAILED or ERRORED! ❌ (pytest exit code: {exit_code})")
+
+    sys.exit(exit_code)

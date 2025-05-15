@@ -116,18 +116,28 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         # Test with ethane (simplest case)
         mol = self.mols[0]
         
-        # Get atom features and adjacency matrix
-        atom_features = self.graph_processor.get_atom_features(mol)
-        adjacency_matrix = self.graph_processor.get_adjacency_matrix(mol)
+        # Convert molecule to graph
+        graph = self.graph_processor.mol_to_graph(mol)
+        self.assertIsInstance(graph, PyGData)
         
         # Check basic properties
-        self.assertEqual(atom_features.shape[0], mol.GetNumAtoms())
-        self.assertEqual(adjacency_matrix.shape, (mol.GetNumAtoms(), mol.GetNumAtoms()))
+        self.assertEqual(graph.num_nodes, mol.GetNumAtoms())
+        self.assertTrue(hasattr(graph, 'x')) # Node features
+        self.assertTrue(hasattr(graph, 'edge_index'))
         
         # Check feature dimensions
-        expected_feature_dim = self.graph_processor.atom_feature_dim
-        self.assertEqual(atom_features.shape[1], expected_feature_dim)
+        self.assertEqual(graph.x.shape[0], mol.GetNumAtoms())
+        self.assertEqual(graph.x.shape[1], self.graph_processor.atom_feature_dim)
         
+        # Check edge_index (basic check, assumes undirected edges are added by mol_to_graph)
+        self.assertEqual(graph.edge_index.shape[0], 2)
+        self.assertGreaterEqual(graph.edge_index.shape[1], mol.GetNumBonds()) # Can be 2*num_bonds for undirected
+        
+        if mol.GetNumBonds() > 0:
+            self.assertTrue(hasattr(graph, 'edge_attr'))
+            self.assertEqual(graph.edge_attr.shape[1], self.graph_processor.bond_feature_dim)
+            self.assertEqual(graph.edge_attr.shape[0], graph.edge_index.shape[1])
+
         print(f"Basic graph conversion test passed for ethane")
     
     def test_mol_to_graph_with_trifluoromethane(self):
@@ -139,17 +149,29 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         mol = self.mols[1]
         num_atoms = mol.GetNumAtoms()
         
-        # Get atom features and adjacency matrix
-        atom_features = self.graph_processor.get_atom_features(mol)
-        adjacency_matrix = self.graph_processor.get_adjacency_matrix(mol)
+        # Convert molecule to graph
+        graph = self.graph_processor.mol_to_graph(mol)
+        self.assertIsInstance(graph, PyGData)
         
         # Check basic properties
-        self.assertEqual(atom_features.shape[0], num_atoms)
-        self.assertEqual(adjacency_matrix.shape, (num_atoms, num_atoms))
+        self.assertEqual(graph.num_nodes, num_atoms)
+        self.assertTrue(hasattr(graph, 'x'))
+        self.assertEqual(graph.x.shape[0], num_atoms)
+        self.assertEqual(graph.x.shape[1], self.graph_processor.atom_feature_dim)
         
-        # Check that adjacency matrix is symmetric
-        self.assertTrue(np.array_equal(adjacency_matrix, adjacency_matrix.T))
+        self.assertTrue(hasattr(graph, 'edge_index'))
+        self.assertEqual(graph.edge_index.shape[0], 2)
         
+        if mol.GetNumBonds() > 0:
+            self.assertTrue(hasattr(graph, 'edge_attr'))
+            self.assertEqual(graph.edge_attr.shape[1], self.graph_processor.bond_feature_dim)
+            self.assertEqual(graph.edge_attr.shape[0], graph.edge_index.shape[1])
+            
+        # Check for 3D coordinates if expected by processor config
+        if self.graph_processor.use_3d_coords:
+            self.assertTrue(hasattr(graph, 'pos'))
+            self.assertEqual(graph.pos.shape, (num_atoms, 3))
+            
         print(f"Graph conversion passed for trifluoromethane")
     
     def test_mol_from_file_to_graph(self):
@@ -165,14 +187,22 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         mol = Chem.MolFromMolFile(mol_file)
         self.assertIsNotNone(mol, "Failed to load molecule from MOL file")
         
-        # Get atom features and adjacency matrix
-        atom_features = self.graph_processor.get_atom_features(mol)
-        adjacency_matrix = self.graph_processor.get_adjacency_matrix(mol)
+        # Convert molecule to graph using the processor's file_to_graph method
+        graph = self.graph_processor.file_to_graph(mol_file)
+        self.assertIsInstance(graph, PyGData)
         
         # Check basic properties
-        self.assertEqual(atom_features.shape[0], mol.GetNumAtoms())
-        self.assertEqual(adjacency_matrix.shape, (mol.GetNumAtoms(), mol.GetNumAtoms()))
+        self.assertEqual(graph.num_nodes, mol.GetNumAtoms())
+        self.assertTrue(hasattr(graph, 'x'))
+        self.assertEqual(graph.x.shape[0], mol.GetNumAtoms())
+        self.assertEqual(graph.x.shape[1], self.graph_processor.atom_feature_dim)
         
+        self.assertTrue(hasattr(graph, 'edge_index'))
+        if mol.GetNumBonds() > 0:
+            self.assertTrue(hasattr(graph, 'edge_attr'))
+            self.assertEqual(graph.edge_attr.shape[1], self.graph_processor.bond_feature_dim)
+            self.assertEqual(graph.edge_attr.shape[0], graph.edge_index.shape[1])
+
         print(f"Successfully created graph from mol file")
     
     def test_process_dataframe(self):
@@ -190,22 +220,35 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         # Convert SMILES to RDKit molecules
         df = create_rdkit_mols(df, smiles_col='smiles', mol_col='rdkit_mol')
         
-        # Process dataframe with the graph processor
-        processed_df = self.graph_processor.process_dataframe(df, mol_column='rdkit_mol')
+        # Simulate processing dataframe row by row
+        processed_graphs = []
+        num_atoms_list = []
+        for idx, row in df.iterrows():
+            mol = row['rdkit_mol']
+            if mol:
+                graph = self.graph_processor.mol_to_graph(mol)
+                if graph:
+                    processed_graphs.append(graph)
+                    num_atoms_list.append(mol.GetNumAtoms())
+            else: # Handle cases where mol might be None if SMILES was invalid
+                processed_graphs.append(None)
+                num_atoms_list.append(0)
+
+        self.assertEqual(len(processed_graphs), len(df))
         
-        # Check that the necessary columns exist
-        required_cols = ["atom_features", "adjacency_matrix", "num_atoms"]
-        has_cols = all(col in processed_df.columns for col in required_cols)
-        self.assertTrue(has_cols, f"Missing columns in processed dataframe")
+        # Check that all valid rows have graph objects
+        for i, graph_obj in enumerate(processed_graphs):
+            original_mol = df.iloc[i]['rdkit_mol']
+            if original_mol: # Only check if original mol was valid
+                self.assertIsInstance(graph_obj, PyGData)
+                self.assertEqual(graph_obj.num_nodes, num_atoms_list[i])
+                self.assertTrue(hasattr(graph_obj, 'x'))
+                self.assertEqual(graph_obj.x.shape[0], num_atoms_list[i])
+                self.assertEqual(graph_obj.x.shape[1], self.graph_processor.atom_feature_dim)
+            else:
+                self.assertIsNone(graph_obj) # Expect None if original mol was None
         
-        # Check that all rows have atom features and adjacency matrices
-        for idx, row in processed_df.iterrows():
-            self.assertIsInstance(row["atom_features"], np.ndarray)
-            self.assertIsInstance(row["adjacency_matrix"], np.ndarray)
-            self.assertEqual(row["atom_features"].shape[0], row["num_atoms"])
-            self.assertEqual(row["adjacency_matrix"].shape, (row["num_atoms"], row["num_atoms"]))
-        
-        print(f"Successfully processed dataframe with {len(processed_df)} molecules")
+        print(f"Successfully processed dataframe with {len(df[df['rdkit_mol'].notna()])} valid molecules into graphs")
         
     def test_save_processed_data(self):
         """Test saving processed molecular graph data."""
@@ -222,23 +265,42 @@ class TestMolecularGraphGenerator(unittest.TestCase):
         # Convert SMILES to RDKit molecules
         df = create_rdkit_mols(df, smiles_col='smiles', mol_col='rdkit_mol')
         
-        # Process dataframe with the graph processor
-        processed_df = self.graph_processor.process_dataframe(df, mol_column='rdkit_mol')
+        # Simulate processing dataframe row by row and collecting graph properties
+        processed_graphs_data = []
+        for idx, row in df.iterrows():
+            mol = row['rdkit_mol']
+            if mol:
+                graph = self.graph_processor.mol_to_graph(mol)
+                if graph:
+                    processed_graphs_data.append({
+                        'id': row['id'],
+                        'name': row['name'],
+                        'smiles': row['smiles'],
+                        'num_nodes': graph.num_nodes,
+                        'num_edges': graph.num_edges,
+                        # Storing paths to individual .pt files would be another option
+                    })
         
-        # Save processed data
+        # Create a DataFrame from the collected graph properties
+        save_df = pd.DataFrame(processed_graphs_data)
+
+        # Save processed data (now a DataFrame of graph properties)
         output_dir = os.path.join(self.temp_dir.name, "output")
         os.makedirs(output_dir, exist_ok=True)
         
-        # Save the data (without atom_features and adjacency_matrix which don't serialize well)
-        save_df = processed_df.copy()
-        save_df.drop(["atom_features", "adjacency_matrix"], axis=1, inplace=True)
-        output_file = os.path.join(output_dir, "molecular_graphs.csv")
+        output_file = os.path.join(output_dir, "molecular_graph_properties.csv")
         save_df.to_csv(output_file, index=False)
         
         # Check that the file was created
         self.assertTrue(os.path.exists(output_file), f"Output file not created: {output_file}")
         
-        print(f"Successfully saved processed data to {output_file}")
+        # Verify content (optional, basic check)
+        loaded_df = pd.read_csv(output_file)
+        self.assertEqual(len(loaded_df), len(df[df['rdkit_mol'].notna()]))
+        self.assertIn('num_nodes', loaded_df.columns)
+        self.assertIn('id', loaded_df.columns)
+
+        print(f"Successfully saved processed graph properties to {output_file}")
 
 
 def run_graph_generation_tests():
