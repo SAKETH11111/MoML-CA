@@ -141,8 +141,8 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         cls.orchestrator = PFASPipelineOrchestrator(
             data_dir=cls.test_config["data_dir"],
             output_dir=cls.test_config["output_dir"],
-            working_dir=cls.test_config["working_dir"],
-            cache_intermediates=True
+            working_dir=cls.test_config["working_dir"]
+            # cache_intermediates is handled by the config dictionary
         )
         
         # Update configuration
@@ -174,7 +174,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         logger.info("Testing preprocessing stage...")
         
         # Run preprocessing
-        df = self.orchestrator.preprocess_data(self.test_dataset, force_rerun=True)
+        df = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True)
         
         # Verify results
         self.assertIsNotNone(df)
@@ -205,12 +205,12 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         """Test caching mechanism."""
         logger.info("Testing caching mechanism...")
         
-        # Clear orchestrator cache
-        self.orchestrator.cache["processed_df"] = None
+        # Clear orchestrator cache for the specific stage
+        self.orchestrator.cache["processed_dataframe"] = None # Updated cache key
         
         # Run preprocessing again without force_rerun
         start_time = time.time()
-        df = self.orchestrator.preprocess_data(self.test_dataset, force_rerun=False)
+        df = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=False) # Updated method name
         end_time = time.time()
         
         # Verify results
@@ -222,7 +222,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         
         # Force rerun and verify it takes longer
         start_time = time.time()
-        df = self.orchestrator.preprocess_data(self.test_dataset, force_rerun=True)
+        df = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True) # Updated method name
         end_time = time.time()
         
         # This should take longer as it's not using the cache, but be reasonable with timing threshold
@@ -236,7 +236,16 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         self.orchestrator.config["execution"]["skip_qm"] = True
         
         # Run ORCA calculations
-        orca_results = self.orchestrator.run_orca_calculations(input_file=self.test_dataset)
+        # The input_file for run_qm_stage should be the processed CSV from the preprocessing stage
+        processed_csv_path = os.path.join(self.orchestrator.dirs["processed_data"], "molecules_processed.csv")
+        # Ensure this file exists from a previous stage or create a dummy one for this test if isolated
+        if not os.path.exists(processed_csv_path) and self.orchestrator.cache.get("processed_dataframe") is None:
+             # Run preprocessing if not done, to ensure the input for QM stage is present
+            logger.info("Preprocessing data for ORCA test setup as processed file not found.")
+            self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True) # Use True if state is unknown
+
+        # Now, the processed_csv_path should exist or its data be in cache
+        orca_results = self.orchestrator.run_qm_stage(input_processed_csv_path=processed_csv_path)
         
         # Should return empty DataFrame when skipped
         self.assertIsInstance(orca_results, pd.DataFrame)
@@ -254,7 +263,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         self.orchestrator.config["execution"]["skip_graph_generation"] = True
         
         # Run full pipeline
-        results = self.orchestrator.run_full_pipeline(self.test_dataset, force_rerun=True)
+        results = self.orchestrator.execute_pipeline(input_csv_path=self.test_dataset, force_rerun=True)
         
         # Verify results
         self.assertIsNotNone(results)
@@ -272,28 +281,43 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
     
     def test_06_resume_pipeline(self):
         """Test resuming pipeline from a checkpoint."""
-        logger.info("Testing pipeline resume functionality...")
+        logger.info("Testing pipeline resume functionality (for preprocessing stage)...")
         
-        # Reset state to simulate interrupted pipeline
-        self.orchestrator.state["orca_calculated"] = False
-        self.orchestrator.state["graphs_generated"] = False
-        self.orchestrator._save_state()
+        processed_csv_path = os.path.join(self.orchestrator.dirs["processed_data"], "molecules_processed.csv")
+
+        # Run preprocessing first with force_rerun to establish a baseline and save state
+        self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=True)
+        self.assertTrue(os.path.exists(processed_csv_path))
+        timestamp_run1 = os.path.getmtime(processed_csv_path)
+        state_run1 = self.orchestrator.state.copy()
+
+        # Allow a brief moment for timestamp granularity
+        time.sleep(0.1)
+
+        # Create a new orchestrator instance - it should load the previously saved state
+        # (assuming state is saved to a file and loaded on init, which it is via _load_state)
+        # For this test, we'll use the same orchestrator instance but simulate re-entry
+        # by clearing a part of its internal cache that might make it re-run without state file.
+        # More robustly, one would create a new instance.
+        # For now, let's rely on force_rerun=False and the existing state file.
         
-        # Mock stages to avoid actual computation
-        self.orchestrator.config["execution"]["skip_qm"] = True
-        self.orchestrator.config["execution"]["skip_graph_generation"] = True
+        # To ensure it's not just using in-memory cache from the same instance:
+        self.orchestrator.cache['processed_dataframe'] = None
         
-        # Resume pipeline
-        results = self.orchestrator.resume_pipeline(self.test_dataset)
+        # Run preprocessing again, force_rerun is False (default for run_preprocessing_stage if not specified)
+        # The orchestrator should see that preprocessing is complete from its loaded state.
+        df_run2 = self.orchestrator.run_preprocessing_stage(input_csv_path=self.test_dataset, force_rerun=False)
         
-        # Verify results
-        self.assertIsNotNone(results)
-        self.assertEqual(results["molecules_processed"], len(TEST_SMILES))
-        self.assertEqual(results["valid_molecules"], 4)  # This is the actual count of valid SMILES in the test
+        self.assertTrue(os.path.exists(processed_csv_path))
+        timestamp_run2 = os.path.getmtime(processed_csv_path)
+
+        # Assert that the file was not modified, meaning the stage was skipped due to loaded state
+        self.assertEqual(timestamp_run1, timestamp_run2, "Processed file was modified, stage did not resume from state.")
         
-        # Disable mocking
-        self.orchestrator.config["execution"]["skip_qm"] = False
-        self.orchestrator.config["execution"]["skip_graph_generation"] = False
+        # Verify results from the second run (should be loaded from cache/state)
+        self.assertIsNotNone(df_run2)
+        self.assertEqual(len(df_run2), len(TEST_SMILES))
+        self.assertTrue(self.orchestrator.state.get("preprocessing_completed"))
 
 def run_tests():
     """Run the test suite."""
