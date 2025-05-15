@@ -23,6 +23,7 @@ from torch_geometric.data import Data
 from rdkit import Chem
 from typing import Dict, List, Tuple, Optional, Union
 import logging
+import numpy as np
 
 from moml.core.molecular_feature_extraction import (
     FunctionalGroupDetector,
@@ -97,8 +98,19 @@ class GraphCoarsener:
         
         # Assign cluster IDs to functional groups (excluding CF groups)
         for group in functional_groups:
-            for atom_idx in group:
-                cluster_mapping[atom_idx] = next_cluster_id
+            # Ensure group is a collection of atom indices (ints), not a set of sets
+            if isinstance(group, (set, list, tuple)):
+                # Flatten if group is a set of sets (should not happen, but guard against it)
+                for atom_idx in group:
+                    if isinstance(atom_idx, (set, list, tuple)):
+                        for idx in atom_idx:
+                            cluster_mapping[idx] = next_cluster_id
+                    else:
+                        cluster_mapping[atom_idx] = next_cluster_id
+            elif isinstance(group, int):
+                cluster_mapping[group] = next_cluster_id
+            else:
+                raise TypeError(f"Unexpected group type: {type(group)}")
             next_cluster_id += 1
         
         # Handle CF groups - they're already identified at the atom level
@@ -163,6 +175,8 @@ class GraphCoarsener:
         """
         # Get original node features
         x = data.x
+        if x is None:
+            raise ValueError("Input data.x (node features) is None.")
         
         # Create a reverse mapping from cluster IDs to atom indices
         clusters = {}
@@ -197,14 +211,16 @@ class GraphCoarsener:
         # Get original edges
         edge_index = data.edge_index
         edge_attr = data.edge_attr
+        if edge_index is None or edge_attr is None:
+            raise ValueError("Input data.edge_index or data.edge_attr is None.")
         
         # Create a set of edges between clusters
         cluster_edges = set()
         cluster_edge_attrs = {}
         
         for i in range(edge_index.shape[1]):
-            src = edge_index[0, i].item()
-            dst = edge_index[1, i].item()
+            src = int(edge_index[0, i].item())
+            dst = int(edge_index[1, i].item())
             
             # Map to cluster IDs
             src_cluster = cluster_mapping[src]
@@ -237,7 +253,7 @@ class GraphCoarsener:
         
         if not coarsened_edge_index:
             # No edges in the coarsened graph
-            return torch.zeros((2, 0), dtype=torch.long), torch.zeros((0, edge_attr.shape[1]), dtype=torch.float)
+            return torch.zeros((2, 0), dtype=torch.long), torch.zeros((0, edge_attr.shape[1] if edge_attr is not None else 0), dtype=torch.float)
         
         return (torch.tensor(coarsened_edge_index, dtype=torch.long).t(), 
                 torch.stack(coarsened_edge_attr))
@@ -258,6 +274,7 @@ class GraphCoarsener:
         if not hasattr(data, 'pos') or data.pos is None:
             return None
         
+        pos = data.pos
         # Create a reverse mapping from cluster IDs to atom indices
         clusters = {}
         for atom_idx, cluster_id in cluster_mapping.items():
@@ -270,7 +287,7 @@ class GraphCoarsener:
         for cluster_id in sorted(clusters.keys()):
             atom_indices = clusters[cluster_id]
             # Average the positions of all atoms in this cluster
-            cluster_pos = torch.mean(data.pos[atom_indices], dim=0)
+            cluster_pos = torch.mean(pos[atom_indices], dim=0)
             coarsened_positions.append(cluster_pos)
         
         return torch.stack(coarsened_positions)
@@ -307,7 +324,7 @@ class GraphCoarsener:
         )
         
         # Transfer any custom attributes from the original graph
-        for key in data.keys:
+        for key in data.keys():
             if key not in ['x', 'edge_index', 'edge_attr', 'pos', 'y', 'num_nodes']:
                 coarsened_data[key] = data[key]
         
@@ -358,7 +375,7 @@ class GraphCoarsener:
         )
         
         # Transfer any custom attributes from the original graph
-        for key in data.keys:
+        for key in data.keys():
             if key not in ['x', 'edge_index', 'edge_attr', 'pos', 'y', 'num_nodes', 
                           'cluster_mapping', 'structural_mapping', 'combined_mapping']:
                 motif_data[key] = data[key]
@@ -465,7 +482,8 @@ class GraphCoarsener:
             
             return graph_paths
         else:
-            return hierarchical_graphs
+            # Cast to correct type for return
+            return dict(hierarchical_graphs)
     
     def create_from_orca(self,
                         mol_file: str,
@@ -494,7 +512,18 @@ class GraphCoarsener:
         # Extract partial charges if quantum properties are available
         partial_charges = None
         if use_quantum_properties and qm_data is not None:
-            partial_charges = qm_data.get(charge_type, {}).get('charges', None)
+            # Only use .get if qm_data is a dict
+            if isinstance(qm_data, dict):
+                charge_dict = qm_data.get(charge_type, None)
+                if isinstance(charge_dict, dict):
+                    partial_charges = charge_dict.get('charges', None)
+                else:
+                    partial_charges = None
+            elif isinstance(qm_data, (list, tuple)):
+                partial_charges = qm_data
+            elif isinstance(qm_data, np.ndarray):
+                partial_charges = qm_data.tolist()
+            # else: leave as None
         
         # Create hierarchical graphs using the molecule file
         return self.create_from_molecule_file(
