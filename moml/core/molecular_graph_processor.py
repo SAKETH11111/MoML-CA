@@ -12,7 +12,9 @@ import torch
 import logging
 from torch_geometric.data import Data
 from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors, Lipinski
+from rdkit.Chem import AllChem, Descriptors
+from rdkit.Chem import Lipinski
+from rdkit.Chem import QED
 from typing import Dict, List, Tuple, Optional, Union, Any
 import numpy as np
 
@@ -54,7 +56,7 @@ class MolecularGraphProcessor:
     
     BOND_FEATURES = MolecularFeatureExtractor.BOND_FEATURES
     
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         Initialize the MolecularGraphProcessor.
         
@@ -153,7 +155,7 @@ class MolecularGraphProcessor:
         return dim
     
     @staticmethod
-    def _one_hot_encoding(value: any, choices: list) -> List[int]:
+    def _one_hot_encoding(value: Any, choices: List[Any]) -> List[int]:
         """
         Create a one-hot encoding of a value from a list of choices.
         
@@ -402,7 +404,7 @@ class MolecularGraphProcessor:
         
         # Add bond length if available
         if bond_length is not None:
-            features.append(bond_length)
+            features.append(float(bond_length))
         
         return features
     
@@ -424,7 +426,9 @@ class MolecularGraphProcessor:
         """
         # Verify the molecule has 3D coordinates if needed
         if self.use_3d_coords and mol.GetNumConformers() == 0:
-            raise ValueError("Molecule does not have 3D coordinates, but use_3d_coords is True")
+            mol = Chem.AddHs(mol)
+            AllChem.EmbedMolecule(mol, randomSeed=42)  # type: ignore[attr-defined]
+            AllChem.UFFOptimizeMolecule(mol)  # type: ignore[attr-defined]
         
         # Extract additional features
         partial_charges = None
@@ -505,11 +509,11 @@ class MolecularGraphProcessor:
         
         # Create additional global features for the molecule
         global_features = [
-            Descriptors.ExactMolWt(mol),              # Molecular weight
-            Descriptors.TPSA(mol),                    # Topological polar surface area
-            Lipinski.NumHDonors(mol),                 # Number of H-bond donors
-            Lipinski.NumHAcceptors(mol),              # Number of H-bond acceptors
-            Descriptors.MolLogP(mol),                 # Octanol-water partition coefficient
+            Descriptors.MolWt(mol),              # Molecular weight # type: ignore[attr-defined]
+            Descriptors.TPSA(mol),                    # Topological polar surface area # type: ignore[attr-defined]
+            Lipinski.NumHDonors(mol),                 # Number of H-bond donors # type: ignore[attr-defined]
+            Lipinski.NumHAcceptors(mol),              # Number of H-bond acceptors # type: ignore[attr-defined]
+            Descriptors.MolLogP(mol),                 # Octanol-water partition coefficient # type: ignore[attr-defined]
             mol.GetNumAtoms(),                        # Total number of atoms
             len([a for a in mol.GetAtoms() if a.GetAtomicNum() == 9])  # Count of fluorine atoms (PFAS specific)
         ]
@@ -611,8 +615,8 @@ class MolecularGraphProcessor:
         # Generate 3D coordinates if needed and not present
         if self.use_3d_coords and mol.GetNumConformers() == 0:
             mol = Chem.AddHs(mol)
-            AllChem.EmbedMolecule(mol, randomSeed=42)
-            AllChem.UFFOptimizeMolecule(mol)
+            AllChem.EmbedMolecule(mol, randomSeed=42) # type: ignore[attr-defined]
+            AllChem.UFFOptimizeMolecule(mol) # type: ignore[attr-defined]
         
         # Generate graph
         graph = self.mol_to_graph(mol, additional_features)
@@ -779,7 +783,7 @@ class MolecularGraphProcessor:
         
         # Add bond length if available
         if bond_length is not None:
-            features["bond_length"] = bond_length
+            features["bond_length"] = float(bond_length)  # type: ignore
         
         return features
     
@@ -794,17 +798,17 @@ class MolecularGraphProcessor:
             Dictionary of molecular descriptors
         """
         descriptors = {
-            "mol_weight": Descriptors.MolWt(mol),
+            "mol_weight": Descriptors.MolWt(mol), # type: ignore[attr-defined]
             "num_atoms": mol.GetNumAtoms(),
             "num_heavy_atoms": mol.GetNumHeavyAtoms(),
             "num_bonds": mol.GetNumBonds(),
-            "num_rotatable_bonds": Descriptors.NumRotatableBonds(mol),
-            "num_h_donors": Descriptors.NumHDonors(mol),
-            "num_h_acceptors": Descriptors.NumHAcceptors(mol),
-            "logp": Descriptors.MolLogP(mol),
-            "tpsa": Descriptors.TPSA(mol),
-            "qed": Descriptors.qed(mol),
-            "fraction_sp3": Descriptors.FractionCSP3(mol),
+            "num_rotatable_bonds": Descriptors.NumRotatableBonds(mol), # type: ignore[attr-defined]
+            "num_h_donors": Lipinski.NumHDonors(mol), # type: ignore[attr-defined]
+            "num_h_acceptors": Lipinski.NumHAcceptors(mol), # type: ignore[attr-defined]
+            "logp": Descriptors.MolLogP(mol), # type: ignore[attr-defined]
+            "tpsa": Descriptors.TPSA(mol), # type: ignore[attr-defined]
+            "qed": QED.qed(mol),
+            "fraction_sp3": Descriptors.FractionCSP3(mol), # type: ignore[attr-defined]
         }
         
         # Add PFAS-specific descriptors if configured
@@ -972,7 +976,7 @@ class MolecularGraphProcessor:
         return df
 
 
-def create_graph_processor(config: Dict[str, Any] = None) -> MolecularGraphProcessor:
+def create_graph_processor(config: Optional[Dict[str, Any]] = None) -> MolecularGraphProcessor:
     """
     Create a MolecularGraphProcessor with the specified configuration.
     
@@ -1094,12 +1098,12 @@ def collate_graphs(graphs: List[Data]) -> Data:
     from torch_geometric.data import Batch
     
     # Use PyTorch Geometric's built-in batching
-    batch = Batch.from_data_list(graphs)
+    batch = Batch.from_data_list(graphs)  # type: ignore[arg-type]
     
-    return batch 
+    return batch  # type: ignore[return-value]
 
 
-def find_charges_file(mol_file: str, charges_dir: str) -> str:
+def find_charges_file(mol_file: str, charges_dir: str) -> Optional[str]:
     """
     Find the corresponding charges file for a molecule file.
     

@@ -132,9 +132,6 @@ class GraphCoarsener:
         """
         distance_features = self.feature_extractor.calculate_distance_features(mol)
         
-        # Get unique cluster IDs
-        unique_clusters = set(cluster_mapping.values())
-        
         # Initialize structural mapping
         structural_mapping = {}
         
@@ -346,6 +343,7 @@ class GraphCoarsener:
             data = self.create_functional_group_graph(data, mol)
         
         # Get the cluster mapping from the functional group level
+        # Does Data have cluster_mapping attribute?
         cluster_mapping = data.cluster_mapping
         
         # Create mapping from functional groups to structural motifs
