@@ -310,10 +310,6 @@ def generate_molecule_grid(
         else:
             prepared_mols.append(None)
 
-    # Calculate grid dimensions
-    n_mols = len(prepared_mols)
-    n_rows = (n_mols + n_cols - 1) // n_cols
-
     # Create a grid image
     img = Draw.MolsToGridImage(prepared_mols, molsPerRow=n_cols, subImgSize=size, legends=labels, useSVG=False)
 
@@ -349,7 +345,7 @@ def save_molecule_grid(
     grid_img = generate_molecule_grid(mols, labels, size, n_cols)
 
     # Save with matplotlib for better formatting
-    fig = plt.figure(figsize=(grid_img.shape[1] / 100, grid_img.shape[0] / 100), dpi=100)
+    plt.figure(figsize=(grid_img.shape[1] / 100, grid_img.shape[0] / 100), dpi=100)
 
     if title:
         plt.title(title, fontsize=14)

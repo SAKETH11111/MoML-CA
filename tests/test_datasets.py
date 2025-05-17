@@ -17,7 +17,7 @@ from rdkit.Chem import AllChem  # Added import
 
 from moml.data.datasets import MolecularGraphDataset, HierarchicalGraphDataset, PFASDataset
 
-# from moml.core import create_molecular_graph_json # Corrected, but HierarchicalGraphDataset handles its own import
+
 
 
 # Helper function to create dummy molecule files (e.g., SDF)

@@ -86,8 +86,6 @@ class JKAggregator(nn.Module):
         super().__init__()
         self.mode, self.block_count = mode, len(block_dims)
 
-        # Removed generic check, mode-specific checks will handle empty block_dims
-
         if mode == "concat":
             if not block_dims:
                 raise ValueError("block_dims cannot be empty for concat mode.")
@@ -302,8 +300,6 @@ class DJMGNN(nn.Module):
                 # So, if edge_attr is None, new_edge_attr should also be None (GraphConvLayer will make dummy)
                 # Or, if we want supernode edges to have *some* attr:
                 if new_edge_attr is None and self.processed_edge_attr_dim > 0:
-                    # Create dummy for all edges if original was None
-                    all_zeros_for_all_edges = x.new_zeros(new_edge_index.size(1), self.processed_edge_attr_dim)
                     # This is not quite right, as GraphConvLayer makes a 1-dim dummy.
                     # Let's stick to: if original edge_attr is None, pass None. Supernode edges won't get explicit attrs.
                     pass
