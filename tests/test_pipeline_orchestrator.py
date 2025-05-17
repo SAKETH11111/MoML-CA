@@ -178,12 +178,14 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         self.assertEqual(valid_count, 4)  # We have 4 valid SMILES in TEST_SMILES
         self.assertEqual(invalid_count, 1)  # We have 1 invalid SMILES in TEST_SMILES
 
-        # Check output file - need to check the actual path
-        output_file = os.path.join(self.orchestrator.dirs["processed_data"], "molecules_processed.csv")
-        self.assertTrue(os.path.exists(output_file))
+        # Check output file - construct the expected filename dynamically
+        base_input_filename = os.path.splitext(os.path.basename(self.test_dataset))[0]
+        expected_output_filename = f"{base_input_filename}_pfas_processed.csv"
+        output_file = os.path.join(self.orchestrator.dirs["processed_data"], expected_output_filename)
+        self.assertTrue(os.path.exists(output_file), f"Expected processed file {output_file} not found.")
 
         # Check state update
-        self.assertTrue(self.orchestrator.state["preprocessed"])
+        self.assertTrue(self.orchestrator.state.get("preprocessing_completed"))
         self.assertEqual(self.orchestrator.state["molecules_processed"], len(TEST_SMILES))
 
         # Check checkpoint
@@ -267,7 +269,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         self.assertEqual(results["preprocessing"]["valid_compounds"], 4)  # We have 4 valid SMILES in TEST_SMILES
 
         # Verify state is updated
-        self.assertTrue(self.orchestrator.state["preprocessed"])
+        self.assertTrue(self.orchestrator.state.get("preprocessing_completed"))
         self.assertEqual(self.orchestrator.state["molecules_processed"], len(TEST_SMILES))
 
         # Disable mocking
@@ -278,11 +280,13 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         """Test resuming pipeline from a checkpoint."""
         logger.info("Testing pipeline resume functionality (for preprocessing stage)...")
 
-        processed_csv_path = os.path.join(self.orchestrator.dirs["processed_data"], "molecules_processed.csv")
+        base_input_filename = os.path.splitext(os.path.basename(self.test_dataset))[0]
+        expected_output_filename = f"{base_input_filename}_pfas_processed.csv"
+        processed_csv_path = os.path.join(self.orchestrator.dirs["processed_data"], expected_output_filename)
 
         # Run preprocessing first with force_rerun to establish a baseline and save state
         self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=True)
-        self.assertTrue(os.path.exists(processed_csv_path))
+        self.assertTrue(os.path.exists(processed_csv_path), f"Expected processed file {processed_csv_path} not found after initial run.")
         timestamp_run1 = os.path.getmtime(processed_csv_path)
         state_run1 = self.orchestrator.state.copy()
 
@@ -303,7 +307,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         # The orchestrator should see that preprocessing is complete from its loaded state.
         df_run2 = self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=False)
 
-        self.assertTrue(os.path.exists(processed_csv_path))
+        self.assertTrue(os.path.exists(processed_csv_path), f"Expected processed file {processed_csv_path} not found after resume run.")
         timestamp_run2 = os.path.getmtime(processed_csv_path)
 
         # Assert that the file was not modified, meaning the stage was skipped due to loaded state

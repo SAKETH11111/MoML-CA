@@ -87,7 +87,10 @@ class MockPyGDataset(TorchDataset):
         if self.num_nodes == 0:  # Special case for graph with no nodes
             x = torch.empty(0, self.in_features)
             edge_index = torch.empty((2, 0), dtype=torch.long)
-            y_graph = torch.randn(self.graph_out_dim) if self.graph_out_dim > 0 else torch.empty(0)
+            if self.graph_out_dim > 0:
+                y_graph = torch.randn(self.graph_out_dim).unsqueeze(0) if self.graph_out_dim == 1 else torch.randn(self.graph_out_dim)
+            else:
+                y_graph = torch.empty(0)
             y_node = torch.empty(0, self.node_out_dim)
         else:
             x = torch.randn(self.num_nodes, self.in_features)
@@ -98,12 +101,24 @@ class MockPyGDataset(TorchDataset):
             elif self.num_nodes == 1:
                 edge_index = torch.empty((2, 0), dtype=torch.long)
 
-            y_graph = torch.randn(self.graph_out_dim) if self.graph_out_dim > 0 else torch.empty(0)
-            y_node = (
-                torch.randn(self.num_nodes, self.node_out_dim)
-                if self.node_out_dim > 0
-                else torch.empty(self.num_nodes, 0)
-            )
+            if self.graph_out_dim > 0:
+                # Ensure y_graph is (1, graph_out_dim) for single graph prediction if graph_out_dim is 1
+                # Or just (graph_out_dim) if > 1. For batching, PyG handles it.
+                # The warning is often about (N) vs (N,1).
+                y_g = torch.randn(self.graph_out_dim)
+                y_graph = y_g.unsqueeze(0) if self.graph_out_dim == 1 and y_g.ndim == 0 else y_g # make it [1] or [1,1] if needed
+                if y_graph.ndim == 1 and self.graph_out_dim == 1 : # if it became [1], make it [1,1]
+                    y_graph = y_graph.unsqueeze(0)
+
+            else:
+                y_graph = torch.empty(0)
+
+            if self.node_out_dim > 0:
+                y_n = torch.randn(self.num_nodes, self.node_out_dim)
+                # Ensure y_node is (num_nodes, 1) if node_out_dim is 1
+                y_node = y_n # if self.node_out_dim > 1 else y_n.view(self.num_nodes, 1) # Already correct shape
+            else:
+                y_node = torch.empty(self.num_nodes, 0)
 
         return Data(x=x, edge_index=edge_index, y=y_graph, node_y=y_node)
 

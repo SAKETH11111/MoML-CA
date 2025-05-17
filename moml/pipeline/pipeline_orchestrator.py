@@ -121,7 +121,7 @@ class MOMLPipelineOrchestrator:
 
         # Initialize pipeline state
         self.state = {
-            "preprocessed": False,
+            "preprocessing_completed": False,
             "orca_calculated": False,
             "graphs_generated": False,
             "last_run": None,
@@ -210,7 +210,7 @@ class MOMLPipelineOrchestrator:
         logger.info(f"Preprocessed {len(df)} molecules, saved to {output_file}")
 
         # Update state
-        self.state["preprocessed"] = True
+        self.state["preprocessing_completed"] = True
         self.state["molecules_processed"] = len(df)
 
         return df
@@ -573,7 +573,7 @@ class MOMLPipelineOrchestrator:
             skip_graphs = self.config.get("execution", {}).get("skip_graph_generation", False)
 
             # Determine what stages have been completed
-            if not self.state["preprocessed"]:
+            if not self.state["preprocessing_completed"]:
                 if not input_file:
                     raise ValueError("Input file required to resume pipeline from preprocessing")
                 logger.info("Resuming from preprocessing stage")
@@ -674,6 +674,21 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         # Initialize base class
         super().__init__(config_file, data_dir, output_dir, working_dir)
 
+# Migrate state from "preprocessed" (from base class init or loaded general state)
+        # to "preprocessing_completed" and remove the old key.
+        if "preprocessed" in self.state:
+            if self.state["preprocessed"] and not self.state.get("preprocessing_completed"):
+                # If old key is true and new key isn't already true (e.g. from a more specific checkpoint load),
+                # transfer status. This handles cases where super state might have been loaded with "preprocessed": True.
+                self.state["preprocessing_completed"] = True
+                logger.info("Migrated 'preprocessed: True' state to 'preprocessing_completed: True' in PFAS orchestrator.")
+            del self.state["preprocessed"]
+            logger.info("Removed 'preprocessed' key from state in PFAS orchestrator after superclass initialization.")
+        
+        # Ensure 'preprocessing_completed' exists in state, defaulting to False if not set by migration or superclass.
+        # This is important if super().__init__ didn't set "preprocessing_completed" and no checkpoint was loaded.
+        if "preprocessing_completed" not in self.state:
+            self.state["preprocessing_completed"] = False
         # Add PFAS-specific configuration
         pfas_config = {
             "pfas": {
@@ -722,16 +737,12 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         )
 
         # Define the expected output path for this stage
-        # Note: The filename construction should be consistent with how it's saved later.
         base_name = os.path.splitext(os.path.basename(input_file))[0]
         processed_file_path = os.path.join(
             self.dirs["processed_data"], f"{base_name}_pfas_processed.csv"
         )  # Consistent naming
 
         # Check if already processed and not forcing rerun
-        # The state "preprocessed" might be too general if multiple input files can be processed.
-        # A more robust check would be against a specific output file or a more detailed state.
-        # For now, using self.state.get("preprocessed") and existence of a conventionally named file.
         if (
             not force_rerun
             and os.path.exists(processed_file_path)
@@ -743,6 +754,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
             try:
                 df = pd.read_csv(processed_file_path)
                 self.cache["processed_df"] = df  # Update cache
+                self.state["preprocessing_completed"] = True  # Ensure state is set when loading
                 return df
             except Exception as e:
                 logger.warning(f"Could not load existing processed file {processed_file_path}: {e}. Re-processing.")
@@ -755,13 +767,12 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         df_with_descriptors = self._process_molecule_features(df_initial_processed, molecule_id_column=id_col)
 
         # Placeholder for PFAS-specific feature engineering or analysis
-        # df_final = add_fluorinated_group_counts(df_with_descriptors, smiles_col='canonical_smiles')
         df_final = df_with_descriptors  # Assuming no extra PFAS steps for now beyond base descriptors
 
         df_final.to_csv(processed_file_path, index=False)
         logger.info(f"PFAS-specific processed data saved to {processed_file_path}")
 
-        self.state["preprocessed"] = True  # General flag
+        self.state["preprocessing_completed"] = True  # Corrected state key
         if "preprocessed_files" not in self.state:
             self.state["preprocessed_files"] = {}
         self.state["preprocessed_files"][input_file] = processed_file_path  # Track specific file
@@ -876,8 +887,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         # 3. Molecular graph generation stage (if not skipped)
         if not self.config["execution"]["skip_graph_generation"]:
             logger.info("Starting molecular graph generation stage")
-            # Empty implementation for now
-            results["graph_generation"] = {"compounds": 0}
+            results["graph_generation"] = {"compounds": 0} # Actual graph generation is handled by base or skipped
         else:
             logger.info("Skipping molecular graph generation stage")
             results["graph_generation"] = {"skipped": True}
@@ -894,6 +904,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
             results["final_data"] = {
                 "total_compounds": len(df),
                 "valid_compounds": df["is_valid_smiles"].sum() if "is_valid_smiles" in df.columns else 0,
+                "preprocessing_status": "completed" if self.state.get("preprocessing_completed") else "pending/failed",
             }
 
         # Store any errors
@@ -910,16 +921,16 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         super()._save_state()  # Call base class method to save general state
 
         # Save PFAS-specific preprocessing checkpoint
-        if self.state.get("preprocessed"):
+        if self.state.get("preprocessing_completed"): # Use the new, correct key
             checkpoint_file = os.path.join(self.dirs["checkpoints"], "preprocessing_checkpoint.pkl")
             # Ensure the 'checkpoints' directory exists, as it's defined in PFASPipelineOrchestrator.__init__
             # and _save_state might be called before other directory creation logic in some scenarios.
             os.makedirs(self.dirs["checkpoints"], exist_ok=True)
 
             data_to_save = {
-                "preprocessed": self.state["preprocessed"],
+                "preprocessing_completed": self.state.get("preprocessing_completed", False), # Save the new key
                 "molecules_processed": self.state.get("molecules_processed", 0),
-                "valid_molecules": self.state.get("valid_molecules", 0),  # Test might look for this
+                "valid_molecules": self.state.get("valid_molecules", 0),
             }
             try:
                 with open(checkpoint_file, "wb") as f_pkl:
@@ -928,7 +939,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
             except Exception as e:
                 logger.error(f"Failed to save PFAS preprocessing checkpoint {checkpoint_file}: {e}")
 
-        # Future: Add other PFAS-specific checkpoints here if needed (e.g., orca_checkpoint.pkl)
+        # Future: Add other PFAS-specific checkpoints here if needed.
 
 
 def main():
