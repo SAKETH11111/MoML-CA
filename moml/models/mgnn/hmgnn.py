@@ -179,7 +179,7 @@ class CrossScaleAttentionMH(nn.Module):
                 # If s == t or not can_map or mapping failed, k and v remain original feats[s] projections
 
                 scores = (q * k).sum(-1) / self.scale  # [Nt, h]
-                w = scores.softmax(-1).unsqueeze(-1)  # [Nt, h, 1]
+                w = scores.softmax(0).unsqueeze(-1)  # [Nt, h, 1]
                 agg = agg + w * v
 
             updated.append(feats[t] + self.out_proj[t](self._join(agg)))

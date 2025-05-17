@@ -189,8 +189,8 @@ def check_class_imbalance(df):
     logger.info("=== Checking Class Imbalance ===")
 
     if "Treatment_Success" in df.columns:
-        # Calculate class distribution
-        class_dist = df["Treatment_Success"].value_counts(normalize=True)
+        # Calculate class distribution with raw counts (not normalized)
+        class_dist = df["Treatment_Success"].value_counts(normalize=False)
         logger.info(f"Class distribution:\n{class_dist}")
 
         # Plot class distribution
@@ -201,17 +201,27 @@ def check_class_imbalance(df):
             RESULTS_DIR / "treatment" / "class_distribution.png",
         )
 
-        # Calculate imbalance ratio safely
+        # Define mappings for positive and negative classes
+        positive_classes = [True, 'True', 'Successful', 'Yes', 1, '1', 'true', 'yes']
+        negative_classes = [False, 'False', 'Unsuccessful', 'No', 0, '0', 'false', 'no']
+
+        # Calculate class counts
         dist_dict = class_dist.to_dict()
-        pos = dist_dict.get(True, dist_dict.get('True', 0))
-        neg = dist_dict.get(False, dist_dict.get('False', 0))
-        if pos == 0 and neg == 0:
-            logger.warning("No 'True' or 'False' classes found for Treatment_Success, cannot compute imbalance.")
+        
+        # Sum up all positive class variations
+        pos_count = sum(dist_dict.get(cls, 0) for cls in positive_classes if cls in dist_dict)
+        
+        # Sum up all negative class variations
+        neg_count = sum(dist_dict.get(cls, 0) for cls in negative_classes if cls in dist_dict)
+        
+        logger.info(f"Positive class count: {pos_count}")
+        logger.info(f"Negative class count: {neg_count}")
+
+        # Calculate imbalance ratio (handle zero case with float('inf'))
+        if pos_count == 0 and neg_count == 0:
+            logger.warning("No valid class values found for Treatment_Success, cannot compute imbalance.")
         else:
-            if neg == 0:
-                imbalance_ratio = float('inf')
-            else:
-                imbalance_ratio = pos / neg
+            imbalance_ratio = float('inf') if neg_count == 0 else pos_count / neg_count
             logger.info(f"Class imbalance ratio: {imbalance_ratio:.2f}")
 
     logger.info("Class imbalance check completed")

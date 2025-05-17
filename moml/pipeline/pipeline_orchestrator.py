@@ -418,9 +418,16 @@ class MOMLPipelineOrchestrator:
                 # Process each molecule with QM properties
                 graph_files = []
                 mol_file_paths = [os.path.join(mol_dir, f) for f in mol_files]
+                
+                # Define the configuration for the graph processor
+                config = {
+                    "use_specific_features": graph_config["use_specific_features"],
+                    "use_quantum_properties": True,
+                    "charge_type": graph_config.get("charge_type", "mulliken")
+                }
 
                 # Function to process a single molecule
-                def process_single_molecule(mol_file):
+                def process_single_molecule(mol_file, config=config):
                     # Instantiate processor inside worker to avoid non-picklable objects
                     processor = create_graph_processor(config)
                     try:
