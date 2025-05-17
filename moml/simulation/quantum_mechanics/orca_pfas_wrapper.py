@@ -44,6 +44,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -216,8 +217,11 @@ def generate_3d_structure(smiles: str, molecule_id: str) -> Optional[Chem.Mol]:
                 logger.error(f"3D coordinate generation ultimately failed for {molecule_id} after multiple attempts.")
                 return None
 
-        # Refine the structure using MMFF94 force field
-        AllChem.MMFFOptimizeMolecule(mol)
+        # Refine the structure using MMFF94 force field and check for failure
+        opt_status = AllChem.MMFFOptimizeMolecule(mol)
+        if opt_status != 0:
+            logger.error(f"MMFF optimization failed for {molecule_id}, status {opt_status}")
+            return None
         logger.info(f"Successfully generated 3D structure for {molecule_id}")
         return mol
 
@@ -386,19 +390,20 @@ def run_orca_calculation(
         common_paths = ["orca", "/opt/orca/orca", os.path.expanduser("~/orca/orca")]  # Add more if needed
         for path_option in common_paths:
             try:
-                # Check if 'orca --version' runs
-                subprocess.run([path_option, "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                orca_executable = path_option
-                logger.info(f"Using ORCA executable found at: {orca_executable}")
-                break
-            except (FileNotFoundError, subprocess.CalledProcessError):
+                # Check ORCA version via stdout and stderr
+                result = subprocess.run([path_option, "--version"], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                output = (result.stdout or "") + (result.stderr or "")
+                if "Program Version ORCA" in output:
+                    orca_executable = path_option
+                    logger.info(f"Using ORCA executable found at: {orca_executable}")
+                    break
+                else:
+                    logger.warning(f"Version check for {path_option} did not confirm ORCA.")
+            except FileNotFoundError:
                 continue
         if orca_executable is None:
-            logger.error(
-                "ORCA executable not specified and not found in common paths or system PATH. "
-                "Please provide the full path using --orca_path."
-            )
-            return False, ""
+            logger.warning("ORCA executable not found; switching to mock mode.")
+            mock_run = True
 
     env = os.environ.copy()
     if openmpi_bin_path:
@@ -410,14 +415,19 @@ def run_orca_calculation(
 
     try:
         # ORCA writes its main output to stdout, which we redirect to the .out file
-        with open(output_file_path, "w") as outfile:
+        with open(output_file_path, "w") as outfile, tempfile.NamedTemporaryFile(mode='w+', delete=False) as errfile:
             process = subprocess.run(
-                command, env=env, cwd=input_dir, stdout=outfile, stderr=subprocess.PIPE, text=True, check=False
+                command, env=env, cwd=input_dir, stdout=outfile, stderr=errfile, text=True, check=False
             )
+
+        # Read stderr from temp file
+        errfile.seek(0)
+        stderr_content = errfile.read()
+        os.unlink(errfile.name)
 
         if process.returncode != 0:
             logger.error(f"ORCA calculation for {molecule_name} failed with return code {process.returncode}.")
-            logger.error(f"ORCA STDERR:\n{process.stderr}")
+            logger.error(f"ORCA STDERR:\n{stderr_content}")
             # Even if it fails, the output file might contain useful info for debugging
             if os.path.exists(output_file_path):
                 logger.warning(f"Partial output file may exist at {output_file_path}")
@@ -430,7 +440,7 @@ def run_orca_calculation(
                 logger.error(
                     f"ORCA calculation for {molecule_name} did not terminate normally. Check {output_file_path}."
                 )
-                logger.error(f"ORCA STDERR (if any from subprocess):\n{process.stderr}")
+                logger.error(f"ORCA STDERR:\n{stderr_content}")
                 return False, output_file_path
 
         logger.info(f"ORCA calculation completed successfully for {molecule_name}. Output: {output_file_path}")
@@ -540,7 +550,7 @@ def process_molecule(
     # This step assumes the orca_json_to_qm9_npz.py script handles parsing and NPZ creation.
     npz_file_path = os.path.join(molecule_specific_dir, f"{clean_molecule_id}_qm9.npz")
     conversion_command = [
-        "python",
+        sys.executable,
         conversion_script_path,
         orca_output_file,
         "-o",

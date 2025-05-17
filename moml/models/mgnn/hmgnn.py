@@ -63,10 +63,16 @@ class CrossScaleAttentionMH(nn.Module):
         super().__init__()
         assert hidden_dim % n_heads == 0, "hidden_dim must be divisible by n_heads"
         self.S, self.h, self.d_k = n_scales, n_heads, hidden_dim // n_heads
-        self.scale = nn.Parameter(torch.tensor(math.sqrt(self.d_k)))  # learnable temperature
-
-        make_proj = lambda: nn.ModuleList(nn.Linear(hidden_dim, hidden_dim) for _ in range(n_scales))
-        self.q_proj, self.k_proj, self.v_proj, self.out_proj = make_proj(), make_proj(), make_proj(), make_proj()
+        # Learnable temperature initialized to 1/sqrt(d_k)
+        self.scale = nn.Parameter(torch.tensor(1.0 / math.sqrt(self.d_k)), requires_grad=True)
+        # Store dims for projection helper
+        self.hidden_dim = hidden_dim
+        self.n_scales = n_scales
+        # Initialize per-scale projection modules
+        self.q_proj = self._make_proj()
+        self.k_proj = self._make_proj()
+        self.v_proj = self._make_proj()
+        self.out_proj = self._make_proj()
 
         self.edge_msg = (
             nn.ModuleList([EdgeNNConv(hidden_dim, hidden_dim, hidden_dim, edge_dim) for _ in range(n_scales - 1)])
@@ -80,6 +86,10 @@ class CrossScaleAttentionMH(nn.Module):
 
     def _join(self, x):
         return x.view(x.size(0), self.h * self.d_k)
+
+    def _make_proj(self) -> nn.ModuleList:
+        """Create a list of linear projections (hidden_dim → hidden_dim) for each scale."""
+        return nn.ModuleList([nn.Linear(self.hidden_dim, self.hidden_dim) for _ in range(self.n_scales)])
 
     def forward(
         self,

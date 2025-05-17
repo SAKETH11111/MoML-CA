@@ -19,9 +19,9 @@ setup(
     description="Molecular Modeling and Machine Learning for Contaminant Analysis",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/saketh/MoML-CA_PFAS",
+    url="https://github.com/saketh/MoML-CA",
     author="Saketh",
-    author_email="saketh@example.com",
+    author_email="sakethbaddam10@gmail.com",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
@@ -74,11 +74,11 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "moml-ca=moml.pipeline.orchestration.pfas_pipeline_orchestrator:main",
+            "moml-ca=moml.pipeline.pipeline_orchestrator:main",
         ],
     },
     project_urls={
-        "Bug Reports": "https://github.com/saketh/MoML-CA_PFAS/issues",
-        "Source": "https://github.com/saketh/MoML-CA_PFAS",
+        "Bug Reports": "https://github.com/saketh11111/MoML-CA/issues",
+        "Source": "https://github.com/saketh11111/MoML-CA",
     },
 )

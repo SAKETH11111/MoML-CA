@@ -9,7 +9,7 @@ from typing import Dict, Optional, Any
 
 from torch.utils.data import Dataset, DataLoader
 
-from moml.core import collate_graphs
+from moml.core.molecular_graph_processor import collate_graphs
 from moml.data.dataset_loader import load_dataset
 from moml.data.dataset_splitter import split_dataset
 

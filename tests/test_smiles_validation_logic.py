@@ -8,6 +8,7 @@ ensuring they correctly handle valid, invalid, and edge case structures.
 
 import os
 import sys
+import pytest
 import logging
 
 # Add project root to path to enable imports
@@ -21,8 +22,7 @@ try:
 
     print("RDKit import successful!")
 except ImportError:
-    print("Failed to import RDKit. Please make sure it's installed.")
-    sys.exit(1)
+    pytest.skip("RDKit not installed, skipping SMILES validation tests", allow_module_level=True)
 
 # Import from consolidated moml module
 from moml.core import calculate_molecular_descriptors

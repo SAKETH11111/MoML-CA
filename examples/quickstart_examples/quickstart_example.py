@@ -38,6 +38,9 @@ def simple_example():
 
     # Convert to graph
     graph = processor.smiles_to_graph(smiles)
+    if graph is None:
+        print(f"Error: Could not create graph for SMILES '{smiles}'.")
+        return None
 
     # Print graph information
     print(f"Graph created with {graph.num_nodes} nodes and {graph.edge_index.shape[1]//2} edges")
@@ -107,10 +110,12 @@ def model_training_example():
         graphs.append(graph)
 
     # Split dataset using standard utility
-    train_graphs, val_graphs = split_dataset(graphs, train_ratio=0.8)
+    train_graphs, val_graphs, test_graphs = split_dataset(graphs, train_ratio=0.8)
 
     # Create dataloaders using standard utility
-    train_loader, val_loader = prepare_dataloaders(train_graphs, val_graphs, batch_size=10)
+    loaders = prepare_dataloaders(train_graphs, val_graphs, batch_size=10)
+    train_loader = loaders["train"]
+    val_loader = loaders["val"]
 
     # Create configuration dictionary with standard settings
     config = {
@@ -127,7 +132,8 @@ def model_training_example():
     model = initialize_model(config, num_node_features, num_edge_features)
 
     # Create trainer
-    trainer = create_trainer(model=model, config=config, train_loader=train_loader, val_loader=val_loader)
+    trainer = create_trainer(config=config, train_loader=train_loader, val_loader=val_loader)
+    model = trainer.model
 
     # Train model
     print("Training model...")

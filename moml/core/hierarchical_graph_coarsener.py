@@ -241,9 +241,11 @@ class GraphCoarsener:
             src = int(edge_index[0, i].item())
             dst = int(edge_index[1, i].item())
 
-            # Map to cluster IDs
-            src_cluster = cluster_mapping[src]
-            dst_cluster = cluster_mapping[dst]
+            # Safely map to cluster IDs, skip if missing
+            src_cluster = cluster_mapping.get(src)
+            dst_cluster = cluster_mapping.get(dst)
+            if src_cluster is None or dst_cluster is None:
+                continue
 
             # Skip self-loops within the same cluster
             if src_cluster == dst_cluster:

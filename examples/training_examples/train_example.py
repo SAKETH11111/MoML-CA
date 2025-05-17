@@ -7,6 +7,8 @@ import os
 import torch
 import torch.nn as nn
 import argparse
+import glob
+from torch_geometric.data import DataLoader
 
 from moml.models.mgnn.training import create_trainer
 
@@ -77,8 +79,19 @@ def main():
     )
     print(f"JK mode: {config['model']['jk_mode']}")
 
+    # Load datasets and wrap in DataLoaders
+    train_files = glob.glob(os.path.join(args.train_dir, "*.pt"))
+    train_graphs = [torch.load(f) for f in train_files]
+    train_loader = DataLoader(train_graphs, batch_size=config["training"]["batch_size"], shuffle=True)
+    if args.val_dir:
+        val_files = glob.glob(os.path.join(args.val_dir, "*.pt"))
+        val_graphs = [torch.load(f) for f in val_files]
+        val_loader = DataLoader(val_graphs, batch_size=config["training"]["batch_size"])
+    else:
+        val_loader = None
+
     # Initialize trainer with config
-    trainer = create_trainer(config=config, train_dir=args.train_dir, val_dir=args.val_dir)
+    trainer = create_trainer(config=config, train_loader=train_loader, val_loader=val_loader)
 
     # Define loss functions (MSE for regression tasks)
     node_loss_fn = nn.MSELoss()
@@ -90,6 +103,11 @@ def main():
 
     print(f"Training completed. Model saved to {args.output_dir}")
 
+    # Display final training metrics
+    if history:
+        print(f"Final node loss: {history.get('node_loss', [None])[-1]:.6f}")
+        print(f"Final graph loss: {history.get('graph_loss', [None])[-1]:.6f}")
+
     # Save configuration for reference
     config_path = os.path.join(args.output_dir, "training_config.json")
     with open(config_path, "w") as f:
@@ -100,7 +118,10 @@ def main():
 
     # Example of how to make predictions with the trained model
     print("\nExample of prediction usage:")
-    print("trainer.predict('molecule.mol', 'charges.txt')")
+    print("from moml.models.mgnn.evaluation import create_predictor")
+    print("predictor = create_predictor(model_path=os.path.join(args.output_dir, 'model.pt'))")
+    print("predictions = predictor.predict('molecule.mol', 'charges.txt')")
+    print("print(predictions)")
 
     return trainer
 

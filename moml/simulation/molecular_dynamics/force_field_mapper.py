@@ -14,8 +14,8 @@ import logging
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# Configure logging via application entry point
+# Get module logger
 logger = logging.getLogger("force_field_mapper")
 
 # Supported force field formats

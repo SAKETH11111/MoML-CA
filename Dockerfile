@@ -19,7 +19,7 @@ ENV PATH=$CONDA_DIR/bin:$PATH
 # Create and activate the Conda environment
 COPY environment.yml /tmp/environment.yml
 RUN conda env create -f /tmp/environment.yml && \
-    conda clean -all -f -y
+    conda clean --all -f -y
 
 # Make Conda environment activate by default in new shells
 SHELL ["conda", "run", "-n", "moml_ca_env", "/bin/bash", "-c"]

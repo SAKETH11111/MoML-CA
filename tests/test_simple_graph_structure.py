@@ -9,6 +9,7 @@ This script tests basic functionality related to molecular graphs:
 """
 
 import sys
+import pytest
 import unittest
 import tempfile
 import logging
@@ -21,11 +22,9 @@ logger = logging.getLogger("test_simple_graph")
 try:
     from rdkit import Chem
     from rdkit.Chem import AllChem
-
     print("RDKit import successful!")
 except ImportError:
-    print("Failed to import RDKit. Please make sure it's installed.")
-    sys.exit(1)
+    pytest.skip("RDKit not installed, skipping simple graph structure tests", allow_module_level=True)
 
 # Try to import torch and torch_geometric
 try:

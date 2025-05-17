@@ -10,6 +10,7 @@ This script tests:
 
 import os
 import sys
+import pytest
 import unittest
 import tempfile
 import logging
@@ -27,36 +28,29 @@ sys.path.append(project_root)
 try:
     from rdkit import Chem
     from rdkit.Chem import AllChem
-
     print("RDKit import successful!")
 except ImportError:
-    print("Failed to import RDKit. Please make sure it's installed.")
-    sys.exit(1)
+    pytest.skip("RDKit not installed, skipping PFAS feature extraction tests", allow_module_level=True)
 
 # Try to import torch and matplotlib (for visualization)
 try:
     import torch
-
     TORCH_AVAILABLE = True
     print("PyTorch import successful!")
 except ImportError:
     TORCH_AVAILABLE = False
-    print("PyTorch not found. Check installation.")
-    sys.exit(1)
+    pytest.skip("PyTorch not found, skipping PFAS feature extraction tests", allow_module_level=True)
 
 # Try to import matplotlib for visualization testing
 try:
     import matplotlib
-
     matplotlib.use("Agg")  # Use non-interactive backend
     import matplotlib.pyplot as plt
-
     MATPLOTLIB_AVAILABLE = True
     print("Matplotlib import successful!")
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
-    print("Matplotlib not found. Check installation.")
-    sys.exit(1)
+    pytest.skip("Matplotlib not found, skipping visualization tests", allow_module_level=True)
 
 # Import from consolidated moml modules
 try:

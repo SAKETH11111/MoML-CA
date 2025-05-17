@@ -28,9 +28,10 @@ from moml.core import (
     calculate_molecular_descriptors,
     create_graph_processor,
 )
-
+# Import QM batch processor from ORCA parser
+from moml.simulation.quantum_mechanics.parser.orca_parser import batch_process_molecules
 # Import consolidated data functionality
-from moml.data import process_dataset, batch_process_molecules, process_mol_file_to_graph
+from moml.data import process_dataset, process_mol_file_to_graph, graph_batch_process
 
 # For parallel processing
 import concurrent.futures
@@ -402,7 +403,7 @@ class MOMLPipelineOrchestrator:
             if skip_qm:
                 logger.info("Using simplified graph generation without quantum properties")
                 # Use our new batch processor from data module
-                graph_files = batch_process_molecules(
+                graph_files = graph_batch_process(
                     input_dir=mol_dir,
                     output_dir=output_dir,
                     config={
@@ -413,19 +414,15 @@ class MOMLPipelineOrchestrator:
                 )
             else:
                 # Create a QM-aware processor
-                logger.info("Using graph generation with quantum properties")
-                config = {
-                    "use_specific_features": graph_config["use_specific_features"],
-                    "use_partial_charges": graph_config["use_quantum_properties"],
-                }
-                processor = create_graph_processor(config)
-
+                # processor = create_graph_processor(config)  # Removed external instantiation
                 # Process each molecule with QM properties
                 graph_files = []
                 mol_file_paths = [os.path.join(mol_dir, f) for f in mol_files]
 
                 # Function to process a single molecule
                 def process_single_molecule(mol_file):
+                    # Instantiate processor inside worker to avoid non-picklable objects
+                    processor = create_graph_processor(config)
                     try:
 
                         mol_id = os.path.splitext(os.path.basename(mol_file))[0]

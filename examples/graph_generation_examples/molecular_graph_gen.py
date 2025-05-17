@@ -69,13 +69,19 @@ def create_and_visualize_atomic_graph(
     partial_charges = None
     if use_quantum_properties and orca_output and os.path.exists(orca_output):
         orca_data = parse_orca_output(orca_output)
-        if orca_data and "mulliken" in orca_data:
-            partial_charges = orca_data["mulliken"].get("charges", None)
+        # ORCA parser uses the key `mulliken_charges`
+        if orca_data and "mulliken_charges" in orca_data:
+            partial_charges = orca_data["mulliken_charges"]
 
     # Create the graph
     graph = graph_processor.file_to_graph(
         mol_file, additional_features={"partial_charges": partial_charges} if partial_charges else None
     )
+
+    # Check if graph was successfully created
+    if graph is None:
+        print(f"Error: Failed to create graph from {mol_file}. The molecule may be unreadable or invalid.")
+        return None
 
     # Save the graph
     if output_file:
