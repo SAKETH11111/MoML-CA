@@ -29,7 +29,7 @@ from moml.core.molecular_feature_extraction import FunctionalGroupDetector
 
 
 # Create a custom Data class for testing that handles the keys attribute properly
-class TestData(Data):
+class CustomGraphData(Data): # Renamed from TestData
     """Custom PyTorch Geometric Data class for testing with a proper keys property."""
 
     def __init__(self, **kwargs):
@@ -82,8 +82,8 @@ def mock_atom_graph(test_molecule):
     # Each atom connects to at most 3 others, and each edge is counted twice (i→j and j→i)
     max_edges = min(num_atoms * 6, num_atoms * (num_atoms - 1))
 
-    # Create a TestData object with necessary attributes
-    data = TestData(
+    # Create a CustomGraphData object with necessary attributes
+    data = CustomGraphData( # Renamed from TestData
         x=torch.randn(num_atoms, 16),  # Node features
         edge_index=torch.zeros(2, max_edges, dtype=torch.long),
         edge_attr=torch.randn(max_edges, 8),
@@ -149,8 +149,8 @@ def mock_torch_geometric_data(test_molecule):
         pos = conf.GetAtomPosition(i)
         positions.append([pos.x, pos.y, pos.z])
 
-    # Create TestData object
-    data = TestData(
+    # Create CustomGraphData object
+    data = CustomGraphData( # Renamed from TestData
         x=x,
         edge_index=edge_index[:, :edge_count],
         edge_attr=edge_attr[:edge_count],
@@ -172,7 +172,7 @@ def mock_functional_group_graph():
     max_edges = num_groups * (num_groups - 1)
 
     # Create a Data object for the functional group graph
-    data = TestData(
+    data = CustomGraphData( # Renamed from TestData
         x=torch.randn(num_groups, 16),  # Node features
         edge_index=torch.zeros(2, max_edges, dtype=torch.long),
         edge_attr=torch.randn(max_edges, 8),
@@ -370,7 +370,7 @@ class TestGraphCoarsener:
         fg_graph = mock_functional_group_graph
 
         # Create mock structural motif graph
-        motif_graph = TestData(
+        motif_graph = CustomGraphData( # Renamed from TestData
             x=torch.randn(2, 16),  # Node features for head and tail
             edge_index=torch.tensor([[0, 1], [1, 0]], dtype=torch.long),
             edge_attr=torch.randn(2, 8),

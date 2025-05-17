@@ -280,7 +280,7 @@ class TestRunOrcaCalculation:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                check=False,
+                # check=False, # Removed as it's default and causes mismatch with mock representation
                 cwd=os.path.dirname(input_file_path),
             )
         finally:
@@ -333,8 +333,11 @@ class TestRunOrcaCalculation:
         output_file_path = input_file_path.replace(".inp", ".out")
 
         # Ensure it doesn't exist before the test
-        if os.path.exists(output_file_path):
-            os.remove(output_file_path)
+        try:
+            if os.path.exists(output_file_path):
+                os.remove(output_file_path)
+        except FileNotFoundError:
+            pass # It's okay if it doesn't exist, that's the point
 
         try:
             # Simulate ORCA executable and input file exist, but output file does not.

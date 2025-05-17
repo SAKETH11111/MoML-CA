@@ -20,7 +20,8 @@
 # Test script for ORCA output parsing and conversion to QM9 NPZ format.
 import subprocess
 import logging
-from moml.simulation.quantum_mechanics.orca_pfas_wrapper import parse_orca_output_to_json
+import json # Added for writing JSON output
+from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output # Corrected import
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,9 +33,22 @@ def main():
     npz_file = "PFAS003_qm9.npz"
 
     # 1. Parse ORCA output to JSON
-    logger.info(f"Parsing ORCA output to JSON: {output_file} -> {json_file}")
-    if not parse_orca_output_to_json(output_file, json_file):
-        logger.error(f"Failed to convert ORCA output to JSON: {output_file}")
+    logger.info(f"Parsing ORCA output: {output_file}")
+    parsed_data = parse_orca_output(output_file)
+
+    if parsed_data.get("status") != "completed":
+        logger.error(f"Failed to parse ORCA output or calculation was not successful: {output_file}. Status: {parsed_data.get('status')}")
+        if parsed_data.get("error_message"):
+            logger.error(f"Error details: {parsed_data.get('error_message')}")
+        return
+
+    logger.info(f"Writing parsed data to JSON: {json_file}")
+    try:
+        with open(json_file, "w") as f:
+            json.dump(parsed_data, f, indent=2)
+        logger.info(f"Successfully wrote parsed data to {json_file}")
+    except IOError as e:
+        logger.error(f"Failed to write JSON file {json_file}: {e}")
         return
 
     # 2. Convert JSON to QM9-style NPZ

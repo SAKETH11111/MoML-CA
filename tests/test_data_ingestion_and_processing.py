@@ -221,7 +221,7 @@ class TestDataProcessing(unittest.TestCase):
             self.skipTest(f"Could not instantiate PFASPipelineOrchestrator: {e}")
 
 
-def test_data_processing_pipeline():
+def run_data_processing_pipeline_tests(): # Renamed from test_data_processing_pipeline
     """Test the entire data processing pipeline with sample data."""
     logger.info("\n========== RUNNING DATA PROCESSING PIPELINE TEST ==========\n")
 
@@ -245,5 +245,5 @@ def test_data_processing_pipeline():
 
 
 if __name__ == "__main__":
-    success = test_data_processing_pipeline()
+    success = run_data_processing_pipeline_tests() # Adjusted to call renamed function
     sys.exit(0 if success else 1)
