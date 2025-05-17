@@ -678,7 +678,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         # Initialize base class
         super().__init__(config_file, data_dir, output_dir, working_dir)
 
-# Migrate state from "preprocessed" (from base class init or loaded general state)
+        # Migrate state from "preprocessed" (from base class init or loaded general state)
         # to "preprocessing_completed" and remove the old key.
         if "preprocessed" in self.state:
             if self.state["preprocessed"] and not self.state.get("preprocessing_completed"):
@@ -835,21 +835,99 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
 
     def analyze_pfas_dataset(self, df: pd.DataFrame, input_file: Optional[str] = None) -> pd.DataFrame:
         """
-        Placeholder for PFAS-specific dataset analysis.
+        Perform PFAS-specific dataset analysis.
 
         Args:
-            df: Processed DataFrame.
+            df: Processed DataFrame containing molecular data.
             input_file: Original input file path (optional).
 
         Returns:
             DataFrame with PFAS analysis results.
         """
-        logger.info("Running placeholder PFAS dataset analysis.")
-        # TODO: Implement actual PFAS analysis logic
-        # For now, return an empty DataFrame or a subset of df
+        logger.info("Starting comprehensive PFAS dataset analysis.")
+
+        # Ensure output directories exist
+        analysis_dir = os.path.join(self.dirs["pfas_results"], "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+        
+        # 1. Filter to PFAS compounds if the flag exists
+        pfas_df = df
         if "is_pfas" in df.columns:
-            return df[df["is_pfas"] == True].copy()
-        return pd.DataFrame()
+            pfas_df = df[df["is_pfas"] == True].copy()
+            logger.info(f"Identified {len(pfas_df)} PFAS compounds out of {len(df)} total compounds")
+            
+            # Save list of PFAS compounds for reference
+            pfas_list_path = os.path.join(analysis_dir, "pfas_compounds_list.csv")
+            pfas_df.to_csv(pfas_list_path, index=False)
+            logger.info(f"Saved PFAS compounds list to {pfas_list_path}")
+        else:
+            logger.warning("'is_pfas' column not found, assuming all compounds are PFAS for analysis")
+
+        # 2. Calculate key PFAS metrics and add them to the dataframe
+        if len(pfas_df) > 0:
+            # 2.1. Analyze fluorine content and distribution
+            if "F_Count" in pfas_df.columns and "C_Count" in pfas_df.columns:
+                # Calculate F:C ratio statistics
+                f_c_ratios = pfas_df["F_Count"] / pfas_df["C_Count"].replace(0, float('nan'))
+                f_c_stats = {
+                    "mean_f_c_ratio": f_c_ratios.mean(),
+                    "median_f_c_ratio": f_c_ratios.median(),
+                    "min_f_c_ratio": f_c_ratios.min(),
+                    "max_f_c_ratio": f_c_ratios.max()
+                }
+                logger.info(f"F:C ratio statistics: {f_c_stats}")
+                
+                # Save F:C ratio statistics
+                with open(os.path.join(analysis_dir, "f_c_ratio_stats.json"), "w") as f:
+                    json.dump(f_c_stats, f, indent=2)
+            
+            # 2.2. Categorize PFAS by structural features
+            struct_columns = ["Is_Aromatic", "Has_Rings", "Is_Cyclic", "Is_Branched", "Chain_Length"]
+            struct_stats = {}
+            for col in struct_columns:
+                if col in pfas_df.columns:
+                    struct_stats[col] = pfas_df[col].value_counts().to_dict()
+            
+            if struct_stats:
+                logger.info(f"PFAS structural statistics: {struct_stats}")
+                with open(os.path.join(analysis_dir, "structural_stats.json"), "w") as f:
+                    json.dump(struct_stats, f, indent=2)
+            
+            # 2.3. Analyze functional groups if data is available
+            func_group_cols = ["num_cf3_groups", "num_cf2_groups", "num_cf_groups"]
+            if all(col in pfas_df.columns for col in func_group_cols):
+                func_group_stats = {
+                    col: {
+                        "mean": pfas_df[col].mean(),
+                        "median": pfas_df[col].median(),
+                        "max": pfas_df[col].max()
+                    } 
+                    for col in func_group_cols
+                }
+                logger.info(f"Functional group statistics: {func_group_stats}")
+                with open(os.path.join(analysis_dir, "functional_group_stats.json"), "w") as f:
+                    json.dump(func_group_stats, f, indent=2)
+
+            # 2.4. Create classification of PFAS based on chain length and functional groups
+            if "Chain_Length" in pfas_df.columns:
+                # Define PFAS classes based on chain length
+                def classify_pfas(row):
+                    if pd.isna(row["Chain_Length"]):
+                        return "Unknown"
+                    length = row["Chain_Length"]
+                    if length <= 3:
+                        return "Short-chain PFAS"
+                    elif length <= 7:
+                        return "Medium-chain PFAS"
+                    else:
+                        return "Long-chain PFAS"
+                
+                pfas_df["pfas_class"] = pfas_df.apply(classify_pfas, axis=1)
+                class_stats = pfas_df["pfas_class"].value_counts().to_dict()
+                logger.info(f"PFAS class distribution: {class_stats}")
+        
+        logger.info("PFAS dataset analysis completed")
+        return pfas_df
 
     def execute_pipeline(self, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
         """
