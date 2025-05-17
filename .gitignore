@@ -70,6 +70,12 @@ coverage.xml
 *.sdf
 !data/processed/chemical_list/pfas20_rdkit_mols.pkl
 
+# Large data files
+data/qm9/processed/data_v3.pt
+data/qm9/processed/*.pt
+# Add exceptions for any small .pt files that should be included
+# !data/qm9/processed/small_file.pt
+
 # Logs and temp files
 *.log
 *.tmp
