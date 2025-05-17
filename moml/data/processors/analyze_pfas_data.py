@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("pfas_data_analysis")
 
 # Define paths
-ROOT_DIR = Path(__file__).resolve().parents[4]
+ROOT_DIR = Path(__file__).resolve().parents[3]
 CLEANED_CHEMICAL_PATH = ROOT_DIR / "data" / "processed" / "chemical_list" / "PFAS_Chemical_List_cleaned.csv"
 CLEANED_TREATMENT_PATH = ROOT_DIR / "data" / "processed" / "treatment_data" / "PFAS_Treatment_Data_cleaned.csv"
 RESULTS_DIR = ROOT_DIR / "experiments" / "results" / "analysis"
@@ -52,19 +52,19 @@ def analyze_chemical_data(df):
     os.makedirs(RESULTS_DIR / "chemical", exist_ok=True)
 
     # Analyze molecular weight distribution
-    if "Molecular_Weight" in df.columns:
+    if "MW_RDKit" in df.columns:
         plot_distribution(
             df,
-            "Molecular_Weight",
+            "MW_RDKit",
             "Molecular Weight (g/mol)",
             RESULTS_DIR / "chemical" / "molecular_weight_dist.png",
             log_scale=True,
         )
 
     # Analyze fluorine content
-    if "Fluorine_Percent" in df.columns:
+    if "F_Percentage" in df.columns:
         plot_distribution(
-            df, "Fluorine_Percent", "Fluorine Content (%)", RESULTS_DIR / "chemical" / "fluorine_content_dist.png"
+            df, "F_Percentage", "Fluorine Content (%)", RESULTS_DIR / "chemical" / "fluorine_content_dist.png"
         )
 
     # Analyze chain length distribution
@@ -141,8 +141,8 @@ def create_correlation_analysis(chem_df, treat_df):
 
     # Select numeric columns for correlation
     numeric_columns = [
-        "Molecular_Weight",
-        "Fluorine_Percent",
+        "MW_RDKit",
+        "F_Percentage",
         "Chain_Length",
         "Treatment_Temp_C",
         "Treatment_Time_Minutes",
