@@ -63,7 +63,7 @@ config = MGNNConfig({
 model = initialize_model(config, graph.x.shape[1], graph.edge_attr.shape[1])
 
 # Train model with dataloaders
-trainer = create_trainer(model, config, train_loader, val_loader)
+trainer = create_trainer(config=config, train_loader=train_loader, val_loader=val_loader)
 # Note: train_loader and val_loader should be PyTorch DataLoader objects containing your training and validation datasets.
 # See the examples directory (examples/training_examples or examples/quickstart_examples) for how to create these dataloaders.
 # Example:
@@ -73,8 +73,8 @@ trainer = create_trainer(model, config, train_loader, val_loader)
 history = trainer.train(epochs=50)
 
 # Make predictions
-predictor = create_predictor(model)
-predictions = predictor.predict([graph])
+predictor = create_predictor(model_path="path/to/saved_model.pt")  # Or pass model directly
+predictions = predictor.predict_from_dataloader(val_loader)  # Or predictor.predict([graph])
 ```
 
 See the [examples directory](examples) for more comprehensive examples.
