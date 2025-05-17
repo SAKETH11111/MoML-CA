@@ -14,12 +14,24 @@ MoML-CA is a Python package for molecular representation learning and property p
 - **Data Processing**: Efficient batch processing of molecular datasets
 - **Visualization**: Tools for visualizing molecular graphs and model predictions
 
+## Large Files Handling
+
+Large data files (>100MB) like training datasets and models are not stored in the Git repository. These files are ignored by Git via the `.gitignore` file and should be shared via alternative methods (cloud storage, direct transfer, etc.).
+
+Large files in the `data/qm9/processed/` directory (particularly `*.pt` files) are automatically excluded from Git.
+
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/MoML-CA.git
+git clone https://github.com/your-username/MoML-CA.git
 cd MoML-CA
+
+# Create a conda environment
+conda env create -f environment.yml
+
+# Activate the environment
+conda activate moml-ca
 
 # Install dependencies
 pip install -r requirements.txt
@@ -120,4 +132,4 @@ Contributions are welcome! Please feel free to submit a Pull Request. For guidel
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the terms of the MIT license.
