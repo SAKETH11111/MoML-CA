@@ -23,14 +23,9 @@ import time
 import pickle  # Added for PFAS-specific checkpointing
 from datetime import datetime
 
-# Import consolidated core functionality
-from moml.core import (
-    calculate_molecular_descriptors,
-    create_graph_processor,
-)
-# Import QM batch processor from ORCA parser
+# Import required functionality from moml modules
+from moml.core import calculate_molecular_descriptors, create_graph_processor
 from moml.simulation.quantum_mechanics.parser.orca_parser import batch_process_molecules
-# Import consolidated data functionality
 from moml.data import process_dataset, process_mol_file_to_graph, graph_batch_process
 
 # For parallel processing
@@ -328,7 +323,7 @@ class MOMLPipelineOrchestrator:
             try:
                 from rdkit import Chem
                 from rdkit.Chem import AllChem
-                import pandas as pd
+
 
                 # Load processed data
                 df = pd.read_csv(processed_file)
@@ -414,7 +409,7 @@ class MOMLPipelineOrchestrator:
                 )
             else:
                 # Create a QM-aware processor
-                # processor = create_graph_processor(config)  # Removed external instantiation
+
                 # Process each molecule with QM properties
                 graph_files = []
                 mol_file_paths = [os.path.join(mol_dir, f) for f in mol_files]
@@ -513,7 +508,8 @@ class MOMLPipelineOrchestrator:
                 logger.info("Skipping ORCA calculations as configured")
                 orca_results = None
             else:
-                orca_results = self.run_orca_calculations(
+                # Results are saved to disk by the method, return value not needed
+                self.run_orca_calculations(
                     df, smiles_col=smiles_col, id_col=id_col, force_rerun=force_rerun
                 )
 
@@ -524,7 +520,8 @@ class MOMLPipelineOrchestrator:
                 logger.info("Skipping molecular graph generation as configured")
                 graph_files = []
             else:
-                graph_files = self.generate_molecular_graphs(force_rerun=force_rerun)
+                # Results are saved to disk by the method, return value not needed
+                self.generate_molecular_graphs(force_rerun=force_rerun)
 
             # Collect results
             pipeline_results = {
@@ -618,9 +615,11 @@ class MOMLPipelineOrchestrator:
                     logger.info("Skipping ORCA calculations as configured")
                     orca_results = None
                 else:
-                    orca_results = self.run_orca_calculations(df, smiles_col=smiles_col, id_col=id_col)
+                    # Results are saved to disk by the method, return value not needed
+                    self.run_orca_calculations(df, smiles_col=smiles_col, id_col=id_col)
 
-                graph_files = self.generate_molecular_graphs()
+                # Results are saved to disk by the method, return value not needed
+                self.generate_molecular_graphs()
             else:
                 logger.info("All pipeline stages already completed or skipped as configured")
                 df = self.preprocess_data(input_file, smiles_col, id_col)

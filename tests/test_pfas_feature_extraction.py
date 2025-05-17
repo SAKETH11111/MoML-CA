@@ -205,10 +205,10 @@ class TestPFASFeatures(unittest.TestCase):
         # For now, let's assume it's meant to operate on the output of the above.
         # If identify_fluorinated_groups is the actual source of num_cfX_groups, it needs to be fixed/found.
         # This test will likely still fail if identify_fluorinated_groups is not correctly defined/imported.
-        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")  # Replaced call
+        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")
 
         # Check group identification columns
-        # Removed 'fluorinated_groups' as its generation is unclear and not done by add_fluorinated_group_counts
+
         required_cols = ["num_cf3_groups", "num_cf2_groups", "num_cf_groups"]
         for col in required_cols:
             self.assertIn(col, test_df.columns, f"Missing required column: {col}")
