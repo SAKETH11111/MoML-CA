@@ -100,3 +100,8 @@ config/pipeline_config.json
 
 /docs/
 /memory-bank/data/qm9/processed/data_v3.pt
+memory-bank/activeContext.md
+memory-bank/decisionLog.md
+memory-bank/productContext.md
+memory-bank/progress.md
+memory-bank/systemPatterns.md
