@@ -159,7 +159,8 @@ def engineer_features(df=None):
                 return None
             try:
                 return Chem.MolFromSmiles(str(s))
-            except:
+            except (ValueError, RuntimeError) as e:
+                logger.debug(f"Failed to parse SMILES: {s}, error: {e}")
                 return None
 
         df["rdkit_mol_cache"] = df["SMILES"].apply(safe_parse_smiles)
