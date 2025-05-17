@@ -63,18 +63,33 @@ def main():
     # Print information about the created graphs
     print("\nHierarchical graphs created:")
     for level, path in graph_paths.items():
-        graph = torch.load(path)
-        print(f"- {level.upper()} level: {Path(path).name}")
-        print(f"  - {graph.num_nodes} nodes, {graph.num_edges // 2} edges")
+        try:
+            graph = torch.load(path)
+            print(f"- {level.upper()} level: {Path(path).name}")
+            print(f"  - {graph.num_nodes} nodes, {graph.num_edges // 2} edges")
 
-        # Print node feature information
-        print(f"  - Node features: {list(graph.ndata.keys())}")
+            # Print node feature information for PyTorch Geometric Data objects
+            node_feature_keys = []
+            if hasattr(graph, 'num_nodes'):
+                for key in graph.keys:
+                    attr = graph[key]
+                    if torch.is_tensor(attr) and attr.dim() > 0 and attr.shape[0] == graph.num_nodes:
+                        node_feature_keys.append(key)
+        
+            if node_feature_keys:
+                print(f"  - Node attributes (features): {node_feature_keys}")
+                for key in node_feature_keys:
+                     print(f"    - {key}: shape {graph[key].shape}")
+            else:
+                print("  - No node attributes (features) found matching num_nodes criteria.")
 
-        # For atom level, print atom types
-        if level == "atom" and "atomic_num" in graph.ndata:
-            atom_nums = graph.ndata["atomic_num"].tolist()
-            atom_types = [Chem.GetPeriodicTable().GetElementSymbol(int(num)) for num in atom_nums]
-            print(f"  - Atoms: {atom_types}")
+            if level == "atom" and hasattr(graph, 'atomic_num') and torch.is_tensor(graph.atomic_num):
+                atom_nums = graph.atomic_num.tolist()
+                atom_types = [Chem.GetPeriodicTable().GetElementSymbol(int(num)) for num in atom_nums]
+                print(f"  - Atoms: {atom_types}")
+        except Exception as e:
+            print(f"Error processing {level} level graph at {path}: {e}")
+            continue
 
     # Visualize the graphs if requested
     if args.visualize:
@@ -83,17 +98,20 @@ def main():
         os.makedirs(vis_dir, exist_ok=True)
 
         for level, path in graph_paths.items():
-            graph = torch.load(path)
+            try:
+                graph = torch.load(path)
 
-            # Create a visualization for fluorine highlighting
-            vis_path = os.path.join(vis_dir, f"{Path(path).stem}_fluorine.png")
-            visualize_molecular_graph(graph, vis_path, highlight_feature="fluorine")
-            print(f"- Created visualization: {Path(vis_path).name}")
+                # Create a visualization for fluorine highlighting
+                vis_path = os.path.join(vis_dir, f"{level}_{Path(path).stem}_fluorine.png")
+                visualize_molecular_graph(graph, vis_path, highlight_feature="fluorine")
+                print(f"- Created visualization: {Path(vis_path).name}")
 
-            # Create a visualization for functional groups
-            vis_path = os.path.join(vis_dir, f"{Path(path).stem}_functional.png")
-            visualize_molecular_graph(graph, vis_path, highlight_feature="functional_group")
-            print(f"- Created visualization: {Path(vis_path).name}")
+                # Create a visualization for functional groups
+                vis_path = os.path.join(vis_dir, f"{level}_{Path(path).stem}_functional.png")
+                visualize_molecular_graph(graph, vis_path, highlight_feature="functional_group")
+                print(f"- Created visualization: {Path(vis_path).name}")
+            except Exception as e:
+                print(f"Error visualizing {level} level graph at {path}: {e}")
 
     print("\nDone!")
 

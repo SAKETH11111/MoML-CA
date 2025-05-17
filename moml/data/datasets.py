@@ -17,6 +17,9 @@ from rdkit.Chem import AllChem  # Added
 import logging
 from moml.core import create_graph_processor
 from moml.core.molecular_graph_processor import MolecularGraphProcessor
+import json
+from packaging import version
+from torch_geometric.data import Data
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +95,11 @@ class MolecularGraphDataset(Dataset):
                     # Check if we already have a processed graph file
                     cache_path = file_path + ".pt"  # Potential .pt for graph object
                     if os.path.exists(cache_path):
-                        graph = torch.load(cache_path, weights_only=False)  # Not specifying map_location
+                        # Load cached graph with compatibility for torch versions
+                        if version.parse(torch.__version__) >= version.parse("2.1"):  
+                            graph = torch.load(cache_path, weights_only=False)
+                        else:
+                            graph = torch.load(cache_path)
                         logger.debug(f"Loaded graph from cache: {cache_path}")
                     else:
                         # Process the molecule file using the graph processor
@@ -194,32 +201,27 @@ class HierarchicalGraphDataset(Dataset):
         for level in self.levels:
             graph_path = os.path.join(mol_dir, f"{level}_graph.pt")
             if os.path.exists(graph_path):
-                graphs[level] = torch.load(graph_path, weights_only=False)
+                # Load graph file with version-aware weights_only flag
+                if version.parse(torch.__version__) >= version.parse("2.1"):
+                    graphs[level] = torch.load(graph_path, weights_only=False)
+                else:
+                    graphs[level] = torch.load(graph_path)
             else:
                 # Try JSON format
                 json_path = os.path.join(mol_dir, f"{level}_graph.json")
                 if os.path.exists(json_path):
-                    # Convert JSON to graph object
-                    # TODO: This is problematic. create_molecular_graph_json GENERATES a JSON from a mol file.
-                    # It does not LOAD a JSON into a graph object.
-                    # This line will likely cause issues later as it returns a path or None.
-                    # For now, providing output_dir to satisfy TypeError.
-                    from moml.core.molecular_graph_processor import create_molecular_graph_json
-
+                    # Load graph from JSON representation
                     try:
-                        # Assuming json_path is the input *molecule* file, and output_dir is where it saves the *new* JSON.
-                        # This is likely not the intended logic if json_path is an *existing* graph JSON.
-                        created_json_path = create_molecular_graph_json(json_path, output_dir=mol_dir)
-                        # If the intention was to load the JSON at json_path into a graph object, this is incorrect.
-                        # graphs[level] should be a Data object. created_json_path is a string or None.
-                        # This will need a proper JSON loading utility.
-                        logger.warning(
-                            f"HierarchicalGraphDataset: create_molecular_graph_json called with json_path {json_path}. This function generates JSON, does not load it. Assigning its return path to graphs[{level}] which is likely incorrect."
-                        )
-                        graphs[level] = created_json_path  # This is likely wrong type for graphs[level]
+                        with open(json_path, 'r') as jf:
+                            graph_dict = json.load(jf)
+                        if isinstance(graph_dict, dict):
+                            graphs[level] = Data(**graph_dict)
+                        else:
+                            logger.error(f"JSON at {json_path} is not a dict, cannot create graph.")
+                            graphs[level] = None
                     except Exception as e:
-                        logger.error(f"Error calling create_molecular_graph_json for {json_path} in dir {mol_dir}: {e}")
-                        graphs[level] = None  # Or handle error appropriately
+                        logger.error(f"Error loading graph from JSON {json_path}: {e}")
+                        graphs[level] = None
 
         # Add label if available
         if self.labels is not None and mol_id in self.labels:
@@ -232,8 +234,15 @@ class HierarchicalGraphDataset(Dataset):
 
         # Apply transform if available
         if self.transform is not None:
-            for level in graphs:
-                graphs[level] = self.transform(graphs[level])
+            for level, g in list(graphs.items()):
+                if g is not None:
+                    try:
+                        graphs[level] = self.transform(g)
+                    except Exception as te:
+                        logger.error(f"Error applying transform at level {level} for molecule {mol_id}: {te}")
+                        graphs[level] = None
+                else:
+                    logger.warning(f"Skipping transform for level {level} as graph is None.")
 
         return graphs
 

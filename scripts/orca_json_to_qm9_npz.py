@@ -55,19 +55,27 @@ def convert_one(fp):
             try:
                 Z.append(int(get_atomic_number(parts[0])))
                 R.append([float(parts[1]), float(parts[2]), float(parts[3])])
-            except:
-                pass
+            except (ValueError, IndexError):
+                continue
 
     R = np.array(R, dtype=np.float32)
     Z = np.array(Z, dtype=np.int8)
 
     # Extract energy
+    energies = []
     for line in lines:
         if "FINAL SINGLE POINT ENERGY" in line:
+            parts = line.split()
             try:
-                y[7] = float(line.split()[-2]) * HARTREE_TO_EV  # E_0K
-            except ValueError:
-                y[7] = float(line.split()[-1]) * HARTREE_TO_EV
+                energy = float(parts[-2]) * HARTREE_TO_EV
+            except (ValueError, IndexError):
+                try:
+                    energy = float(parts[-1]) * HARTREE_TO_EV
+                except (ValueError, IndexError):
+                    continue
+            energies.append(energy)
+    if energies:
+        y[7] = energies[-1]
 
     return R, Z, y
 
@@ -79,15 +87,16 @@ def get_atomic_number(symbol):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("orca_path")
+    p.add_argument("orca_paths", nargs="+", help="Paths to ORCA JSON files")
     p.add_argument("-o", "--out", required=True)
     args = p.parse_args()
 
     Rs, Zs, Ys = [], [], []
-    R, Z, y = convert_one(args.orca_path)
-    Rs.append(R)
-    Zs.append(Z)
-    Ys.append(y)
+    for fp in args.orca_paths:
+        R, Z, y = convert_one(fp)
+        Rs.append(R)
+        Zs.append(Z)
+        Ys.append(y)
 
     np.savez_compressed(args.out, R=Rs, Z=Zs, y=Ys)
     print(f"✅  {len(Rs)} molecules ➜ {args.out}")

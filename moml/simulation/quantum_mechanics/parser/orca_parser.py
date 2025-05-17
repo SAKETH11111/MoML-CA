@@ -72,13 +72,13 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
     patterns = {
         "calculation_completed": r".*ORCA TERMINATED NORMALLY.*",
         "error": r".*(ERROR|Error):.*",
-        "mulliken_charges": r"MULLIKEN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+).*?\n)+",
-        "loewdin_charges": r"LOEWDIN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+).*?\n)+",
-        "dipole_moment": r"DIPOLE MOMENT(?:.|\n)*?Total\s+([-+]?\d+\.\d+)\s+([-+]?\d+\.\d+)\s+([-+]?\d+\.\d+)\s+([-+]?\d+\.\d+)",
-        "homo_lumo_gap_direct": r"HOMO-LUMO gap:\s*([-+]?\d*\.\d+)\s*Eh\s*=\s*([-+]?\d*\.\d+)\s*eV",
+        "mulliken_charges": r"MULLIKEN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?).*?\n)+",
+        "loewdin_charges": r"LOEWDIN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?).*?\n)+",
+        "dipole_moment": r"DIPOLE MOMENT(?:.|\n)*?Total\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)",
+        "homo_lumo_gap_direct": r"HOMO-LUMO gap:\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s*Eh\s*=\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s*eV",
         # More flexible HOMO/LUMO patterns to match lines like "   0  -10.0... 2.0... (HOMO)"
-        "homo_energy": r"^\s*\d+\s+([-+]?\d+\.\d+)\s+[\d\.]+\s+\(HOMO\)",  # Group 1 is energy
-        "lumo_energy": r"^\s*\d+\s+([-+]?\d+\.\d+)\s+[\d\.]+\s+\(LUMO\)",  # Group 1 is energy
+        "homo_energy": r"^\s*\d+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)+\s+\(HOMO\)",  # Group 1 is energy
+        "lumo_energy": r"^\s*\d+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)+\s+\(LUMO\)",  # Group 1 is energy
         "geometry": r"CARTESIAN COORDINATES \(ANGSTROEM\).*?\n(.*?)\n\n",
     }
 
@@ -101,7 +101,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         if mulliken_header_match:
             start_index = mulliken_header_match.end()
             # Define a pattern for a single charge line: number, symbol, optional colon, charge
-            charge_line_pattern = re.compile(r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d+\.\d+)")
+            charge_line_pattern = re.compile(r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)")
 
             temp_mulliken_charges = []
 
@@ -140,7 +140,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         if loewdin_header_match:
             start_index = loewdin_header_match.end()
             charge_line_pattern = re.compile(
-                r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d+\.\d+)"
+                r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)"
             )  # Symbol can be 1-3 chars e.g. Cl, Br
 
             temp_loewdin_charges = []
@@ -201,7 +201,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         if geometry_match:
             result["optimized_geometry"] = []  # Initialize as list
             geometry_text = geometry_match.group(1)
-            atom_pattern = r"(\w+)\s+([-+]?\d*\.\d+)\s+([-+]?\d*\.\d+)\s+([-+]?\d*\.\d+)"
+            atom_pattern = r"(\w+)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)"
 
             for line in geometry_text.split("\n"):
                 if not line.strip():

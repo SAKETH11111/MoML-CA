@@ -177,7 +177,7 @@ class MGNNPredictor:
             Dictionary with predictions
         """
         # Use the processor to create a graph from the file
-        graph = self.processor.file_to_graph(file_path, charges_file_path=charges_file)
+        graph = self.processor.file_to_graph(file_path)
 
         # Make prediction
         return self.predict_from_graph(graph)
@@ -307,7 +307,9 @@ class MGNNPredictor:
             save_config: Whether to also save the configuration
         """
         # Create output directory if it doesn't exist
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        dirpath = os.path.dirname(output_file)
+        if dirpath:
+            os.makedirs(dirpath, exist_ok=True)
 
         # Convert tensors to lists
         serializable_preds = {}

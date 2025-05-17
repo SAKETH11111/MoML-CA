@@ -11,6 +11,7 @@ different data processors in the MoML framework.
 import pandas as pd
 from rdkit import Chem
 import logging
+import numpy as np
 from moml.core.molecular_feature_extraction import FunctionalGroupDetector  # Added import
 
 # Set up logging
@@ -129,19 +130,15 @@ def calculate_molecular_complexity(df: pd.DataFrame, mol_col: str = "ROMol") -> 
 
     # Calculate chain length (longest carbon chain)
     def get_chain_length(mol):
-        if mol is None:
+        # Compute distance matrix once
+        dist_matrix = Chem.GetDistanceMatrix(mol)
+        # Identify carbon atom indices
+        carbon_indices = [atom.GetIdx() for atom in mol.GetAtoms() if atom.GetSymbol() == "C"]
+        if len(carbon_indices) < 2:
             return 0
-        # Get all carbon atoms
-        carbon_atoms = [atom for atom in mol.GetAtoms() if atom.GetSymbol() == "C"]
-        if not carbon_atoms:
-            return 0
-        # Find the longest path between carbon atoms
-        max_length = 0
-        for start in carbon_atoms:
-            for end in carbon_atoms:
-                if start != end:
-                    path_length = len(Chem.GetShortestPath(mol, start.GetIdx(), end.GetIdx()))
-                    max_length = max(max_length, path_length)
+        # Extract submatrix for carbon atoms and find maximum distance
+        sub_matrix = dist_matrix[np.ix_(carbon_indices, carbon_indices)]
+        max_length = int(np.max(sub_matrix))
         return max_length
 
     df["Chain_Length"] = df[mol_col].apply(get_chain_length)

@@ -52,6 +52,12 @@ model = initialize_model(config, graph.x.shape[1], graph.edge_attr.shape[1])
 
 # Train model with dataloaders
 trainer = create_trainer(model, config, train_loader, val_loader)
+# Note: train_loader and val_loader should be PyTorch DataLoader objects containing your training and validation datasets.
+# See the examples directory (examples/training_examples or examples/quickstart_examples) for how to create these dataloaders.
+# Example:
+# from torch.utils.data import DataLoader
+# train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+# val_loader = DataLoader(val_dataset, batch_size=32)
 history = trainer.train(epochs=50)
 
 # Make predictions

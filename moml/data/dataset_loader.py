@@ -8,6 +8,7 @@ import os
 import glob
 import pandas as pd
 from typing import Dict, List, Optional, Any
+import logging
 
 from moml.data.datasets import MolecularGraphDataset, HierarchicalGraphDataset
 
@@ -43,40 +44,25 @@ def load_dataset(
     if labels_file and os.path.exists(labels_file):
         labels = {}
         try:
-            # Try to load as CSV
-            try:
-                df = pd.read_csv(labels_file)
+            df = pd.read_csv(labels_file)
+            # Determine label column
+            if "filename" in df.columns and len(df.columns) >= 2:
+                label_col = [col for col in df.columns if col != "filename"][0]
 
-                # Determine label column
-                if "filename" in df.columns and len(df.columns) >= 2:
-                    label_col = [col for col in df.columns if col != "filename"][0]
+                for _, row in df.iterrows():
+                    filename = row["filename"]
+                    label = row[label_col]
 
-                    for _, row in df.iterrows():
-                        filename = row["filename"]
-                        label = row[label_col]
-
-                        # Find full path
-                        full_path = os.path.join(data_dir, filename)
-                        if os.path.exists(full_path):
-                            labels[full_path] = label
-            except ImportError:
-                # Fallback to simple CSV parsing
-                with open(labels_file, "r") as f:
-                    # Skip header
-                    next(f)
-                    for line in f:
-                        parts = line.strip().split(",")
-                        if len(parts) >= 2:
-                            file_name = parts[0]
-                            label = float(parts[1])
-
-                            # Add full path to labels dictionary
-                            file_path = os.path.join(data_dir, file_name)
-                            if os.path.exists(file_path):
-                                labels[file_path] = label
-
+                    # Find full path
+                    full_path = os.path.join(data_dir, filename)
+                    if os.path.exists(full_path):
+                        labels[full_path] = label
+        except pd.errors.ParserError as e:
+            logging.error(f"Error parsing labels file {labels_file}: {e}")
+            raise
         except Exception as e:
-            print(f"Error loading labels file: {e}")
+            logging.error(f"Error loading labels file {labels_file}: {e}")
+            raise
 
     # Create dataset
     return MolecularGraphDataset(mol_files, labels, config)
@@ -126,9 +112,9 @@ def load_datasets_from_splits(
 
 def load_hierarchical_dataset(
     data_dir: str,
-    levels: List[str] = ["atom", "functional_group", "structural_motif"],
+    levels: Optional[List[str]] = None,
     labels_file: Optional[str] = None,
-) -> Dict[str, MolecularGraphDataset]:
+) -> Dict[str, HierarchicalGraphDataset]:
     """
     Load hierarchical graph datasets from a directory.
 
@@ -138,8 +124,10 @@ def load_hierarchical_dataset(
         labels_file: Optional path to file containing labels
 
     Returns:
-        Dictionary of datasets for each level
+        Dictionary of HierarchicalGraphDataset for each level
     """
+    if levels is None:
+        levels = ["atom", "functional_group", "structural_motif"]
 
     # Load labels if provided
     labels = None
@@ -156,7 +144,8 @@ def load_hierarchical_dataset(
                 labels[mol_id] = label
 
         except Exception as e:
-            print(f"Error loading labels file: {e}")
+            logging.error(f"Error loading labels file {labels_file}: {e}")
+            raise
 
     # Create datasets for each level
     datasets = {}

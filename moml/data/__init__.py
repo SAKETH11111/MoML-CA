@@ -46,6 +46,7 @@ from .molecule_processors import (
     process_dataset,
     save_processed_molecules,
     batch_process_molecules_dataset,
+    graph_batch_process,
 )
 
 __all__ = [
@@ -67,4 +68,5 @@ __all__ = [
     "process_dataset",
     "save_processed_molecules",
     "batch_process_molecules_dataset",
+    "graph_batch_process",
 ]

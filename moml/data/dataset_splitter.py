@@ -147,13 +147,14 @@ def scaffold_split_dataset(
     for i, smiles in enumerate(smiles_list):
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            scaffold = ""
+            logger.error(f"Invalid SMILES at index {i}: '{smiles}'")
+            scaffold = f"invalid_smiles_{i}"
         else:
             try:
                 scaffold = MurckoScaffold.MurckoScaffoldSmiles(mol=mol, includeChirality=False)
             except Exception as e:
-                logger.warning(f"Could not generate Murcko scaffold for SMILES {smiles}: {e}")
-                scaffold = ""
+                logger.error(f"Error generating Murcko scaffold for SMILES at index {i} ('{smiles}'): {e}")
+                scaffold = f"scaffold_error_{i}"
 
         if scaffold not in scaffolds:
             scaffolds[scaffold] = [i]

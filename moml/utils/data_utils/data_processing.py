@@ -120,12 +120,13 @@ def handle_missing_values(
     return df
 
 
-def standardize_text_data(df: pd.DataFrame, text_columns: List[str]) -> pd.DataFrame:
+def standardize_text_data(df: pd.DataFrame, text_columns: List[str], special_char_cols: List[str]) -> pd.DataFrame:
     """Standardize text data in specified columns.
 
     Args:
         df: DataFrame to standardize
         text_columns: List of column names containing text data
+        special_char_cols: List of column names to remove special characters from
 
     Returns:
         DataFrame with standardized text data
@@ -137,7 +138,7 @@ def standardize_text_data(df: pd.DataFrame, text_columns: List[str]) -> pd.DataF
             df[col] = df[col].str.strip()
             logger.info(f"Removed trailing spaces from {col}")
 
-            if col in ["name", "description"]:  # Add more columns that need special character removal
+            if col in special_char_cols:
                 df[col] = df[col].str.replace(r"[^\w\s\-\(\)\[\]\{\}\.,;:+=/\\]", "", regex=True)
                 logger.info(f"Removed special characters from {col}")
 

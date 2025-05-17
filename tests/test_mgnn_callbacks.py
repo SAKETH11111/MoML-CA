@@ -1,4 +1,3 @@
-
 """
 Unit tests for the training callbacks in moml.models.mgnn.training.callbacks.
 """
@@ -57,7 +56,6 @@ def temp_checkpoint_dir():
     shutil.rmtree(dir_path)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestEarlyStopping:
     def test_initialization(self):
         es = EarlyStopping(monitor="val_acc", patience=5, min_delta=0.01, mode="max", verbose=False)

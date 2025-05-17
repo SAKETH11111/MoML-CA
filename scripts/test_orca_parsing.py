@@ -19,6 +19,7 @@
 #
 # Test script for ORCA output parsing and conversion to QM9 NPZ format.
 import subprocess
+import argparse
 import logging
 import json # Added for writing JSON output
 from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output # Corrected import
@@ -28,9 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    output_file = "PFAS003.out"
-    json_file = "PFAS003.json"
-    npz_file = "PFAS003_qm9.npz"
+    parser = argparse.ArgumentParser(description="Test ORCA parsing and conversion pipeline")
+    parser.add_argument("--output_file", required=True, help="Path to ORCA output file (.out)")
+    parser.add_argument("--json_file", required=True, help="Path to intermediate JSON file")
+    parser.add_argument("--npz_file", required=True, help="Path to QM9-format output NPZ file")
+    args = parser.parse_args()
+    output_file = args.output_file
+    json_file = args.json_file
+    npz_file = args.npz_file
 
     # 1. Parse ORCA output to JSON
     logger.info(f"Parsing ORCA output: {output_file}")

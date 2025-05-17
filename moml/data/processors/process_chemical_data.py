@@ -17,7 +17,12 @@ This script performs data cleaning and feature engineering on the PFAS Chemical 
 """
 
 import re
+import logging
 from pathlib import Path
+from rdkit import Chem
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 # Import consolidated MoML functions
 
@@ -139,6 +144,21 @@ def engineer_features(df=None):
     # Load cleaned data if not provided
     if df is None:
         df = load_data(CLEANED_DATA_PATH)
+
+    # Ensure SMILES column exists
+    if "SMILES" not in df.columns:
+        logger.error("SMILES column missing in dataframe, cannot engineer features")
+        raise KeyError("SMILES column missing in dataframe")
+
+    # Validate SMILES entries
+    invalid_mask = df["SMILES"].apply(lambda s: Chem.MolFromSmiles(s) is None)
+    num_invalid = invalid_mask.sum()
+    if num_invalid > 0:
+        logger.warning(f"Dropping {num_invalid} invalid SMILES entries before feature engineering")
+        df = df[~invalid_mask]
+    if df.empty:
+        logger.error("All SMILES entries are invalid, aborting feature engineering")
+        raise ValueError("No valid SMILES entries to engineer features")
 
     # Create RDKit molecules
     df = create_rdkit_mols(df)

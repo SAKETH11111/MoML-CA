@@ -12,6 +12,8 @@ import logging
 from typing import Dict, List, Any
 
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
