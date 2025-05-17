@@ -290,7 +290,7 @@ class LearningRateScheduler(Callback):
                 threshold=self.threshold,
                 cooldown=self.cooldown,
                 min_lr=self.min_lr,
-                verbose=self.verbose,
+                # verbose=self.verbose, # Removed deprecated parameter
             )
 
     def on_epoch_end(self, trainer, epoch, logs=None):
