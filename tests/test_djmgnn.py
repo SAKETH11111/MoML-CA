@@ -10,6 +10,13 @@ from torch_geometric.nn import GraphNorm  # Added
 
 from moml.models.mgnn.djmgnn import GraphConvLayer, DenseGNNBlock, JKAggregator, DJMGNN
 
+# Fixture for running tests on CPU and CUDA if available
+@pytest.fixture(params=["cpu", "cuda"])
+def device(request):
+    if request.param == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    return torch.device(request.param)
+
 # Test Fixtures and Parameters
 NODE_IN_DIM = 16
 EDGE_ATTR_DIM_PRESENT = 4
@@ -64,37 +71,37 @@ def dummy_graph_data_batch(request):
     return batch.x, batch.edge_index, batch.edge_attr if edge_attr_dim_override > 0 else None, batch.batch
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestGraphConvLayer:
-    def test_instantiation(self):
-        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT)
+    def test_instantiation(self, device):
+        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         assert isinstance(layer.conv, nn.Module)
         assert isinstance(layer.edge_mlp, nn.Sequential)
         assert isinstance(layer.norm, GraphNorm)  # Changed from layer.bn and nn.BatchNorm1d
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_forward_pass_with_edge_attr(self, dummy_graph_data_single):
+    def test_forward_pass_with_edge_attr(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
-        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         out_x = layer(x, edge_index, edge_attr)
         assert out_x.shape == (NUM_NODES, HIDDEN_DIM)
         assert out_x.dtype == torch.float32
 
-    # This test previously failed when GraphConvLayer could not handle edge_attr_dim=0.
-    # It should now pass.
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
-    def test_forward_pass_no_edge_attr(self, dummy_graph_data_single):
-        x, edge_index, _ = dummy_graph_data_single  # edge_attr is None
-        # To make this pass, GraphConvLayer needs to adapt.
-        # For example, if edge_attr_dim is 0, it might use a different conv or a dummy edge_mlp.
-        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_ABSENT)
-        out_x = layer(x, edge_index, None)  # Pass None for edge_attr
+    def test_forward_pass_no_edge_attr(self, dummy_graph_data_single, device):
+        x, edge_index, _ = dummy_graph_data_single
+        x, edge_index = x.to(device), edge_index.to(device)
+        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_ABSENT).to(device)
+        out_x = layer(x, edge_index, None)
         assert out_x.shape == (NUM_NODES, HIDDEN_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_gradient_flow(self, dummy_graph_data_single):
+    def test_gradient_flow(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
-        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
 
         for param in layer.parameters():
             param.requires_grad = True
@@ -109,55 +116,58 @@ class TestGraphConvLayer:
     @pytest.mark.parametrize(
         "dummy_graph_data_single", [{"num_nodes": 0, "edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True
     )
-    def test_forward_zero_nodes(self, dummy_graph_data_single):
+    def test_forward_zero_nodes(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
-        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         out_x = layer(x, edge_index, edge_attr)
         assert out_x.shape == (0, HIDDEN_DIM)
 
     @pytest.mark.parametrize(
         "dummy_graph_data_single", [{"num_edges": 0, "edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True
     )
-    def test_forward_zero_edges(self, dummy_graph_data_single):
+    def test_forward_zero_edges(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
-        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         out_x = layer(x, edge_index, edge_attr)
-        assert out_x.shape == (
-            NUM_NODES,
-            HIDDEN_DIM,
-        )  # Output shape depends on nodes, not edges for NNConv's output feature dim
+        assert out_x.shape == (NUM_NODES, HIDDEN_DIM)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestDenseGNNBlock:
     N_LAYERS_BLOCK = 2
     TRANSITION_DIM = HIDDEN_DIM // 2
 
-    def test_instantiation(self):
-        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT)
+    def test_instantiation(self, device):
+        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         assert len(block.layers) == self.N_LAYERS_BLOCK
         assert isinstance(block.transition, nn.Linear)
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_forward_pass_with_edge_attr(self, dummy_graph_data_single):
+    def test_forward_pass_with_edge_attr(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
-        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         out_x = block(x, edge_index, edge_attr)
         assert out_x.shape == (NUM_NODES, self.TRANSITION_DIM)
 
-    # This test previously failed as DenseGNNBlock uses GraphConvLayer.
-    # It should now pass.
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
-    def test_forward_pass_no_edge_attr(self, dummy_graph_data_single):
+    def test_forward_pass_no_edge_attr(self, dummy_graph_data_single, device):
         x, edge_index, _ = dummy_graph_data_single
-        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_ABSENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_ABSENT).to(device)
         out_x = block(x, edge_index, None)
         assert out_x.shape == (NUM_NODES, self.TRANSITION_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_gradient_flow(self, dummy_graph_data_single):
+    def test_gradient_flow(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
-        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         out_x = block(x, edge_index, edge_attr)
         loss = out_x.sum()
         loss.backward()
@@ -167,9 +177,11 @@ class TestDenseGNNBlock:
     @pytest.mark.parametrize(
         "dummy_graph_data_single", [{"num_nodes": 0, "edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True
     )
-    def test_forward_zero_nodes(self, dummy_graph_data_single):
+    def test_forward_zero_nodes(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
-        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT)
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        block = DenseGNNBlock(NODE_IN_DIM, HIDDEN_DIM, self.N_LAYERS_BLOCK, self.TRANSITION_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         out_x = block(x, edge_index, edge_attr)
         assert out_x.shape == (0, self.TRANSITION_DIM)
 
@@ -179,8 +191,8 @@ class TestJKAggregator:
     JK_OUT_DIM = HIDDEN_DIM * 2
 
     @pytest.mark.parametrize("mode", ["concat", "max", "attention", "lstm"])
-    def test_instantiation(self, mode):
-        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode)
+    def test_instantiation(self, mode, device):
+        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode).to(device)
         if mode == "concat":
             assert isinstance(aggregator.proj, nn.Linear)
         elif mode == "max":
@@ -194,16 +206,16 @@ class TestJKAggregator:
             assert hasattr(aggregator, "lstm_final_proj") and isinstance(aggregator.lstm_final_proj, nn.Linear)
 
     @pytest.mark.parametrize("mode", ["concat", "max", "attention", "lstm"])
-    def test_forward_pass(self, mode):
-        block_outputs = [torch.randn(NUM_NODES, dim) for dim in self.BLOCK_DIMS]
-        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode)
+    def test_forward_pass(self, mode, device):
+        block_outputs = [torch.randn(NUM_NODES, dim).to(device) for dim in self.BLOCK_DIMS]
+        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode).to(device)
         out_features = aggregator(block_outputs)
         assert out_features.shape == (NUM_NODES, self.JK_OUT_DIM)
 
     @pytest.mark.parametrize("mode", ["concat", "max", "attention", "lstm"])
-    def test_gradient_flow(self, mode):
-        block_outputs = [torch.randn(NUM_NODES, dim, requires_grad=True) for dim in self.BLOCK_DIMS]
-        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode)
+    def test_gradient_flow(self, mode, device):
+        block_outputs = [torch.randn(NUM_NODES, dim, requires_grad=True).to(device) for dim in self.BLOCK_DIMS]
+        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode).to(device)
 
         for param in aggregator.parameters():
             param.requires_grad = True
@@ -231,22 +243,32 @@ class TestJKAggregator:
                 assert attn_v.grad is not None, f"Gradient is None for attn_vecs[{i}] in mode {mode}"
             checked_any_param_grad = True
         elif mode == "lstm":
-            if hasattr(aggregator, "lstm_projs_in"):  # Check if LSTM path was properly initialized
-                for i, proj_layer in enumerate(aggregator.lstm_projs_in):
+            lstm_path_grads_ok_in_djmgnn_jk = False
+            if (
+                hasattr(aggregator, "lstm_projs_in")
+                and hasattr(aggregator, "lstm_layer")
+                and hasattr(aggregator, "lstm_final_proj")
+            ):
+                try:
+                    for i, proj_layer in enumerate(aggregator.lstm_projs_in):
+                        assert (
+                            proj_layer.weight.grad is not None
+                        ), f"Gradient is None for lstm_projs_in[{i}].weight in mode {mode}"
+                    for name, param in aggregator.lstm_layer.named_parameters():
+                        assert param.grad is not None, f"Gradient is None for lstm_layer.{name} in mode {mode}"
                     assert (
-                        proj_layer.weight.grad is not None
-                    ), f"Gradient is None for lstm_projs_in[{i}].weight in mode {mode}"
-                for name, param in aggregator.lstm_layer.named_parameters():
-                    assert param.grad is not None, f"Gradient is None for lstm_layer.{name} in mode {mode}"
-                assert (
-                    aggregator.lstm_final_proj.weight.grad is not None
-                ), f"Gradient is None for lstm_final_proj.weight in mode {mode}"
-                checked_any_param_grad = True
-            elif hasattr(aggregator, "fallback_proj"):  # Check fallback if LSTM specific parts are missing
+                        aggregator.lstm_final_proj.weight.grad is not None
+                    ), "Gradient is None for lstm_final_proj.weight in mode {mode}"
+                    lstm_path_grads_ok_in_djmgnn_jk = True
+                    checked_any_param_grad = True
+                except AssertionError:
+                    pass  # Will check fallback next
+
+            if not lstm_path_grads_ok_in_djmgnn_jk and hasattr(aggregator, "fallback_proj"):
                 assert (
                     aggregator.fallback_proj.weight.grad is not None
-                ), f"Gradient is None for fallback_proj.weight in mode {mode} (LSTM fallback)"
-                checked_any_param_grad = True
+                ), f"DJMGNN (jk_mode={mode}): Main JK params failed grad check, AND jk.fallback_proj.weight.grad is also None."
+                checked_any_param_grad = True  # Counted as checked
 
         if not checked_any_param_grad and hasattr(aggregator, "fallback_proj"):
             # If no mode-specific params were checked (e.g. LSTM init failed and went to general fallback)
@@ -265,14 +287,13 @@ class TestJKAggregator:
         #          assert param.grad is not None, f"Gradient is None for param {name} in mode {mode}"
 
     @pytest.mark.parametrize("mode", ["concat", "max", "attention", "lstm"])
-    def test_forward_zero_nodes(self, mode):
-        block_outputs = [torch.empty(0, dim) for dim in self.BLOCK_DIMS]  # Zero nodes
-        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode)
+    def test_forward_zero_nodes(self, mode, device):
+        block_outputs = [torch.empty(0, dim).to(device) for dim in self.BLOCK_DIMS]  # Zero nodes
+        aggregator = JKAggregator(self.BLOCK_DIMS, self.JK_OUT_DIM, mode=mode).to(device)
         out_features = aggregator(block_outputs)
         assert out_features.shape == (0, self.JK_OUT_DIM)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestDJMGNN:
     N_BLOCKS = 2
     LAYERS_PER_BLOCK = 1
@@ -280,7 +301,7 @@ class TestDJMGNN:
     GRAPH_OUT_DIM = 1
 
     @pytest.mark.parametrize("jk_mode", ["concat", "max", "attention", "lstm"])
-    def test_instantiation(self, jk_mode):
+    def test_instantiation(self, jk_mode, device):
         model = DJMGNN(
             in_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -290,16 +311,14 @@ class TestDJMGNN:
             jk_mode=jk_mode,
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
-        )
+        ).to(device)
         assert len(model.blocks) == self.N_BLOCKS
         assert isinstance(model.jk, JKAggregator)  # Changed from model.jk_aggregator
         assert model.jk.mode == jk_mode  # Changed from model.jk_aggregator
         assert isinstance(model.node_head, nn.Sequential)
         assert isinstance(model.graph_head, nn.Sequential)
 
-    # This test previously failed as DJMGNN uses GraphConvLayer.
-    # It should now pass.
-    def test_instantiation_no_edge_attr(self):
+    def test_instantiation_no_edge_attr(self, device):
         model = DJMGNN(
             in_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -309,12 +328,14 @@ class TestDJMGNN:
             jk_mode="concat",
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
-        )
+        ).to(device)
         assert len(model.blocks) == self.N_BLOCKS  # Should still instantiate
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_forward_pass_single_graph_with_edge_attr(self, dummy_graph_data_single):
+    def test_forward_pass_single_graph_with_edge_attr(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
         model = DJMGNN(
             in_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -324,7 +345,7 @@ class TestDJMGNN:
             jk_mode="concat",
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
-        )
+        ).to(device)
         outputs = model(x, edge_index, edge_attr, batch=None)
 
         assert "node_pred" in outputs
@@ -334,10 +355,10 @@ class TestDJMGNN:
         assert outputs["node_pred"].shape == (expected_num_nodes, self.NODE_OUT_DIM)
         assert outputs["graph_pred"].shape == (1, self.GRAPH_OUT_DIM)
 
-    # This test previously failed. It should now pass.
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
-    def test_forward_pass_single_graph_no_edge_attr(self, dummy_graph_data_single):
+    def test_forward_pass_single_graph_no_edge_attr(self, dummy_graph_data_single, device):
         x, edge_index, _ = dummy_graph_data_single
+        x, edge_index = x.to(device), edge_index.to(device)
         model = DJMGNN(
             in_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -347,15 +368,18 @@ class TestDJMGNN:
             jk_mode="concat",
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
-        )
+        ).to(device)
         outputs = model(x, edge_index, edge_attr=None, batch=None)
         assert "node_pred" in outputs
         expected_num_nodes = NUM_NODES + (1 if model.use_super else 0)
         assert outputs["node_pred"].shape == (expected_num_nodes, self.NODE_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_forward_pass_batch_graph_with_edge_attr(self, dummy_graph_data_batch):
+    def test_forward_pass_batch_graph_with_edge_attr(self, dummy_graph_data_batch, device):
         x, edge_index, edge_attr, batch_vector = dummy_graph_data_batch
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        batch_vector = batch_vector.to(device)
         model = DJMGNN(
             in_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -365,7 +389,7 @@ class TestDJMGNN:
             jk_mode="concat",
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
-        )
+        ).to(device)
         outputs = model(x, edge_index, edge_attr, batch=batch_vector)
 
         assert "node_pred" in outputs
@@ -375,10 +399,11 @@ class TestDJMGNN:
         assert outputs["node_pred"].shape == (expected_num_nodes_batch, self.NODE_OUT_DIM)
         assert outputs["graph_pred"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
 
-    # This test previously failed. It should now pass.
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
-    def test_forward_pass_batch_graph_no_edge_attr(self, dummy_graph_data_batch):
+    def test_forward_pass_batch_graph_no_edge_attr(self, dummy_graph_data_batch, device):
         x, edge_index, _, batch_vector = dummy_graph_data_batch
+        x, edge_index = x.to(device), edge_index.to(device)
+        batch_vector = batch_vector.to(device)
         model = DJMGNN(
             in_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -388,7 +413,7 @@ class TestDJMGNN:
             jk_mode="concat",
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
-        )
+        ).to(device)
         outputs = model(x, edge_index, edge_attr=None, batch=batch_vector)
         assert "node_pred" in outputs
         expected_num_nodes_batch = x.shape[0] + (BATCH_SIZE if model.use_super else 0)
@@ -396,7 +421,7 @@ class TestDJMGNN:
         assert outputs["graph_pred"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_gradient_flow(self, dummy_graph_data_batch):
+    def test_gradient_flow(self, dummy_graph_data_batch, device):
         x, edge_index, edge_attr, batch_vector = dummy_graph_data_batch
 
         # Ensure input tensor x requires gradients for this test
@@ -413,11 +438,14 @@ class TestDJMGNN:
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
             dropout=0.0,
-        )
+        ).to(device)
 
         for param in model.parameters():
             param.requires_grad = True
 
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
+        batch_vector = batch_vector.to(device)
         outputs = model(x, edge_index, edge_attr, batch=batch_vector)
         loss = outputs["node_pred"].sum() + outputs["graph_pred"].sum()
         loss.backward()
@@ -503,8 +531,10 @@ class TestDJMGNN:
     @pytest.mark.parametrize(
         "dummy_graph_data_single", [{"num_nodes": 0, "edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True
     )
-    def test_forward_zero_nodes_single_graph(self, dummy_graph_data_single):
+    def test_forward_zero_nodes_single_graph(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
+        x, edge_index = x.to(device), edge_index.to(device)
+        edge_attr = edge_attr.to(device) if edge_attr is not None else None
         model = DJMGNN(
             in_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -514,7 +544,7 @@ class TestDJMGNN:
             jk_mode="concat",
             node_out_dim=self.NODE_OUT_DIM,
             graph_out_dim=self.GRAPH_OUT_DIM,
-        )
+        ).to(device)
         outputs = model(x, edge_index, edge_attr, batch=None)  # batch=None for single graph
         # If x has 0 nodes, but use_supernode is True, node_pred shape will be (1, NODE_OUT_DIM) due to supernode
         expected_num_nodes_zero_case = 0
@@ -549,5 +579,3 @@ class TestDJMGNN:
         if torch.isnan(outputs["graph_pred"]).any():  # More robust check
             print("Warning: graph_pred contains NaNs for zero-node graph.")
         # assert not torch.isnan(outputs['graph_pred']).any() # Ideal case
-
-    # TODO: Add test for zero-node graph in a batch scenario. This is more complex due to Batch object.

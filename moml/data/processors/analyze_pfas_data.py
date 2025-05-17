@@ -201,9 +201,18 @@ def check_class_imbalance(df):
             RESULTS_DIR / "treatment" / "class_distribution.png",
         )
 
-        # Calculate imbalance ratio
-        imbalance_ratio = class_dist[True] / class_dist[False] if False in class_dist else float("inf")
-        logger.info(f"Class imbalance ratio: {imbalance_ratio:.2f}")
+        # Calculate imbalance ratio safely
+        dist_dict = class_dist.to_dict()
+        pos = dist_dict.get(True, dist_dict.get('True', 0))
+        neg = dist_dict.get(False, dist_dict.get('False', 0))
+        if pos == 0 and neg == 0:
+            logger.warning("No 'True' or 'False' classes found for Treatment_Success, cannot compute imbalance.")
+        else:
+            if neg == 0:
+                imbalance_ratio = float('inf')
+            else:
+                imbalance_ratio = pos / neg
+            logger.info(f"Class imbalance ratio: {imbalance_ratio:.2f}")
 
     logger.info("Class imbalance check completed")
 

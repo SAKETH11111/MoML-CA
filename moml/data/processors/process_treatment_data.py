@@ -41,7 +41,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("treatment_data_processing")
 
 # Define paths
-ROOT_DIR = Path(__file__).resolve().parents[4]
+ROOT_DIR = Path(__file__).resolve().parents[3]  # fixed to repo root
 RAW_TREATMENT_PATH = ROOT_DIR / "data" / "raw" / "PFAS_Treatment_Data.csv"
 CLEANED_CHEMICAL_PATH = ROOT_DIR / "data" / "processed" / "chemical_list" / "PFAS_Chemical_List_cleaned.csv"
 PROCESSED_TREATMENT_PATH = ROOT_DIR / "data" / "processed" / "treatment_data" / "PFAS_Treatment_Data_cleaned.csv"
@@ -81,14 +81,14 @@ def convert_time_to_minutes(time_str):
 
     value = float(numeric_values[0])
 
-    # Convert to minutes based on units
-    if "second" in time_str or "sec" in time_str or "s" in time_str:
+    # Convert to minutes based on precise unit matching
+    if re.search(r"\b(sec(ond)?s?)\b", time_str):
         return value / 60.0
-    elif "minute" in time_str or "min" in time_str:
+    elif re.search(r"\b(min(ute)?s?)\b", time_str):
         return value
-    elif "hour" in time_str or "hr" in time_str or "h" in time_str:
+    elif re.search(r"\b(ho?ur?s?|hrs?)\b", time_str):
         return value * 60.0
-    elif "day" in time_str or "d" in time_str:
+    elif re.search(r"\b(days?)\b", time_str):
         return value * 24 * 60.0
     else:
         return value  # Assume minutes if no unit specified
@@ -219,7 +219,7 @@ def process_treatment_data():
     df = clean_casrn(df)
 
     # Convert numeric columns
-    numeric_columns = ["Treatment_Temp_C"]
+    numeric_columns = ["Treatment_Temp_C", "Effectiveness_Percent"]  # include for imputation
     df = convert_numeric_columns(df, numeric_columns)
 
     # Convert treatment time to minutes
@@ -230,6 +230,10 @@ def process_treatment_data():
     for col in concentration_columns:
         if col in df.columns:
             df[f"{col}_Numeric"] = df[col].apply(extract_numeric_from_text)
+
+    # Extract numeric values for effectiveness percent
+    if "Effectiveness_Percent" in df.columns:
+        df["Effectiveness_Percent_Numeric"] = df["Effectiveness_Percent"].apply(extract_numeric_from_text)
 
     # Handle missing values
     df = handle_missing_values(df)

@@ -15,10 +15,13 @@ from tqdm import tqdm
 from typing import List, Dict, Optional, Any
 import pandas as pd
 import pickle
+import logging
+from rdkit import Chem
 
-from moml.core import create_graph_processor, find_charges_file, read_charges_from_file
+from moml.core import create_graph_processor, find_charges_file, read_charges_from_file, calculate_molecular_descriptors
 from moml.utils import validate_smiles
 
+logger = logging.getLogger(__name__)
 
 def process_mol_file(mol_file: str, processor=None, charges_file: Optional[str] = None) -> Any:
     """
@@ -42,7 +45,14 @@ def process_mol_file(mol_file: str, processor=None, charges_file: Optional[str] 
         try:
             partial_charges = read_charges_from_file(charges_file)
             if partial_charges is not None:
-                additional_features = {"partial_charges": partial_charges}
+                # Validate partial charges length matches atom count
+                mol = Chem.MolFromMolFile(mol_file)
+                if mol is not None and len(partial_charges) == mol.GetNumAtoms():
+                    additional_features = {"partial_charges": partial_charges}
+                else:
+                    atom_count = mol.GetNumAtoms() if mol else 'unknown'
+                    logger.error(f"Invalid partial charges length {len(partial_charges)} for {mol_file}, expected {atom_count}")
+                    additional_features = None
         except Exception as e:
             print(f"Error reading charges from {charges_file}: {e}")
 
@@ -67,6 +77,9 @@ def process_mol_file_to_graph(
     """
     # Process the molecule
     graph = process_mol_file(mol_file, processor, charges_file)
+    if graph is None:
+        logger.error(f"Graph processing failed for {mol_file}, not saving.")
+        raise ValueError(f"Graph is None for file {mol_file}")
 
     # Determine output path if not provided
     if output_file is None:
@@ -150,6 +163,80 @@ def batch_process_molecules(
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
         print(f"Saved preprocessing configuration to {config_path}")
+
+    return processed_files
+
+
+def graph_batch_process(
+    input_dir: str,
+    output_dir: str,
+    config: Optional[Dict[str, Any]] = None,
+    file_pattern: str = "*.mol",
+) -> List[str]:
+    """
+    Process all molecule files in the input directory and save graph representations
+    to the output directory. 
+    
+    This function is a simplified version of batch_process_molecules specifically
+    designed for the pipeline orchestrator. It provides a more focused API with
+    fewer parameters, making it easier to use in pipeline contexts.
+    
+    Key differences from batch_process_molecules:
+    - Does not support explicit charges_dir (quantum properties handled via config)
+    - Uses a single file pattern rather than comma-separated patterns
+    - Logging uses the logger rather than print statements
+    - Tailored for use in the pipeline_orchestrator.py module
+
+    Args:
+        input_dir: Directory containing molecule files
+        output_dir: Directory to save processed graph files
+        config: Optional configuration for graph processing
+        file_pattern: Pattern to match molecule files
+
+    Returns:
+        List of paths to the saved graph files
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create processor with config
+    processor = create_graph_processor(config)
+
+    # Get list of molecule files
+    mol_files = glob.glob(os.path.join(input_dir, file_pattern))
+
+    if not mol_files:
+        logger.warning(f"No files found matching pattern '{file_pattern}' in {input_dir}")
+        return []
+
+    logger.info(f"Processing {len(mol_files)} molecule files")
+
+    # Process each molecule file
+    processed_files = []
+    for mol_file in tqdm(mol_files, desc="Processing molecules"):
+        try:
+            # Generate output file path
+            base_name = os.path.splitext(os.path.basename(mol_file))[0]
+            output_file = os.path.join(output_dir, f"{base_name}_graph.pt")
+
+            # Process and save the file
+            process_mol_file_to_graph(
+                mol_file=mol_file, output_file=output_file, processor=processor
+            )
+
+            processed_files.append(output_file)
+
+        except Exception as e:
+            logger.error(f"Error processing {mol_file}: {e}")
+
+    logger.info(f"Processed {len(processed_files)} molecules successfully")
+
+    # Save configuration for reference if provided
+    if config:
+        config_path = os.path.join(output_dir, "preprocessing_config.json")
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+        logger.info(f"Saved preprocessing configuration to {config_path}")
 
     return processed_files
 

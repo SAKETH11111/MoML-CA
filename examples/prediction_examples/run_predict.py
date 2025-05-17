@@ -74,21 +74,27 @@ def main():
         predictor = create_predictor(args.model_path, device=device)
 
         print(f"Running inference on {args.mol_file}")
-        predictions = predictor.predict_from_file(args.mol_file, args.charges_file)
+        predictions = None  # Initialize predictions
+        try:
+            predictions = predictor.predict_from_file(args.mol_file, args.charges_file)
+        except Exception as e:
+            print(f"Error during prediction for {args.mol_file}: {e}")
+            # Optionally, handle the error further, e.g., by exiting or returning
 
         # Convert tensors to lists for display
         serializable_preds = {}
-        for key, value in predictions.items():
-            serializable_preds[key] = value.tolist()
+        if predictions is not None:
+            for key, value in predictions.items():
+                serializable_preds[key] = value.tolist()
 
-        # Print predictions
-        print("\nPredictions:")
-        if "graph_pred" in serializable_preds:
-            graph_pred = serializable_preds["graph_pred"]
-            print(f"Graph-level prediction: {graph_pred}")
+            # Print predictions
+            print("\nPredictions:")
+            if "graph_pred" in serializable_preds:
+                graph_pred = serializable_preds["graph_pred"]
+                print(f"Graph-level prediction: {graph_pred}")
 
-        if "node_pred" in serializable_preds:
-            node_pred = serializable_preds["node_pred"]
+            if "node_pred" in serializable_preds:
+                node_pred = serializable_preds["node_pred"]
             print(f"Node-level predictions (first 5 nodes): {node_pred[:5]}")
 
         # Save predictions to file if requested

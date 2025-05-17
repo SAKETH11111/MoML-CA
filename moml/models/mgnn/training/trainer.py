@@ -233,7 +233,7 @@ class MGNNTrainer:
             self._call_callbacks("on_batch_end", batch_idx, logs=batch_logs)
 
         # Calculate average loss
-        epoch_loss = total_loss / num_batches
+        epoch_loss = total_loss / num_batches if num_batches > 0 else 0.0
 
         return epoch_loss
 
@@ -567,7 +567,7 @@ def train_epoch(
         progress_bar.set_postfix({"loss": loss.item()})
 
     # Calculate average loss
-    epoch_loss = total_loss / num_batches
+    epoch_loss = total_loss / num_batches if num_batches > 0 else 0.0
 
     return epoch_loss
 

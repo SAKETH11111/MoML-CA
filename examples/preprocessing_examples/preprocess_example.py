@@ -227,7 +227,8 @@ def main():
             config_file = os.path.join(args.output_dir, "graph_config.json")
             save_config(config, config_file)
             print(f"Configuration with dataset statistics saved to {config_file}")
-
+    else:
+        print("No files were processed. Skipping dataset statistics calculation.")
 
 if __name__ == "__main__":
     main()

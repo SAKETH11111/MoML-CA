@@ -12,6 +12,7 @@ import argparse
 import pandas as pd
 from rdkit import Chem
 import logging
+import tempfile
 
 from moml.core import GraphCoarsener, calculate_molecular_descriptors
 from moml.data import process_dataset, save_processed_molecules
@@ -103,11 +104,20 @@ def save_and_create_graphs(df: pd.DataFrame, output_dir: str, base_name: str) ->
             # If 3D embedding fails, continue with 2D structure
             pass
 
-        # Save the hierarchical graphs
-        coarsener.create_from_molecule_file(
-            mol_file=mol,
-            output_dir=graphs_dir,
-        )
+        # Save the hierarchical graphs: write Mol to temp file for file-based API
+        with tempfile.NamedTemporaryFile(suffix=".mol", delete=False) as tmp:
+            tmp_path = tmp.name
+            Chem.MolToMolFile(mol, tmp_path)
+        try:
+            coarsener.create_from_molecule_file(
+                mol_file=tmp_path,
+                output_dir=graphs_dir,
+            )
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                logger.warning(f"Could not remove temporary file {tmp_path}")
 
     output_files["molecular_graphs"] = graphs_dir
     return output_files

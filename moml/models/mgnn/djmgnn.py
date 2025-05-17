@@ -43,7 +43,9 @@ class GraphConvLayer(nn.Module):
         # self.edge_mlp if it expected >1 features. This indicates an upstream issue.
         # The test `test_forward_pass_no_edge_attr` passes None when actual_edge_attr_dim is 0.
         if edge_attr_for_nnconv_input is None and edge_index.numel() > 0:  # Ensure we create dummy only if edges exist
-            edge_attr_for_nnconv_input = x.new_ones(edge_index.size(1), 1)
+            # Create dummy edge attributes matching expected dimension
+            dummy_dim = self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], 'in_features') else self.actual_edge_attr_dim
+            edge_attr_for_nnconv_input = x.new_ones(edge_index.size(1), dummy_dim)
         elif edge_index.numel() == 0:  # No edges, edge_attr should be empty or None
             edge_attr_for_nnconv_input = torch.empty(
                 0, self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], "in_features") else 1
@@ -303,27 +305,6 @@ class DJMGNN(nn.Module):
                     # This is not quite right, as GraphConvLayer makes a 1-dim dummy.
                     # Let's stick to: if original edge_attr is None, pass None. Supernode edges won't get explicit attrs.
                     pass
-
-        new_batch = torch.cat(
-            [batch[:num_nodes_original], torch.arange(num_graphs, device=device) + num_graphs]
-        )  # This batch logic for supernodes is complex
-        # Simpler: batch for supernodes is just arange(num_graphs)
-        final_batch_for_supernodes = torch.arange(num_graphs, device=device)
-        new_batch_corrected = torch.cat(
-            [
-                batch[:num_nodes_original],
-                final_batch_for_supernodes + (num_graphs if batch.numel() > num_nodes_original else 0),
-            ],
-            dim=0,
-        )
-        # The batch vector needs to align with x_with_super
-        # Original nodes keep their batch indices. Supernodes get new batch indices from 0 to num_graphs-1,
-        # but shifted if batch was not empty.
-        # Correct batch for supernodes: torch.arange(num_graphs, device=device)
-        # x_with_super has original nodes then supernodes.
-        # batch_for_x = batch[:num_nodes_original]
-        # batch_for_super = torch.arange(num_graphs, device=device) # These are 0 to num_graphs-1
-        # new_batch_final = torch.cat([batch_for_x, batch_for_super], dim=0) # This is wrong, supernode batch indices are relative to their own block
 
         # Correct batch assignment:
         # Original nodes: use their original batch indices

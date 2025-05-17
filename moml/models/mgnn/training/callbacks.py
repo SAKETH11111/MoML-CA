@@ -7,6 +7,7 @@ training process by adding functionality like early stopping, model checkpointin
 
 import os
 import torch
+import copy  # for deep-copying state_dict tensors
 from typing import Optional, Callable
 
 
@@ -103,7 +104,9 @@ class EarlyStopping(Callback):
             # Reset counters and update best value
             self.best_value = current
             self.wait = 0
-            self.best_weights = trainer.model.state_dict().copy()
+            # Deep-copy state_dict to freeze best_weights
+            state = trainer.model.state_dict()
+            self.best_weights = {k: v.clone().detach() for k, v in state.items()}
         else:
             # Increment wait counter
             self.wait += 1
