@@ -20,8 +20,10 @@ import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# Define FLOAT constant for robust matching of numeric data
+FLOAT = r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?"
+
+# Set up logging - remove basicConfig
 logger = logging.getLogger("orca_parser")
 
 # Suppress RDKit logging except for warnings and errors
@@ -72,13 +74,13 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
     patterns = {
         "calculation_completed": r".*ORCA TERMINATED NORMALLY.*",
         "error": r".*(ERROR|Error):.*",
-        "mulliken_charges": r"MULLIKEN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?).*?\n)+",
-        "loewdin_charges": r"LOEWDIN ATOMIC CHARGES.*?\n(?:\s*\d+\s+\w+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?).*?\n)+",
-        "dipole_moment": r"DIPOLE MOMENT(?:.|\n)*?Total\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)",
-        "homo_lumo_gap_direct": r"HOMO-LUMO gap:\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s*Eh\s*=\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s*eV",
+        "mulliken_charges": f"MULLIKEN ATOMIC CHARGES.*?\\n(?:\\s*\\d+\\s+\\w+\\s+({FLOAT}).*?\\n)+",
+        "loewdin_charges": f"LOEWDIN ATOMIC CHARGES.*?\\n(?:\\s*\\d+\\s+\\w+\\s+({FLOAT}).*?\\n)+",
+        "dipole_moment": f"DIPOLE MOMENT(?:.|\\n)*?Total\\s+({FLOAT})\\s+({FLOAT})\\s+({FLOAT})\\s+({FLOAT})",
+        "homo_lumo_gap_direct": f"HOMO-LUMO gap:\\s*({FLOAT})\\s*Eh\\s*=\\s*({FLOAT})\\s*eV",
         # More flexible HOMO/LUMO patterns to match lines like "   0  -10.0... 2.0... (HOMO)"
-        "homo_energy": r"^\s*\d+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)+\s+\(HOMO\)",  # Group 1 is energy
-        "lumo_energy": r"^\s*\d+\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)+\s+\(LUMO\)",  # Group 1 is energy
+        "homo_energy": f"^\\s*\\d+\\s+({FLOAT})\\s+({FLOAT})+\\s+\\(HOMO\\)",  # Group 1 is energy
+        "lumo_energy": f"^\\s*\\d+\\s+({FLOAT})\\s+({FLOAT})+\\s+\\(LUMO\\)",  # Group 1 is energy
         "geometry": r"CARTESIAN COORDINATES \(ANGSTROEM\).*?\n(.*?)\n\n",
     }
 
@@ -101,7 +103,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         if mulliken_header_match:
             start_index = mulliken_header_match.end()
             # Define a pattern for a single charge line: number, symbol, optional colon, charge
-            charge_line_pattern = re.compile(r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)")
+            charge_line_pattern = re.compile(f"^\\s*\\d+\\s+[A-Za-z]{{1,3}}\\s*:?\\s*({FLOAT})")
 
             temp_mulliken_charges = []
 
@@ -140,7 +142,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         if loewdin_header_match:
             start_index = loewdin_header_match.end()
             charge_line_pattern = re.compile(
-                r"^\s*\d+\s+[A-Za-z]{1,3}\s*:?\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)"
+                f"^\\s*\\d+\\s+[A-Za-z]{{1,3}}\\s*:?\\s*({FLOAT})"
             )  # Symbol can be 1-3 chars e.g. Cl, Br
 
             temp_loewdin_charges = []
@@ -201,7 +203,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         if geometry_match:
             result["optimized_geometry"] = []  # Initialize as list
             geometry_text = geometry_match.group(1)
-            atom_pattern = r"(\w+)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)\s+([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)"
+            atom_pattern = f"(\\w+)\\s+({FLOAT})\\s+({FLOAT})\\s+({FLOAT})"
 
             for line in geometry_text.split("\n"):
                 if not line.strip():
@@ -436,14 +438,18 @@ def run_orca_calculation(input_file: str, orca_path: str = None, num_procs: int 
 
         # Determine ORCA path - default to the installed location or system PATH
         if orca_path is None:
-            # Try common installation paths
-            possible_paths = ["/Users/saketh/Library/orca_6_0_1/orca", "/opt/orca/orca", "orca"]  # System PATH
+            # Try common installation paths (removed user-specific path)
+            possible_paths = ["/opt/orca/orca", "orca"]  # Common path and System PATH
 
             for path in possible_paths:
                 if path == "orca" or os.path.exists(path):
                     orca_path = path
                     logger.info(f"Using ORCA: {orca_path}")
                     break
+            
+            # Check if orca_path is still None after trying possible paths
+            if orca_path is None:
+                raise FileNotFoundError("ORCA executable not found. Please install ORCA or specify the correct path.")
 
         # Build command
         command = [orca_path, input_file]

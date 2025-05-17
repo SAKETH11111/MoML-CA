@@ -211,6 +211,8 @@ class DJMGNN(nn.Module):
     ):
         super().__init__()
         self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = p_dropedge, use_supernode, use_rbf, rbf_K
+        self.hidden_dim = hidden_dim  # Cache the hidden dimension
+        self.node_out_dim = node_out_dim  # Store the node output dimension
 
         self.input_edge_attr_dim = edge_attr_dim  # Store original input edge_attr_dim
 
@@ -327,7 +329,7 @@ class DJMGNN(nn.Module):
         if x.numel() == 0:
             # logger.warning("DJMGNN forward called with zero nodes.")
             return {
-                "node_pred": torch.empty(0, self.node_head[-1].out_features).to(x.device),
+                "node_pred": torch.empty(0, self.node_out_dim).to(x.device),
                 "graph_pred": torch.empty(0, self.graph_head[-1].out_features).to(x.device),
             }
 

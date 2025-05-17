@@ -206,7 +206,7 @@ def main():
 
     # Common arguments for graph generation
     graph_parser = argparse.ArgumentParser(add_help=False, parents=[common_parser])
-    graph_parser.add_argument("--orca", type=str, required=True, help="Path to ORCA output file")
+    graph_parser.add_argument("--orca", type=str, help="Path to ORCA output file")
     graph_parser.add_argument("--output-dir", type=str, help="Directory to save generated graphs")
     graph_parser.add_argument("--visualize", action="store_true", help="Visualize the generated graph")
     graph_parser.add_argument(
@@ -240,6 +240,11 @@ def main():
     analyze_parser = subparsers.add_parser("analyze", parents=[common_parser], help="Analyze functional groups")
 
     args = parser.parse_args()
+
+    # Check if ORCA file is required but not provided
+    if args.command in ["atomic", "hierarchical"] and args.use_quantum_properties and args.orca is None:
+        print("Quantum properties are enabled but no ORCA file provided. Proceeding without quantum properties.")
+        args.use_quantum_properties = False
 
     # Execute the appropriate command
     if args.command == "atomic":

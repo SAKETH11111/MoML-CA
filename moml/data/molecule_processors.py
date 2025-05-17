@@ -19,7 +19,7 @@ import logging
 from rdkit import Chem
 
 from moml.core import create_graph_processor, find_charges_file, read_charges_from_file, calculate_molecular_descriptors
-from moml.utils import validate_smiles
+from moml.utils.data_utils.validation import validate_smiles
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +437,6 @@ def batch_process_molecules_dataset(
         Dictionary with paths to saved files
     """
     import os
-    from moml.core import calculate_molecular_descriptors
 
     # Process the dataset
     df = process_dataset(input_file, smiles_col, id_col)
