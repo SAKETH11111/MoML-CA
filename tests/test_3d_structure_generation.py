@@ -20,48 +20,12 @@ try:
 except ImportError:
     pytest.skip("RDKit not installed, skipping 3D structure generation tests", allow_module_level=True)
 
+# Import the function from the original module
+from moml.simulation.quantum_mechanics.parser.orca_parser import smiles_to_3d_structure
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("test_3d_generation")
-
-
-def smiles_to_3d_structure(smiles, molecule_id="test_molecule", optimize=True):
-    """
-    Convert SMILES string to 3D molecular structure using RDKit.
-
-    Args:
-        smiles: SMILES string
-        molecule_id: Identifier for the molecule
-        optimize: Whether to perform force field optimization
-
-    Returns:
-        RDKit molecule with 3D coordinates or None if failed
-    """
-    try:
-        # Convert SMILES to RDKit molecule
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            logger.error(f"Failed to parse SMILES: {smiles}")
-            return None
-
-        # Add hydrogen atoms
-        mol = Chem.AddHs(mol)
-
-        # Generate 3D coordinates
-        result = AllChem.EmbedMolecule(mol, randomSeed=42)
-        if result == -1:
-            logger.error(f"Coordinate generation failed for {molecule_id}")
-            return None
-
-        # Optimize structure using force field
-        if optimize:
-            AllChem.MMFFOptimizeMolecule(mol)
-
-        return mol
-
-    except Exception as e:
-        logger.error(f"Error creating 3D structure for {molecule_id}: {str(e)}")
-        return None
 
 
 def run_tests():
@@ -133,9 +97,8 @@ def run_tests():
     return success_count == len(test_cases)
 
 
+# Check if this module is being run directly or being imported
 if __name__ == "__main__":
-    import pytest
-    pytest.skip("Script style 3D structure tests, skipping under pytest", allow_module_level=True)
     print("Testing 3D structure generation functionality...")
     success = run_tests()
     if success:
@@ -144,3 +107,7 @@ if __name__ == "__main__":
     else:
         print("\nSome 3D structure generation tests FAILED!")
         sys.exit(1)
+else:
+    # When being collected by pytest, skip this test module
+    # This will properly skip the tests when running with pytest
+    pytest.skip("Script style 3D structure tests, skipping under pytest", allow_module_level=True)
