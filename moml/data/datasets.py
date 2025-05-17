@@ -13,13 +13,12 @@ from typing import Dict, List, Optional, Any, Callable
 import glob
 from tqdm import tqdm
 from rdkit import Chem
-from rdkit.Chem import AllChem  # Added
+from rdkit.Chem import AllChem
 import logging
-from moml.core import create_graph_processor
-from moml.core.molecular_graph_processor import MolecularGraphProcessor
 import json
 from packaging import version
 from torch_geometric.data import Data
+from moml.core import create_graph_processor, MolecularGraphProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +304,6 @@ class PFASDataset(Dataset):
         self.graphs = []
         if self.smiles:
             # RDKit Chem is already imported at the top level
-            # from moml.core import batch_create_graphs_from_molecules # This function is being replaced
 
             # Convert SMILES to RDKit molecules
             molecules = []  # List of RDKit Mol objects

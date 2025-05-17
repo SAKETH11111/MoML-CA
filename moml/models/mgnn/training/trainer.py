@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from moml.core import create_graph_processor
 from moml.models.mgnn import DJMGNN
 from moml.models.mgnn.evaluation import MGNNPredictor
 
@@ -153,7 +152,7 @@ class MGNNTrainer:
                 if isinstance(outputs, dict) and isinstance(targets, dict) and num_loss_components == 0:
                     # This state (both dicts, no common keys for loss) is problematic.
                     # Returning 0 for now to avoid crash, but indicates an issue.
-                    # print("Warning: _compute_loss received dicts for outputs and targets, but no common loss components found.")
+
                     return torch.tensor(
                         0.0, device=self.device, requires_grad=True
                     )  # Ensure it's a tensor that can be backpropped (if 0)
@@ -590,8 +589,7 @@ def create_trainer(
     Returns:
         Configured trainer with initialized model
     """
-    # Create graph processor to get dimensions
-    processor = create_graph_processor(config)
+    # We don't need to create a graph processor here since we're not using it
 
     # Prepare arguments for DJMGNN constructor
     model_kwargs = {
