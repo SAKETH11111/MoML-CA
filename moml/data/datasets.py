@@ -87,6 +87,18 @@ class MolecularGraphDataset(Dataset):
                             delattr(current_graph, "y")
                         if hasattr(current_graph, "label"):
                             delattr(current_graph, "label")
+
+            # Apply transform to each graph if transform is defined
+            if self.transform is not None:
+                for i in range(len(self.graphs)):
+                    try:
+                        self.graphs[i] = self.transform(self.graphs[i])
+                    except Exception as te:
+                        logger.error(f"Error applying transform to graph from {self.mol_files[i]}: {te}")
+                        self.graphs[i] = None  # Set graph to None if transform fails
+
+                # Remove None graphs after transform
+                self.graphs = [g for g in self.graphs if g is not None]
         else:
             # Fallback to individual processing
             for file_path in tqdm(self.mol_files, desc="Processing molecular graphs"):
@@ -96,7 +108,7 @@ class MolecularGraphDataset(Dataset):
                     cache_path = file_path + ".pt"  # Potential .pt for graph object
                     if os.path.exists(cache_path):
                         # Load cached graph with compatibility for torch versions
-                        if version.parse(torch.__version__) >= version.parse("2.1"):  
+                        if version.parse(torch.__version__) >= version.parse("2.1"):
                             graph = torch.load(cache_path, weights_only=False)
                         else:
                             graph = torch.load(cache_path)

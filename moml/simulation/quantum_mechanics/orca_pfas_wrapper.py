@@ -404,6 +404,8 @@ def run_orca_calculation(
         if orca_executable is None:
             logger.warning("ORCA executable not found; switching to mock mode.")
             mock_run = True
+            # Early return using the mock_run path to avoid using None as orca_executable
+            return run_orca_calculation_mock(input_file_path)
 
     env = os.environ.copy()
     if openmpi_bin_path:
@@ -420,9 +422,11 @@ def run_orca_calculation(
                 command, env=env, cwd=input_dir, stdout=outfile, stderr=errfile, text=True, check=False
             )
 
-        # Read stderr from temp file
-        errfile.seek(0)
-        stderr_content = errfile.read()
+            # Read stderr from temp file while it's still open
+            errfile.seek(0)
+            stderr_content = errfile.read()
+
+        # Close and remove the temporary file outside the with block
         os.unlink(errfile.name)
 
         if process.returncode != 0:

@@ -19,13 +19,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("molecular_processing")
 
 
-def create_rdkit_mols(df: pd.DataFrame, smiles_col: str = "SMILES", mol_col: str = "ROMol") -> pd.DataFrame:
+def create_rdkit_mols(df: pd.DataFrame, smiles_col: str = "SMILES", mol_col: str = "ROMol", mol_cache_col: str = None) -> pd.DataFrame:
     """Create RDKit molecule objects from SMILES strings.
 
     Args:
         df: DataFrame containing SMILES strings
         smiles_col: Name of column containing SMILES strings
         mol_col: Name of column to store RDKit molecules
+        mol_cache_col: Optional name of column containing pre-parsed RDKit molecules
 
     Returns:
         DataFrame with RDKit molecules and validity flags
@@ -37,18 +38,27 @@ def create_rdkit_mols(df: pd.DataFrame, smiles_col: str = "SMILES", mol_col: str
         valid_col = f"is_valid_{smiles_col}"
 
     # Check if the SMILES column exists
-    if smiles_col not in df.columns:
-        raise ValueError(f"SMILES column '{smiles_col}' not found in dataframe")
+    if smiles_col not in df.columns and mol_cache_col not in df.columns:
+        raise ValueError(f"Neither SMILES column '{smiles_col}' nor molecule cache column '{mol_cache_col}' found in dataframe")
 
-    # Create RDKit molecules and validity flags
-    def smiles_to_mol_with_hs(s):
-        if pd.notna(s):
-            mol = Chem.MolFromSmiles(str(s))
-            if mol:
-                return Chem.AddHs(mol)
-        return None
+    # Use pre-parsed molecules if available
+    if mol_cache_col and mol_cache_col in df.columns:
+        logger.info(f"Using pre-parsed molecules from '{mol_cache_col}' column")
+        df[mol_col] = df[mol_cache_col].apply(lambda mol: Chem.AddHs(mol) if mol is not None else None)
+    else:
+        # Create RDKit molecules and validity flags
+        def smiles_to_mol_with_hs(s):
+            if pd.notna(s) and isinstance(s, str):
+                try:
+                    mol = Chem.MolFromSmiles(str(s))
+                    if mol:
+                        return Chem.AddHs(mol)
+                except:
+                    return None
+            return None
 
-    df[mol_col] = df[smiles_col].apply(smiles_to_mol_with_hs)
+        df[mol_col] = df[smiles_col].apply(smiles_to_mol_with_hs)
+
     df[valid_col] = df[mol_col].notna()
 
     # Log statistics
@@ -130,6 +140,10 @@ def calculate_molecular_complexity(df: pd.DataFrame, mol_col: str = "ROMol") -> 
 
     # Calculate chain length (longest carbon chain)
     def get_chain_length(mol):
+        # Check if mol is None to prevent TypeError
+        if mol is None:
+            return 0
+
         # Compute distance matrix once
         dist_matrix = Chem.GetDistanceMatrix(mol)
         # Identify carbon atom indices

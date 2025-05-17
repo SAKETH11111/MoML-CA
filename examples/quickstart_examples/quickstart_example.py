@@ -87,7 +87,7 @@ def model_training_example():
 
     # Create random graphs
     graphs = []
-    for i in range(num_graphs):
+    for _ in range(num_graphs):
         # Random node features
         x = torch.randn(num_nodes, num_node_features)
 

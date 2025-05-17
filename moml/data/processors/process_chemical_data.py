@@ -18,6 +18,7 @@ This script performs data cleaning and feature engineering on the PFAS Chemical 
 
 import re
 import logging
+import pandas as pd
 from pathlib import Path
 from rdkit import Chem
 
@@ -150,18 +151,34 @@ def engineer_features(df=None):
         logger.error("SMILES column missing in dataframe, cannot engineer features")
         raise KeyError("SMILES column missing in dataframe")
 
-    # Validate SMILES entries
-    invalid_mask = df["SMILES"].apply(lambda s: Chem.MolFromSmiles(s) is None)
-    num_invalid = invalid_mask.sum()
-    if num_invalid > 0:
-        logger.warning(f"Dropping {num_invalid} invalid SMILES entries before feature engineering")
-        df = df[~invalid_mask]
-    if df.empty:
-        logger.error("All SMILES entries are invalid, aborting feature engineering")
-        raise ValueError("No valid SMILES entries to engineer features")
+    # Add a column to cache parsed molecules to avoid redundant parsing
+    if "rdkit_mol_cache" not in df.columns:
+        # Safely validate SMILES entries and create molecule cache
+        def safe_parse_smiles(s):
+            if pd.isna(s) or not isinstance(s, str):
+                return None
+            try:
+                return Chem.MolFromSmiles(str(s))
+            except:
+                return None
 
-    # Create RDKit molecules
-    df = create_rdkit_mols(df)
+        df["rdkit_mol_cache"] = df["SMILES"].apply(safe_parse_smiles)
+
+        # Create a mask for valid molecules
+        invalid_mask = df["rdkit_mol_cache"].isna()
+        num_invalid = invalid_mask.sum()
+
+        if num_invalid > 0:
+            logger.warning(f"Found {num_invalid} invalid SMILES entries before feature engineering")
+            logger.warning(f"Dropping {num_invalid} invalid SMILES entries before feature engineering")
+            df = df[~invalid_mask]
+
+        if df.empty:
+            logger.error("All SMILES entries are invalid, aborting feature engineering")
+            raise ValueError("No valid SMILES entries to engineer features")
+
+    # Create RDKit molecules, passing the cached molecules if available
+    df = create_rdkit_mols(df, mol_cache_col="rdkit_mol_cache")
 
     # Extract fluorine counts
     df = extract_fluorine_count(df)

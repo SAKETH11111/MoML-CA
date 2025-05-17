@@ -95,19 +95,26 @@ def save_and_create_graphs(df: pd.DataFrame, output_dir: str, base_name: str) ->
     # Create graphs for each molecule
     for mol, mol_id in zip(valid_mols, valid_ids):
         # Generate 3D coordinates if needed
+        mol_with_coords = mol
         try:
-            mol = Chem.AddHs(mol)
-            Chem.AllChem.EmbedMolecule(mol)  # type: ignore
-            mol = Chem.RemoveHs(mol)
+            # We'll create a copy with hydrogens that's used only for 3D coordinates generation
+            mol_with_h = Chem.AddHs(Chem.Mol(mol))
+            embed_result = Chem.AllChem.EmbedMolecule(mol_with_h)  # type: ignore
+            
+            if embed_result == -1:
+                logger.warning(f"3D coordinate generation failed for molecule {mol_id}. Proceeding with 2D structure.")
+            else:
+                # If successful, use the 3D structure (without explicit H)
+                Chem.AllChem.MMFFOptimizeMolecule(mol_with_h)
+                mol_with_coords = Chem.RemoveHs(mol_with_h)
         except Exception as e:
-            logger.warning(f"Could not embed molecule {mol_id} (SMILES: {Chem.MolToSmiles(mol)}): {e}. Proceeding with 2D structure.")
-            # If 3D embedding fails, continue with 2D structure
-            pass
+            logger.warning(f"Could not embed molecule {mol_id} in 3D (SMILES: {Chem.MolToSmiles(mol)}): {e}. Proceeding with 2D structure.")
+            # Continue with the original molecule (2D structure)
 
         # Save the hierarchical graphs: write Mol to temp file for file-based API
         with tempfile.NamedTemporaryFile(suffix=".mol", delete=False) as tmp:
             tmp_path = tmp.name
-            Chem.MolToMolFile(mol, tmp_path)
+            Chem.MolToMolFile(mol_with_coords, tmp_path)
         try:
             coarsener.create_from_molecule_file(
                 mol_file=tmp_path,
@@ -155,7 +162,10 @@ def main():
     total_count = len(df)
     print("\nProcessing Summary:")
     print(f"- Total compounds: {total_count}")
-    print(f"- Valid SMILES: {valid_count} ({valid_count/total_count*100:.1f}%)")
+    if total_count > 0:
+        print(f"- Valid SMILES: {valid_count} ({valid_count/total_count*100:.1f}%)")
+    else:
+        print(f"- Valid SMILES: {valid_count} (0.0%)")
     print(f"- Invalid SMILES: {total_count - valid_count}")
 
     print("\nOutput Files:")

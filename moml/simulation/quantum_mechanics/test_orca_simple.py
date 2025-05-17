@@ -124,7 +124,8 @@ def check_result_files(output_dir):
     ml = output_dir / "ml_training_data.json"
     if ml.exists():
         try:
-            data = json.load(open(ml))
+            with open(ml) as f:
+                data = json.load(f)
             logger.info(f"ML data entries: {len(data)}")
         except Exception as e:
             logger.error(f"Error reading ML data: {e}")
