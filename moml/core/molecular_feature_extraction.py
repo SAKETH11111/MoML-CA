@@ -507,7 +507,7 @@ class MolecularFeatureExtractor:
             # than to a CF3 group, assuming both types of groups exist and are distinct from the atom.
 
 
-            if min_dist_func != -1 and min_dist_cf3 != -1:
+            if min_dist_func != 0.0 and min_dist_cf3 != 0.0:
                 is_head_group = min_dist_func < min_dist_cf3
 
 
