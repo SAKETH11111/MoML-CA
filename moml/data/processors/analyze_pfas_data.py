@@ -72,7 +72,7 @@ def analyze_chemical_data(df):
         plot_count(df, "Chain_Length", "Chain Length", RESULTS_DIR / "chemical" / "chain_length_dist.png")
 
     # Analyze structural features
-    feature_columns = ["Is_Aromatic", "Has_Rings", "Is_Cyclic", "Has_Branching", "High_Fluorine_Content"]
+    feature_columns = ["Is_Aromatic", "Has_Rings", "Is_Cyclic", "Is_Branched", "Has_Fluorine"]
 
     for feature in feature_columns:
         if feature in df.columns:
@@ -193,11 +193,14 @@ def check_class_imbalance(df):
         class_dist = df["Treatment_Success"].value_counts(normalize=False)
         logger.info(f"Class distribution:\n{class_dist}")
 
-        # Plot class distribution
+        # Generate dynamic labels from unique values
+        labels = class_dist.index.astype(str).tolist()
+        
+        # Plot class distribution with dynamic labels
         plot_pie_chart(
             df,
             "Treatment_Success",
-            ["Successful", "Unsuccessful"],
+            labels,
             RESULTS_DIR / "treatment" / "class_distribution.png",
         )
 

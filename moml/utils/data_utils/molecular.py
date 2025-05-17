@@ -53,7 +53,8 @@ def create_rdkit_mols(df: pd.DataFrame, smiles_col: str = "SMILES", mol_col: str
                     mol = Chem.MolFromSmiles(str(s))
                     if mol:
                         return Chem.AddHs(mol)
-                except:
+                except (ValueError, RuntimeError) as e:
+                    logger.debug(f"Failed to parse SMILES: {s}, error: {e}")
                     return None
             return None
 
