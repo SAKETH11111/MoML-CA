@@ -342,7 +342,7 @@ class TestLearningRateScheduler:
             threshold=1e-4,
             cooldown=0,
             min_lr=0,
-
+            # verbose=True, # Removed deprecated parameter
         )
         assert lrs.scheduler == mock_reduce_lr.return_value
 

@@ -10,6 +10,8 @@ DenseGNNBlock and JKAggregator are reused from `djmgnn.py`.
 from __future__ import annotations
 import math
 import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Optional, Dict, Any, Tuple
 
 import torch
@@ -18,9 +20,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import global_mean_pool, global_add_pool, global_max_pool
 from torch_scatter import scatter_add
 
-from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator
-
-logger = logging.getLogger(__name__)
+from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator  # adjust the path if needed
 
 
 #  GPU scatter / gather helpers

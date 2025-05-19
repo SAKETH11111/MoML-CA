@@ -215,7 +215,8 @@ def calculate_classification_metrics(
                 _pred_labels_1d = flat_preds.astype(int)
         elif pred_values.ndim == 2 and pred_values.shape[1] == 2:  # (N,2) probabilities
             _pred_labels_1d = np.argmax(pred_values, axis=1)
-            # Assume class '1' is positive if present.
+            # Determine positive class index for AUC. Assume class '1' is positive if present.
+            positive_class_idx = 1
             if _num_true_classes == 2:  # Ensure we have two unique classes
                 sorted_unique_classes = np.sort(_unique_true_classes)
                 # If labels are not 0 and 1, map to 0 and 1 for roc_auc_score or pick one as positive

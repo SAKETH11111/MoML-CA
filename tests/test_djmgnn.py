@@ -274,7 +274,7 @@ class TestJKAggregator:
             # If no mode-specific params were checked (e.g. LSTM init failed and went to general fallback)
             # and fallback_proj exists, check its gradient.
             # This case implies the forward pass might have used the final fallback.
-
+            # print(f"Warning: Mode {mode} might have used the final fallback_proj. Checking its gradient.")
             assert (
                 aggregator.fallback_proj.weight.grad is not None
             ), f"Gradient is None for final fallback_proj.weight in mode {mode}"
