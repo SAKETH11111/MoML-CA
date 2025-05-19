@@ -388,7 +388,7 @@ class DJMGNN(nn.Module):
         current_edge_index, current_edge_attr = self.drop_edges(current_edge_index, current_edge_attr)
 
         h_intermediate, outs = current_x, []
-        for block in enumerate(self.blocks):
+        for block in self.blocks:
             if h_intermediate.numel() == 0:
                 block_output_dim = block.transition.out_features if hasattr(block, "transition") else self.hidden_dim
                 h_intermediate = torch.empty(0, block_output_dim).to(x.device)
