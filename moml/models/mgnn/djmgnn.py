@@ -208,8 +208,11 @@ class DJMGNN(nn.Module):
         use_supernode=True,
         use_rbf=True,
         rbf_K=32,
+        env_dim: int = 0,
+        env_mlp: bool = False,
     ):
         super().__init__()
+        self.env_dim = env_dim
         self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = p_dropedge, use_supernode, use_rbf, rbf_K
         self.hidden_dim = hidden_dim  # Cache the hidden dimension
         self.node_out_dim = node_out_dim  # Store the node output dimension
@@ -236,14 +239,25 @@ class DJMGNN(nn.Module):
 
         self.jk = JKAggregator([hidden_dim] * n_blocks, hidden_dim, mode=jk_mode)
 
+        # optional env projection
+        env_in = env_dim if not env_mlp else hidden_dim
+        if env_dim and env_mlp:
+            self.env_proj = nn.Sequential(nn.Linear(env_dim, hidden_dim), nn.SiLU())
+        else:
+            self.env_proj = None
+
+        fused_graph_in = hidden_dim + env_in
+        fused_node_in = hidden_dim + env_in
+
+        # heads
         self.node_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Linear(fused_node_in, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, node_out_dim),
         )
         self.graph_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Linear(fused_graph_in, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, graph_out_dim),
@@ -325,7 +339,7 @@ class DJMGNN(nn.Module):
         mask = torch.rand(edge_index.size(1), device=edge_index.device) > self.p_dropedge
         return edge_index[:, mask], (edge_attr[mask] if edge_attr is not None and edge_attr.numel() > 0 else edge_attr)
 
-    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None):
+    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None, env_vec=None):
         if x.numel() == 0:
             # logger.warning("DJMGNN forward called with zero nodes.")
             return {
@@ -374,7 +388,7 @@ class DJMGNN(nn.Module):
         current_edge_index, current_edge_attr = self.drop_edges(current_edge_index, current_edge_attr)
 
         h_intermediate, outs = current_x, []
-        for block_idx, block in enumerate(self.blocks):
+        for block in self.blocks:
             if h_intermediate.numel() == 0:
                 block_output_dim = block.transition.out_features if hasattr(block, "transition") else self.hidden_dim
                 h_intermediate = torch.empty(0, block_output_dim).to(x.device)
@@ -403,5 +417,14 @@ class DJMGNN(nn.Module):
         else:
             graph_pooled = self.pool(h_aggregated, current_batch)
 
-        graph_pred = self.graph_head(graph_pooled)
+        if self.env_dim:
+            if env_vec is None:
+                env_vec = x.new_zeros(graph_pooled.size(0), self.env_dim)
+            env_emb = self.env_proj(env_vec) if self.env_proj else env_vec
+            graph_fused = torch.cat([graph_pooled, env_emb], 1)
+            h_aggregated = torch.cat([h_aggregated, env_emb], 1)
+        else:
+            graph_fused = graph_pooled
+        graph_pred = self.graph_head(graph_fused)
+        # If graph_pred is empty, ensure it's the right size
         return {"node_pred": node_pred, "graph_pred": graph_pred}

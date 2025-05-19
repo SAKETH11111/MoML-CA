@@ -2,8 +2,7 @@
 Force Field Parameter Mapper Module
 
 This module provides functionality to convert machine learning predictions
-(from MGNN models) into force field parameters for molecular dynamics simulations.
-It supports multiple force field formats and simulation engines.
+(from MGNN models) into force field parameters for OpenMM molecular dynamics simulations.
 """
 
 import os
@@ -18,52 +17,27 @@ from rdkit.Chem import AllChem
 # Get module logger
 logger = logging.getLogger("force_field_mapper")
 
-# Supported force field formats
-SUPPORTED_FF_FORMATS = ["amber", "gaff", "charmm", "opls", "gromos"]
-
-# Supported simulation engines
-SUPPORTED_ENGINES = ["gromacs", "amber", "openmm", "lammps", "namd"]
-
 
 class ForceFieldMapper:
     """
-    Converts ML model predictions to force field parameters for MD simulations.
+    Converts ML model predictions to force field parameters for OpenMM MD simulations.
 
     This class provides methods to:
     1. Map node-level predictions (e.g., partial charges) to atoms
-    2. Convert predictions to various force field format files
+    2. Convert predictions to OpenMM XML force field format
     3. Validate parameter quality
-    4. Export to different MD simulation engines
     """
 
     def __init__(
         self,
-        force_field_type: str = "amber",
-        simulation_engine: str = "gromacs",
         config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the ForceFieldMapper.
 
         Args:
-            force_field_type: Type of force field to generate (amber, gaff, charmm, etc.)
-            simulation_engine: Target simulation engine (gromacs, amber, openmm, etc.)
             config: Additional configuration parameters
         """
-        # Validate and set force field type
-        if force_field_type.lower() not in SUPPORTED_FF_FORMATS:
-            logger.warning(f"Force field type '{force_field_type}' not in supported formats: {SUPPORTED_FF_FORMATS}")
-            logger.info("Defaulting to 'amber' force field type.")  # Added logger.info
-            force_field_type = "amber"
-        self.force_field_type = force_field_type.lower()
-
-        # Validate and set simulation engine
-        if simulation_engine.lower() not in SUPPORTED_ENGINES:
-            logger.warning(f"Simulation engine '{simulation_engine}' not in supported engines: {SUPPORTED_ENGINES}")
-            logger.info("Defaulting to 'gromacs' simulation engine.")  # Added logger.info
-            simulation_engine = "gromacs"
-        self.simulation_engine = simulation_engine.lower()
-
         # Store configuration
         self.config = config or {}
 
@@ -107,95 +81,71 @@ class ForceFieldMapper:
 
         return charge_map
 
-    def assign_atom_types(self, mol: Chem.Mol, force_field_type: Optional[str] = None) -> Dict[int, str]:
+    def assign_atom_types(self, mol: Chem.Mol) -> Dict[int, str]:
         """
-        Assign atom types based on the selected force field.
+        Assign atom types based on element and hybridization.
 
         Args:
             mol: RDKit molecule
-            force_field_type: Type of force field to use for atom typing
 
         Returns:
             Dictionary mapping atom indices to atom types
         """
-        # Use instance force field type if not specified
-        if force_field_type is None:
-            force_field_type = self.force_field_type
-
         atom_types = {}
 
-        if force_field_type == "gaff" or force_field_type == "amber":
-            # For GAFF/AMBER, we would normally use AmberTools
-            # This is a simplified implementation using RDKit's properties
-            for i, atom in enumerate(mol.GetAtoms()):
-                element = atom.GetSymbol()
-                hyb = atom.GetHybridization()
-                is_aromatic = atom.GetIsAromatic()
+        for i, atom in enumerate(mol.GetAtoms()):
+            element = atom.GetSymbol()
+            hyb = atom.GetHybridization()
+            is_aromatic = atom.GetIsAromatic()
 
-                # Very simplified GAFF-like atom typing
-                if element == "C":
-                    if is_aromatic:
-                        atype = "ca"  # Aromatic carbon
-                    elif hyb == Chem.rdchem.HybridizationType.SP3:
-                        atype = "c3"  # SP3 carbon
-                    elif hyb == Chem.rdchem.HybridizationType.SP2:
-                        atype = "c2"  # SP2 carbon
-                    elif hyb == Chem.rdchem.HybridizationType.SP:
-                        atype = "c1"  # SP carbon
-                    else:
-                        atype = "c3"  # Default
-                elif element == "N":
-                    if is_aromatic:
-                        atype = "na"  # Aromatic nitrogen
-                    elif hyb == Chem.rdchem.HybridizationType.SP3:
-                        atype = "n3"  # SP3 nitrogen
-                    elif hyb == Chem.rdchem.HybridizationType.SP2:
-                        atype = "n2"  # SP2 nitrogen
-                    elif hyb == Chem.rdchem.HybridizationType.SP:
-                        atype = "n1"  # SP nitrogen
-                    else:
-                        atype = "n3"  # Default
-                elif element == "O":
-                    if hyb == Chem.rdchem.HybridizationType.SP3:
-                        atype = "oh"  # Hydroxyl oxygen
-                    elif hyb == Chem.rdchem.HybridizationType.SP2:
-                        atype = "o"  # Carbonyl oxygen
-                    else:
-                        atype = "o"  # Default
-                elif element == "F":
-                    atype = "f"  # Fluorine
-                elif element == "H":
-                    # Check what the hydrogen is bonded to
-                    neighbors = [n.GetSymbol() for n in atom.GetNeighbors()]
-                    if "C" in neighbors:
-                        atype = "hc"  # H attached to C
-                    elif "N" in neighbors:
-                        atype = "hn"  # H attached to N
-                    elif "O" in neighbors:
-                        atype = "ho"  # H attached to O
-                    else:
-                        atype = "h1"  # Default hydrogen
-                else:
-                    # For other elements, use lowercase symbol as type
-                    atype = element.lower()
-
-                atom_types[i] = atype
-        else:
-            # For other force fields, use generic atom type based on element and hybridization
-            for i, atom in enumerate(mol.GetAtoms()):
-                element = atom.GetSymbol()
-                hyb = atom.GetHybridization()
-
-                if hyb == Chem.rdchem.HybridizationType.SP3:
-                    hyb_str = "3"
+            # Generate atom type based on element and hybridization
+            if element == "C":
+                if is_aromatic:
+                    atype = "ca"  # Aromatic carbon
+                elif hyb == Chem.rdchem.HybridizationType.SP3:
+                    atype = "c3"  # SP3 carbon
                 elif hyb == Chem.rdchem.HybridizationType.SP2:
-                    hyb_str = "2"
+                    atype = "c2"  # SP2 carbon
                 elif hyb == Chem.rdchem.HybridizationType.SP:
-                    hyb_str = "1"
+                    atype = "c1"  # SP carbon
                 else:
-                    hyb_str = ""
+                    atype = "c3"  # Default
+            elif element == "N":
+                if is_aromatic:
+                    atype = "na"  # Aromatic nitrogen
+                elif hyb == Chem.rdchem.HybridizationType.SP3:
+                    atype = "n3"  # SP3 nitrogen
+                elif hyb == Chem.rdchem.HybridizationType.SP2:
+                    atype = "n2"  # SP2 nitrogen
+                elif hyb == Chem.rdchem.HybridizationType.SP:
+                    atype = "n1"  # SP nitrogen
+                else:
+                    atype = "n3"  # Default
+            elif element == "O":
+                if hyb == Chem.rdchem.HybridizationType.SP3:
+                    atype = "oh"  # Hydroxyl oxygen
+                elif hyb == Chem.rdchem.HybridizationType.SP2:
+                    atype = "o"  # Carbonyl oxygen
+                else:
+                    atype = "o"  # Default
+            elif element == "F":
+                atype = "f"  # Fluorine
+            elif element == "H":
+                # Check what the hydrogen is bonded to
+                neighbors = [n.GetSymbol() for n in atom.GetNeighbors()]
+                if "C" in neighbors:
+                    atype = "hc"  # H attached to C
+                elif "N" in neighbors:
+                    atype = "hn"  # H attached to N
+                elif "O" in neighbors:
+                    atype = "ho"  # H attached to O
+                else:
+                    atype = "h1"  # Default hydrogen
+            else:
+                # For other elements, use lowercase symbol as type
+                atype = element.lower()
 
-                atom_types[i] = f"{element}{hyb_str}"
+            atom_types[i] = atype
 
         return atom_types
 
@@ -246,7 +196,6 @@ class ForceFieldMapper:
                 r_eq = ((pos_i.x - pos_j.x) ** 2 + (pos_i.y - pos_j.y) ** 2 + (pos_i.z - pos_j.z) ** 2) ** 0.5
             else:
                 # Estimate based on atom types and bond type
-                # This would be much more sophisticated in a real implementation
                 atom_i = mol.GetAtomWithIdx(i)
                 atom_j = mol.GetAtomWithIdx(j)
 
@@ -324,7 +273,6 @@ class ForceFieldMapper:
                         type_k = atom_types[k]
 
                         # Default force constant based on atom types
-                        # This would be more sophisticated in a real implementation
                         ktheta = 50.0  # kcal/mol/rad^2
 
                         # Get equilibrium angle from conformer if available
@@ -540,7 +488,7 @@ class ForceFieldMapper:
         logger.debug(f"generate_force_field_parameters: charge_map created: {charge_map}")
 
         # Assign atom types
-        atom_types = self.assign_atom_types(mol, self.force_field_type)
+        atom_types = self.assign_atom_types(mol)
 
         # Predict bond parameters
         bond_params = self.predict_bond_parameters(mol, atom_types)
@@ -555,11 +503,10 @@ class ForceFieldMapper:
         parameters = {
             "mol_name": mol.GetProp("_Name") if mol.HasProp("_Name") else "MOL",
             "atom_types": atom_types,
-            "partial_charges": charge_map,  # This is the charge map Dict[int, float]
+            "partial_charges": charge_map,
             "bonds": bond_params,
             "angles": angle_params,
             "dihedrals": dihedral_params,
-            "force_field_type": self.force_field_type,
         }
         logger.debug(
             f"generate_force_field_parameters: Returning parameters dict with keys: {list(parameters.keys())}, type: {type(parameters)}"
@@ -590,7 +537,7 @@ class ForceFieldMapper:
             "charge_balance_ok": True,
             "bonds_ok": True,
             "angles_ok": True,
-            "dihedrals_ok": True,  # Initialize all as True
+            "dihedrals_ok": True,
         }
 
         # 1. Check charge balance
@@ -628,7 +575,7 @@ class ForceFieldMapper:
                     diff = abs(actual_length - predicted_length)
                     if diff > self.validation_cutoffs["bond_length_deviation"]:
                         validation["passed"] = False
-                        validation["bonds_ok"] = False  # Set specific flag
+                        validation["bonds_ok"] = False
                         validation["issues"].append(
                             {
                                 "type": "bond_length",
@@ -637,20 +584,7 @@ class ForceFieldMapper:
                             }
                         )
 
-        # Placeholder for angle and dihedral checks - to be re-added if they were there
-        # For now, assume they might have been removed or simplified in the version I'm seeing.
-        # If the tests expect 'angles_ok' and 'dihedrals_ok', they will fail if these checks aren't here.
-        # The previous error log showed the test expecting these keys.
-        # The current file content (from error) ends validate_parameters after bond checks.
-        # This means the version of the file used by pytest is different or was reverted.
-
-        # Based on the test failures (KeyError for angles_ok, dihedrals_ok),
-        # the tests *expect* these checks. The file content I have from the error
-        # shows validate_parameters ending prematurely.
-        # I will add simplified checks for angles and dihedrals to set these flags,
-        # assuming the detailed logic was lost/reverted.
-
-        # 3. Check angle parameters (simplified)
+        # 3. Check angle parameters
         if "angles" in parameters:
             for angle_key, angle_param in parameters["angles"].items():
                 if not (0 < angle_param.get("theta_eq", 109.5) < 180.0):  # Basic sanity check
@@ -663,12 +597,12 @@ class ForceFieldMapper:
                             "message": f"Angle {angle_key} has unrealistic theta_eq: {angle_param.get('theta_eq', 'N/A'):.2f}°",
                         }
                     )
-                    break  # Stop at first bad angle for simplicity in this recovery step
+                    break
         else:
-            validation["angles_ok"] = False  # No angles params means not ok if expected
+            validation["angles_ok"] = False
             validation["issues"].append({"type": "missing_angles", "message": "Angle parameters missing."})
 
-        # 4. Check dihedral parameters (simplified)
+        # 4. Check dihedral parameters
         if "dihedrals" in parameters:
             for dihedral_key, dihedral_terms in parameters["dihedrals"].items():
                 for term_params in dihedral_terms:
@@ -682,20 +616,20 @@ class ForceFieldMapper:
                                 "message": f"Dihedral {dihedral_key} term has very high k: {term_params.get('k', 0.0):.2f} kcal/mol",
                             }
                         )
-                        break  # Stop at first bad dihedral term
+                        break
                 if not validation["dihedrals_ok"]:
-                    break  # Stop if already failed
+                    break
         else:
-            validation["dihedrals_ok"] = False  # No dihedrals params means not ok if expected
+            validation["dihedrals_ok"] = False
             validation["issues"].append({"type": "missing_dihedrals", "message": "Dihedral parameters missing."})
 
         return validation
 
-    def export_to_gromacs(
-        self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str  # Added base_filename
+    def export_to_openmm(
+        self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str
     ) -> Tuple[bool, Dict[str, str]]:
         """
-        Export force field parameters to GROMACS format files.
+        Export force field parameters to OpenMM XML format.
 
         Args:
             parameters: Dictionary with force field parameters
@@ -706,449 +640,177 @@ class ForceFieldMapper:
         Returns:
             Tuple of (success, file_paths)
         """
-        if self.simulation_engine != "gromacs":
-            logger.warning(f"Requested export to GROMACS but engine is set to {self.simulation_engine}")
-            logger.info("Proceeding with GROMACS export")
-
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
 
         # Get molecule name
         mol_name = parameters["mol_name"]
 
-        # File paths
-        top_file = os.path.join(output_dir, f"{mol_name}.top")
-        itp_file = os.path.join(output_dir, f"{mol_name}.itp")
-        gro_file = os.path.join(output_dir, f"{mol_name}.gro")
+        # File path for XML
+        xml_file = os.path.join(output_dir, f"{mol_name}.xml")
 
         try:
-            # Write ITP file (molecule topology)
-            with open(itp_file, "w") as f:
-                # Header
-                f.write(f"; GROMACS itp file for {mol_name}\n")
-                f.write("; Generated by MoML-CA ForceFieldMapper\n")
-                f.write("\n")
+            with open(xml_file, "w") as f:
+                # Write XML header
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write('<ForceField>\n\n')
 
-                # Atom types
-                f.write("[ atomtypes ]\n")
-                f.write(";name  mass  charge  ptype  sigma  epsilon\n")
-
-                # Write atom types (simplified)
+                # Write AtomTypes section
+                f.write('  <AtomTypes>\n')
+                f.write('    <!-- name = unique string; class = mixing group; element = IUPAC; mass = amu -->\n')
+                
+                # Track written atom types to avoid duplicates
+                written_types = set()
+                
                 for i, atype in parameters["atom_types"].items():
                     atom = mol.GetAtomWithIdx(i)
                     element = atom.GetSymbol()
                     mass = atom.GetMass()
-                    charge = parameters["partial_charges"][i]
+                    
+                    # Skip if already written
+                    if atype in written_types:
+                        continue
+                        
+                    f.write(f'    <Type name="{atype}" class="{atype}" element="{element}" mass="{mass:.6f}"/>\n')
+                    written_types.add(atype)
+                
+                f.write('  </AtomTypes>\n\n')
 
-                    # Simplified LJ parameters
-                    sigma = 0.3  # nm
-                    epsilon = 0.5  # kJ/mol
-
-                    f.write(f"{atype}  {mass:.4f}  {charge:.4f}  A  {sigma:.6f}  {epsilon:.6f}\n")
-
-                f.write("\n")
-
-                # Molecule definition
-                f.write("[ moleculetype ]\n")
-                f.write("; name  nrexcl\n")
-                f.write(f"{mol_name}  3\n\n")
-
-                # Atoms section
-                f.write("[ atoms ]\n")
-                f.write(";nr  type  resnr  resname  atom  cgnr  charge  mass\n")
-
+                # Write Residues section
+                f.write('  <Residues>\n')
+                f.write(f'    <Residue name="{mol_name}">\n')
+                
+                # Write atoms
                 for i in range(mol.GetNumAtoms()):
                     atom = mol.GetAtomWithIdx(i)
                     atype = parameters["atom_types"][i]
                     charge = parameters["partial_charges"][i]
-                    mass = atom.GetMass()
-
-                    # GROMACS uses 1-indexed atom numbers
-                    f.write(
-                        f"{i+1}  {atype}  1  {mol_name}  {atom.GetSymbol()}{i+1}  {i+1}  {charge:.6f}  {mass:.4f}\n"
-                    )
-
-                f.write("\n")
-
-                # Bonds section
-                f.write("[ bonds ]\n")
-                f.write(";ai  aj  funct  c0  c1\n")
-
-                # Keep track of written bonds to avoid duplicates
-                written_bonds = set()
-
+                    f.write(f'      <Atom name="{atom.GetSymbol()}{i+1}" type="{atype}" charge="{charge:.6f}"/>\n')
+                
+                # Write bonds
                 for bond in mol.GetBonds():
                     i = bond.GetBeginAtomIdx()
                     j = bond.GetEndAtomIdx()
+                    atom_i = mol.GetAtomWithIdx(i)
+                    atom_j = mol.GetAtomWithIdx(j)
+                    f.write(f'      <Bond atomName1="{atom_i.GetSymbol()}{i+1}" atomName2="{atom_j.GetSymbol()}{j+1}"/>\n')
+                
+                f.write('    </Residue>\n')
+                f.write('  </Residues>\n\n')
 
-                    # Skip if already written
-                    if (i, j) in written_bonds or (j, i) in written_bonds:
-                        continue
-
-                    # Get parameters
-                    if (i, j) in parameters["bonds"]:
-                        bond_param = parameters["bonds"][(i, j)]
-                        r_eq = bond_param["r_eq"]  # nm
-                        k = bond_param["k"] * 2.0  # Convert to GROMACS units (kJ/mol/nm^2)
-
-                        # GROMACS uses 1-indexed atom numbers
-                        f.write(f"{i+1}  {j+1}  1  {r_eq/10:.6f}  {k*418.4:.1f}\n")
-
-                        # Mark as written
-                        written_bonds.add((i, j))
-
-                f.write("\n")
-
-                # Angles section
-                f.write("[ angles ]\n")
-                f.write(";ai  aj  ak  funct  c0  c1\n")
-
-                # Keep track of written angles to avoid duplicates
-                written_angles = set()
-
-                for angle_idxs, angle_param in parameters["angles"].items():
-                    i, j, k = angle_idxs
-
-                    # Skip if already written
-                    if (i, j, k) in written_angles or (k, j, i) in written_angles:
-                        continue
-
-                    theta_eq = angle_param["theta_eq"]  # degrees
-                    ktheta = angle_param["k"] * 2.0  # Convert to GROMACS units (kJ/mol/rad^2)
-
-                    # GROMACS uses 1-indexed atom numbers
-                    f.write(f"{i+1}  {j+1}  {k+1}  1  {theta_eq:.2f}  {ktheta:.1f}\n")
-
-                    # Mark as written
-                    written_angles.add((i, j, k))
-
-                f.write("\n")
-
-                # Dihedrals section
-                f.write("[ dihedrals ]\n")
-                f.write(";ai  aj  ak  al  funct  c0  c1  c2\n")
-
-                # Keep track of written dihedrals to avoid duplicates
-                written_dihedrals = set()
-
-                for dihedral_idxs, dihedral_params in parameters["dihedrals"].items():
-                    i, j, k, l = dihedral_idxs
-
-                    # Skip if already written
-                    if (i, j, k, l) in written_dihedrals or (l, k, j, i) in written_dihedrals:
-                        continue
-
-                    # Process each term in the dihedral
-                    for idx, term in enumerate(dihedral_params):
-                        if term["type"] == "proper":
-                            # Convert to GROMACS units
-                            k = term["k"] * 4.184  # kcal/mol -> kJ/mol
-                            phase = term["phase"]  # degrees
-                            n = term["n"]
-
-                            # GROMACS periodicity is opposite sign
-                            if phase == 180.0:
-                                k = -k
-
-                            # GROMACS uses 1-indexed atom numbers
-                            f.write(f"{i+1}  {j+1}  {k+1}  {l+1}  9  {phase:.1f}  {k:.2f}  {n}\n")
-
-                    # Mark as written
-                    written_dihedrals.add((i, j, k, l))
-
-                f.write("\n")
-
-                # Pairs section (simplified 1-4 interactions)
-                f.write("[ pairs ]\n")
-                f.write(";ai  aj  funct  c0  c1\n")
-                f.write("; 1-4 interactions generated automatically by GROMACS\n\n")
-
-            # Write TOP file (system topology)
-            with open(top_file, "w") as f:
-                f.write(f"; GROMACS topology for {mol_name}\n")
-                f.write("; Generated by MoML-CA ForceFieldMapper\n\n")
-
-                # Force field definition
-                f.write("; Include force field parameters\n")
-                f.write("; Note: In a full implementation, you would include standard force field files\n")
-                if self.force_field_type == "amber" or self.force_field_type == "gaff":
-                    f.write(';#include "amber99sb.ff/forcefield.itp"\n')
-                else:
-                    f.write(';#include "gromos54a7.ff/forcefield.itp"\n')
-                f.write("\n")
-
-                # Include molecule parameters
-                f.write("; Include molecule parameters\n")
-                f.write(f'#include "{os.path.basename(itp_file)}"\n\n')
-
-                # System definition
-                f.write("[ system ]\n")
-                f.write(f"{mol_name}\n\n")
-
-                # Molecules section
-                f.write("[ molecules ]\n")
-                f.write("; Compound  #mols\n")
-                f.write(f"{mol_name}  1\n")
-
-            # Write GRO file (structure)
-            with open(gro_file, "w") as f:
-                f.write(f"{mol_name} generated by MoML-CA\n")
-                f.write(f"{mol.GetNumAtoms()}\n")
-
-                # Verify 3D coordinates exist
-                if mol.GetNumConformers() == 0:
-                    # Generate 3D coordinates
-                    mol = Chem.AddHs(mol)
-                    AllChem.EmbedMolecule(mol)
-                    AllChem.UFFOptimizeMolecule(mol)
-
-                # Write atom coordinates
-                conf = mol.GetConformer()
-                for i in range(mol.GetNumAtoms()):
-                    atom = mol.GetAtomWithIdx(i)
-                    pos = conf.GetAtomPosition(i)
-
-                    # Convert to nm
-                    x = pos.x / 10.0
-                    y = pos.y / 10.0
-                    z = pos.z / 10.0
-
-                    # GRO format:
-                    # residue_number (5 positions, integer)
-                    # residue_name (5 characters)
-                    # atom name (5 characters)
-                    # atom_number (5 positions, integer)
-                    # position (in nm, x y z in 3 columns, each 8 positions with 3 decimal places)
-                    # velocity (in nm/ps, x y z in 3 columns, each 8 positions with 4 decimal places)
-
-                    # Construct fields for GRO format
-                    res_number = 1
-                    res_name = mol_name[:5]  # Ensure resname is at most 5 chars
-                    atom_name_str = (atom.GetSymbol() + str(i + 1))[:5]  # Ensure atom name is at most 5 chars
-                    atom_num = i + 1
-
-                    f.write(
-                        f"{res_number:5d}{res_name:<5.5s}{atom_name_str:<5.5s}{atom_num:5d}{x:8.3f}{y:8.3f}{z:8.3f}\n"
-                    )
-
-                # Write box dimensions (10x10x10 nm)
-                f.write("  10.00000  10.00000  10.00000\n")
-
-            return True, {"top": top_file, "itp": itp_file, "gro": gro_file}
-
-        except Exception as e:
-            logger.error(f"Error exporting to GROMACS: {str(e)}")
-            return False, {}
-
-    def export_to_amber(
-        self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str  # Added base_filename
-    ) -> Tuple[bool, Dict[str, str]]:
-        """
-        Export force field parameters to AMBER format files.
-
-        Args:
-            parameters: Dictionary with force field parameters
-            mol: RDKit molecule
-            output_dir: Directory to save output files
-            base_filename: Base name for output files
-
-        Returns:
-            Tuple of (success, file_paths)
-        """
-        if self.simulation_engine != "amber":
-            logger.warning(f"Requested export to AMBER but engine is set to {self.simulation_engine}")
-            logger.info("Proceeding with AMBER export")
-
-        # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Get molecule name
-        mol_name = parameters["mol_name"]
-
-        # File paths
-        prmtop_file = os.path.join(output_dir, f"{mol_name}.prmtop")
-        inpcrd_file = os.path.join(output_dir, f"{mol_name}.inpcrd")
-        frcmod_file = os.path.join(output_dir, f"{mol_name}.frcmod")
-        mol2_file = os.path.join(output_dir, f"{mol_name}.mol2")  # Define mol2 file path
-
-        try:
-            # Write FRCMOD file (force field modification file)
-            with open(frcmod_file, "w") as f:
-                f.write(f"FRCMOD file for {mol_name} generated by MoML-CA\n")
-
-                # Bond parameters
-                f.write("BOND\n")
-
-                # Keep track of written bonds to avoid duplicates
+                # Write HarmonicBondForce section
+                f.write('  <HarmonicBondForce>\n')
+                f.write('    <!-- Harmonic bonds: length in nm, k in kJ mol-1 nm-2 -->\n')
+                
+                # Track written bonds to avoid duplicates
                 written_bonds = set()
-
+                
                 for bond_idxs, bond_param in parameters["bonds"].items():
                     i, j = bond_idxs
                     type_i = bond_param["type_i"]
                     type_j = bond_param["type_j"]
-
+                    
                     # Skip if already written
                     bond_key = tuple(sorted([type_i, type_j]))
                     if bond_key in written_bonds:
                         continue
-
-                    r_eq = bond_param["r_eq"]  # Angstroms
-                    k = bond_param["k"]  # kcal/mol/A^2
-
-                    f.write(f"{type_i}-{type_j}  {k:.1f}  {r_eq:.4f}\n")
-
-                    # Mark as written
+                    
+                    r_eq = bond_param["r_eq"] / 10.0  # Convert to nm
+                    k = bond_param["k"] * 2.0 * 418.4  # Convert to kJ/mol/nm^2
+                    
+                    f.write(f'    <Bond class1="{type_i}" class2="{type_j}" length="{r_eq:.6f}" k="{k:.1f}"/>\n')
                     written_bonds.add(bond_key)
+                
+                f.write('  </HarmonicBondForce>\n\n')
 
-                # Angle parameters
-                f.write("\nANGLE\n")
-
-                # Keep track of written angles to avoid duplicates
+                # Write HarmonicAngleForce section
+                f.write('  <HarmonicAngleForce>\n')
+                f.write('    <!-- Harmonic angles: angle in rad, k in kJ mol-1 rad-2 -->\n')
+                
+                # Track written angles to avoid duplicates
                 written_angles = set()
-
+                
                 for angle_idxs, angle_param in parameters["angles"].items():
                     i, j, k = angle_idxs
                     type_i = angle_param["type_i"]
                     type_j = angle_param["type_j"]
                     type_k = angle_param["type_k"]
-
+                    
                     # Skip if already written
-                    if i > k:
-                        angle_key = (type_k, type_j, type_i)
-                    else:
-                        angle_key = (type_i, type_j, type_k)
-
+                    angle_key = tuple(sorted([type_i, type_j, type_k]))
                     if angle_key in written_angles:
                         continue
-
-                    theta_eq = angle_param["theta_eq"]  # degrees
-                    ktheta = angle_param["k"]  # kcal/mol/rad^2
-
-                    f.write(f"{type_i}-{type_j}-{type_k}  {ktheta:.1f}  {theta_eq:.1f}\n")
-
-                    # Mark as written
+                    
+                    theta_eq = angle_param["theta_eq"] * np.pi / 180.0  # Convert to radians
+                    ktheta = angle_param["k"] * 2.0 * 4.184  # Convert to kJ/mol/rad^2
+                    
+                    f.write(f'    <Angle class1="{type_i}" class2="{type_j}" class3="{type_k}" angle="{theta_eq:.6f}" k="{ktheta:.1f}"/>\n')
                     written_angles.add(angle_key)
+                
+                f.write('  </HarmonicAngleForce>\n\n')
 
-                # Dihedral parameters
-                f.write("\nDIHEDRAL\n")
-
-                # Keep track of written dihedrals to avoid duplicates
+                # Write PeriodicTorsionForce section
+                f.write('  <PeriodicTorsionForce>\n')
+                f.write('    <!-- Proper torsions: Fourier series -->\n')
+                
+                # Track written dihedrals to avoid duplicates
                 written_dihedrals = set()
-
+                
                 for dihedral_idxs, dihedral_params in parameters["dihedrals"].items():
                     i, j, k, l = dihedral_idxs
-
-                    # Get atom types
                     type_i = parameters["atom_types"][i]
                     type_j = parameters["atom_types"][j]
                     type_k = parameters["atom_types"][k]
                     type_l = parameters["atom_types"][l]
-
+                    
                     # Skip if already written
-                    if i > l:
-                        dihedral_key = (type_l, type_k, type_j, type_i)
-                    else:
-                        dihedral_key = (type_i, type_j, type_k, type_l)
-
+                    dihedral_key = tuple(sorted([type_i, type_j, type_k, type_l]))
                     if dihedral_key in written_dihedrals:
                         continue
-
-                    # Write each term
+                    
+                    # Write each term in the dihedral
+                    terms = []
                     for term in dihedral_params:
                         if term["type"] == "proper":
-                            k = term["k"]  # kcal/mol
-                            phase = term["phase"]  # degrees
-                            n = term["n"]  # periodicity
-
-                            f.write(f"{type_i}-{type_j}-{type_k}-{type_l} 1 {k:.3f} {phase:.1f} {n:.1f}\n")
-
-                    # Mark as written
+                            k = term["k"] * 4.184  # Convert to kJ/mol
+                            phase = term["phase"] * np.pi / 180.0  # Convert to radians
+                            n = term["n"]
+                            terms.append(f'periodicity{n}="{n}" phase{n}="{phase:.6f}" k{n}="{k:.6f}"')
+                    
+                    if terms:
+                        f.write(f'    <Proper type1="{type_i}" type2="{type_j}" type3="{type_k}" type4="{type_l}" {" ".join(terms)}/>\n')
+                    
                     written_dihedrals.add(dihedral_key)
+                
+                f.write('  </PeriodicTorsionForce>\n\n')
 
-                # Improper dihedrals (not implemented in this simplified version)
-                f.write("\nIMPROPER\n")
+                # Write NonbondedForce section
+                f.write('  <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">\n')
+                f.write('    <UseAttributeFromResidue name="charge"/>\n')
+                
+                # Track written atom types to avoid duplicates
+                written_nb_types = set()
+                
+                for i, atype in parameters["atom_types"].items():
+                    if atype in written_nb_types:
+                        continue
+                    
+                    # Simplified LJ parameters
+                    sigma = 0.3  # nm
+                    epsilon = 0.5  # kJ/mol
+                    
+                    f.write(f'    <Atom type="{atype}" sigma="{sigma:.6f}" epsilon="{epsilon:.6f}"/>\n')
+                    written_nb_types.add(atype)
+                
+                f.write('  </NonbondedForce>\n\n')
 
-                # Nonbonded parameters
-                f.write("\nNONBON\n")
+                # Close ForceField tag
+                f.write('</ForceField>\n')
 
-            # In a real implementation, we would call AmberTools (tleap) to generate prmtop/inpcrd
-            # For this simplified example, we'll create placeholder files
-
-            with open(prmtop_file, "w") as f:
-                f.write("This is a placeholder for a real AMBER prmtop file.\n")
-                f.write("In a real implementation, this would be generated using AmberTools (tleap).\n")
-
-            with open(inpcrd_file, "w") as f:
-                f.write("This is a placeholder for a real AMBER inpcrd file.\n")
-                f.write("In a real implementation, this would be generated using AmberTools (tleap).\n")
-
-            with open(mol2_file, "w") as f:  # Create placeholder mol2 file
-                f.write(f"@<TRIPOS>MOLECULE\n{mol_name}\n")
-                f.write(f"{mol.GetNumAtoms()} {mol.GetNumBonds()} 0 0 0\n")  # Atom count, bond count
-                f.write("SMALL\nGASTEIGER\n\n@<TRIPOS>ATOM\n")
-                # Minimal atom info for placeholder
-                for i in range(mol.GetNumAtoms()):
-                    atom = mol.GetAtomWithIdx(i)
-                    charge = parameters.get("partial_charges", {}).get(i, 0.0)
-                    f.write(
-                        f"{i+1:>4} {atom.GetSymbol():<4} 0.0000 0.0000 0.0000 {atom.GetSymbol().upper():<4} 1 {mol_name} {charge:.4f}\n"
-                    )
-                f.write("@<TRIPOS>BOND\n")
-                for bond_idx, bond in enumerate(mol.GetBonds()):
-                    f.write(
-                        f"{bond_idx+1:>5} {bond.GetBeginAtomIdx()+1:>5} {bond.GetEndAtomIdx()+1:>5} {bond.GetBondTypeAsDouble():.1f}\n"
-                    )
-
-            return True, {
-                "prmtop": prmtop_file,
-                "inpcrd": inpcrd_file,
-                "frcmod": frcmod_file,
-                "mol2": mol2_file,  # Add mol2 to returned dict
-            }
+            return True, {"xml": xml_file}
 
         except Exception as e:
-            logger.error(f"Error exporting to AMBER: {str(e)}")
-            return False, {}
-
-    def export_parameters(
-        self,
-        parameters: Dict[str, Any],
-        mol: Chem.Mol,
-        output_dir: str,
-        base_filename: str,  # Added base_filename
-        engine: Optional[str] = None,
-    ) -> Tuple[bool, Dict[str, str]]:
-        """
-        Export force field parameters to files.
-
-        Args:
-            parameters: Dictionary with force field parameters
-            mol: RDKit molecule
-            output_dir: Directory to save output files
-            base_filename: Base name for output files
-            engine: Optional simulation engine to export to
-
-        Returns:
-            Tuple of (success, file_paths)
-        """
-        # Use instance engine if not specified
-        if engine is None:
-            engine = self.simulation_engine
-
-        # Export based on selected engine
-        if engine == "gromacs":
-            # Assuming a default base_filename if not provided, or it should be passed down
-            base_fn = parameters.get("mol_name", "molecule")
-            return self.export_to_gromacs(parameters, mol, output_dir, base_filename=base_fn)
-        elif engine == "amber":
-            base_fn = parameters.get("mol_name", "molecule")
-            return self.export_to_amber(parameters, mol, output_dir, base_filename=base_fn)
-        elif engine == "openmm":
-            # Not implemented in this simplified version
-            logger.error("OpenMM export not implemented in this version")
-            return False, {}
-        else:
-            logger.error(f"Unsupported simulation engine: {engine}")
+            logger.error(f"Error exporting to OpenMM: {str(e)}")
             return False, {}
 
     def convert_mgnn_predictions_to_force_field(
@@ -1156,8 +818,7 @@ class ForceFieldMapper:
         mol: Chem.Mol,
         node_predictions: Union[Dict, List[float]],
         output_dir: str,
-        base_filename: str,  # Added base_filename
-        engine: Optional[str] = None,
+        base_filename: str,
     ) -> Tuple[bool, Dict[str, Any]]:
         """
         Convert MGNN model predictions to force field files.
@@ -1169,7 +830,6 @@ class ForceFieldMapper:
             node_predictions: Node-level predictions from MGNN model (partial charges)
             output_dir: Directory to save output files
             base_filename: Base name for output files
-            engine: Optional simulation engine to export to
 
         Returns:
             Tuple of (success, results)
@@ -1197,7 +857,7 @@ class ForceFieldMapper:
         validation = self.validate_parameters(parameters, mol)
 
         # Export parameters to files
-        success, file_paths = self.export_parameters(parameters, mol, output_dir, base_filename, engine)
+        success, file_paths = self.export_to_openmm(parameters, mol, output_dir, base_filename)
 
         if not success:
             logger.error("Failed to export force field parameters")
@@ -1209,18 +869,14 @@ class ForceFieldMapper:
         return True, results
 
 
-def create_force_field_mapper(
-    force_field_type: str = "amber", simulation_engine: str = "gromacs", config: Optional[Dict[str, Any]] = None
-) -> ForceFieldMapper:
+def create_force_field_mapper(config: Optional[Dict[str, Any]] = None) -> ForceFieldMapper:
     """
     Create a ForceFieldMapper instance.
 
     Args:
-        force_field_type: Type of force field to generate
-        simulation_engine: Target simulation engine
         config: Additional configuration parameters
 
     Returns:
         ForceFieldMapper instance
     """
-    return ForceFieldMapper(force_field_type, simulation_engine, config)
+    return ForceFieldMapper(config)
