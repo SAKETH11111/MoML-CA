@@ -33,10 +33,9 @@ class ForceFieldMapper:
         config: Optional[Dict[str, Any]] = None,
     ):
         """
-        Initialize the ForceFieldMapper.
-
-        Args:
-            config: Additional configuration parameters
+        Initializes a ForceFieldMapper instance with optional configuration.
+        
+        If no configuration is provided, default validation cutoffs for charge balance, bond length deviation, angle deviation, and dihedral energy are set.
         """
         # Store configuration
         self.config = config or {}
@@ -51,15 +50,20 @@ class ForceFieldMapper:
 
     def map_partial_charges(self, mol: Chem.Mol, charges: List[float], normalize: bool = True) -> Dict[int, float]:
         """
-        Map predicted partial charges to atoms in a molecule.
-
+        Assigns predicted partial charges to atoms in an RDKit molecule, with optional normalization.
+        
+        If normalization is enabled, adjusts the charges so their sum matches the molecule's formal charge by distributing the correction evenly across all atoms.
+        
         Args:
-            mol: RDKit molecule
-            charges: List of partial charges
-            normalize: Whether to normalize charges to ensure neutrality
-
+        	mol: The RDKit molecule to which charges are assigned.
+        	charges: List of predicted partial charges, one per atom.
+        	normalize: If True, normalizes charges to match the molecule's formal charge.
+        
         Returns:
-            Dictionary mapping atom indices to partial charges
+        	A dictionary mapping atom indices to their assigned partial charges.
+        
+        Raises:
+        	ValueError: If the number of charges does not match the number of atoms in the molecule.
         """
         if mol.GetNumAtoms() != len(charges):
             raise ValueError(f"Number of atoms ({mol.GetNumAtoms()}) doesn't match number of charges ({len(charges)})")
@@ -83,13 +87,10 @@ class ForceFieldMapper:
 
     def assign_atom_types(self, mol: Chem.Mol) -> Dict[int, str]:
         """
-        Assign atom types based on element and hybridization.
-
-        Args:
-            mol: RDKit molecule
-
+        Assigns atom types to each atom in an RDKit molecule based on element, hybridization, and aromaticity.
+        
         Returns:
-            Dictionary mapping atom indices to atom types
+            A dictionary mapping atom indices to atom type strings suitable for force field parameterization.
         """
         atom_types = {}
 
@@ -153,14 +154,16 @@ class ForceFieldMapper:
         self, mol: Chem.Mol, atom_types: Dict[int, str]
     ) -> Dict[Tuple[int, int], Dict[str, float]]:
         """
-        Predict bond parameters based on atom types and geometry.
-
+        Predicts bond force constants and equilibrium bond lengths for each bond in a molecule.
+        
+        Uses 3D coordinates if available to calculate bond lengths; otherwise estimates them from covalent radii and bond type. Assigns default force constants based on bond order and stores parameters for both directions of each bond.
+        
         Args:
-            mol: RDKit molecule
-            atom_types: Dictionary mapping atom indices to atom types
-
+        	mol: RDKit molecule object.
+        	atom_types: Mapping of atom indices to atom type strings.
+        
         Returns:
-            Dictionary mapping bond indices to bond parameters
+        	A dictionary mapping atom index pairs to bond parameter dictionaries, including atom types, force constant, equilibrium bond length, and bond type.
         """
         # Calculate equilibrium bond lengths from 3D geometry if available
         has_3d = mol.GetNumConformers() > 0
@@ -237,14 +240,9 @@ class ForceFieldMapper:
         self, mol: Chem.Mol, atom_types: Dict[int, str]
     ) -> Dict[Tuple[int, int, int], Dict[str, float]]:
         """
-        Predict angle parameters based on atom types and geometry.
-
-        Args:
-            mol: RDKit molecule
-            atom_types: Dictionary mapping atom indices to atom types
-
-        Returns:
-            Dictionary mapping angle indices to angle parameters
+        Predicts angle force field parameters for all angles in a molecule.
+        
+        For each angle defined by three connected atoms, assigns atom types, a default force constant, and an equilibrium angle based on 3D geometry if available or estimated from hybridization otherwise. Returns a dictionary mapping angle index triples to parameter dictionaries.
         """
         # Check if 3D coordinates are available
         has_3d = mol.GetNumConformers() > 0
@@ -459,14 +457,9 @@ class ForceFieldMapper:
         self, mol: Chem.Mol, partial_charges: Optional[List[float]] = None
     ) -> Dict[str, Any]:
         """
-        Generate complete force field parameters for a molecule.
-
-        Args:
-            mol: RDKit molecule
-            partial_charges: Optional list of partial charges (if None, uses Gasteiger charges)
-
-        Returns:
-            Dictionary with all force field parameters
+        Generates force field parameters for a molecule, including atom types, partial charges, bonds, angles, and dihedrals.
+        
+        If partial charges are not provided, Gasteiger charges are computed. The resulting parameters are returned as a dictionary suitable for use in OpenMM simulations.
         """
         # Calculate Gasteiger charges if none provided
         logger.debug(f"generate_force_field_parameters: initial partial_charges type: {type(partial_charges)}")
@@ -522,14 +515,16 @@ class ForceFieldMapper:
 
     def validate_parameters(self, parameters: Dict[str, Any], mol: Chem.Mol) -> Dict[str, Any]:
         """
-        Validate force field parameters.
-
+        Validates generated force field parameters against chemical and physical criteria.
+        
+        Checks charge balance, bond length deviations (if 3D coordinates are available), angle equilibrium values, and dihedral force constants. Records any issues found and sets flags indicating the validity of each parameter type.
+        
         Args:
-            parameters: Dictionary with force field parameters
-            mol: RDKit molecule
-
+            parameters: Dictionary containing force field parameters for the molecule.
+            mol: RDKit molecule object to validate against.
+        
         Returns:
-            Dictionary with validation results
+            A dictionary summarizing validation results, including pass/fail flags and any issues detected.
         """
         validation = {
             "passed": True,
@@ -629,16 +624,9 @@ class ForceFieldMapper:
         self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str
     ) -> Tuple[bool, Dict[str, str]]:
         """
-        Export force field parameters to OpenMM XML format.
-
-        Args:
-            parameters: Dictionary with force field parameters
-            mol: RDKit molecule
-            output_dir: Directory to save output files
-            base_filename: Base name for output files
-
-        Returns:
-            Tuple of (success, file_paths)
+        Exports force field parameters to an OpenMM-compatible XML file.
+        
+        Writes atom types, residues, bonds, angles, dihedrals, and nonbonded parameters in XML format, performing necessary unit conversions and avoiding duplicate entries. Returns a tuple indicating success and a dictionary with the XML file path.
         """
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -821,18 +809,18 @@ class ForceFieldMapper:
         base_filename: str,
     ) -> Tuple[bool, Dict[str, Any]]:
         """
-        Convert MGNN model predictions to force field files.
-
-        This is the main entry point for converting ML predictions to MD parameters.
-
+        Converts MGNN node-level predictions into OpenMM-compatible force field files.
+        
+        Extracts partial charges from MGNN predictions, generates and validates force field parameters, and exports them as OpenMM XML files. Returns a tuple indicating success and a results dictionary containing parameters, validation results, and file paths.
+        
         Args:
-            mol: RDKit molecule
-            node_predictions: Node-level predictions from MGNN model (partial charges)
-            output_dir: Directory to save output files
-            base_filename: Base name for output files
-
+            mol: RDKit molecule to parameterize.
+            node_predictions: MGNN node-level predictions (partial charges) as a list or dict.
+            output_dir: Directory where output files will be saved.
+            base_filename: Base name for the generated files.
+        
         Returns:
-            Tuple of (success, results)
+            A tuple (success, results), where success is True if export succeeded, and results is a dictionary with parameter data, validation results, and file paths.
         """
         # Extract partial charges from node predictions
         if isinstance(node_predictions, dict) and "node_pred" in node_predictions:
@@ -871,12 +859,12 @@ class ForceFieldMapper:
 
 def create_force_field_mapper(config: Optional[Dict[str, Any]] = None) -> ForceFieldMapper:
     """
-    Create a ForceFieldMapper instance.
-
+    Creates and returns a ForceFieldMapper instance with optional configuration.
+    
     Args:
-        config: Additional configuration parameters
-
+        config: Optional dictionary of configuration parameters for the mapper.
+    
     Returns:
-        ForceFieldMapper instance
+        A ForceFieldMapper object initialized with the provided configuration.
     """
     return ForceFieldMapper(config)

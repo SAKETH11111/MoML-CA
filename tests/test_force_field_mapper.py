@@ -65,18 +65,26 @@ class TestForceFieldMapper:
     """Tests for the ForceFieldMapper class."""
 
     def test_init_default(self):
-        """Test ForceFieldMapper initialization with default parameters."""
+        """
+        Tests that ForceFieldMapper initializes with an empty configuration by default.
+        """
         mapper = ForceFieldMapper()
         assert mapper.config == {}
 
     def test_init_custom(self):
-        """Test ForceFieldMapper initialization with custom config."""
+        """
+        Tests that ForceFieldMapper initializes correctly with a custom configuration dictionary.
+        """
         config = {"test_param": "test_value"}
         mapper = ForceFieldMapper(config=config)
         assert mapper.config == config
 
     def test_map_partial_charges_no_normalize(self, ethanol_mol_3d: Chem.Mol):
-        """Test map_partial_charges without normalization."""
+        """
+        Tests that map_partial_charges assigns input charges directly to atoms when normalization is disabled.
+        
+        Verifies that the output charge mapping matches the input charges for each atom in the molecule.
+        """
         mapper = ForceFieldMapper()
         num_atoms = ethanol_mol_3d.GetNumAtoms()
         charges_in = [0.1 * i for i in range(num_atoms)]
@@ -100,14 +108,20 @@ class TestForceFieldMapper:
         assert abs(sum(charge_map.values()) - formal_charge) < 1e-6  # Check sum after normalization
 
     def test_map_partial_charges_mismatch(self, ethanol_mol_3d: Chem.Mol):
-        """Test map_partial_charges with mismatched number of charges."""
+        """
+        Tests that map_partial_charges raises a ValueError when the number of input charges does not match the number of atoms in the molecule.
+        """
         mapper = ForceFieldMapper()
         charges_in = [0.1]  # Not enough charges
         with pytest.raises(ValueError, match="doesn't match number of charges"):
             mapper.map_partial_charges(ethanol_mol_3d, charges_in)
 
     def test_assign_atom_types_ethanol(self, ethanol_mol_3d: Chem.Mol):
-        """Test assign_atom_types for ethanol."""
+        """
+        Tests that assign_atom_types correctly assigns atom types for a 3D ethanol molecule.
+        
+        Verifies that the number of assigned atom types matches the number of atoms and that the hydroxyl oxygen is typed as "oh".
+        """
         mapper = ForceFieldMapper()
         atom_types = mapper.assign_atom_types(ethanol_mol_3d)
         # CCOH: C(H3)-C(H2)-O-H
@@ -122,7 +136,11 @@ class TestForceFieldMapper:
         assert atom_types[oxygen_idx] == "oh"  # Hydroxyl oxygen
 
     def test_assign_atom_types_pfoa_frag(self, pfoa_frag_mol_3d: Chem.Mol):
-        """Test assign_atom_types for PFOA fragment."""
+        """
+        Tests that assign_atom_types correctly assigns atom types for a PFOA fragment.
+        
+        Verifies that a fluorine atom is typed as "f" and, if identified, the carbonyl carbon is typed as "c2".
+        """
         mapper = ForceFieldMapper()
         atom_types = mapper.assign_atom_types(pfoa_frag_mol_3d)
         # CF3COOH
@@ -179,7 +197,11 @@ class TestForceFieldMapper:
         assert bond_params[(idx1, idx2)]["r_eq"] > 0.5
 
     def test_predict_angle_parameters_3d(self, ethanol_mol_3d: Chem.Mol):
-        """Test predict_angle_parameters with 3D coordinates."""
+        """
+        Tests that predict_angle_parameters generates valid angle parameters for a 3D ethanol molecule.
+        
+        Verifies that angle parameters are produced, including for the C-C-O angle, and checks that the equilibrium angle value is a float within a physically reasonable range.
+        """
         mapper = ForceFieldMapper()
         atom_types = mapper.assign_atom_types(ethanol_mol_3d)
         angle_params = mapper.predict_angle_parameters(ethanol_mol_3d, atom_types)
@@ -208,7 +230,9 @@ class TestForceFieldMapper:
         assert 0 < param_set["theta_eq"] < 180  # Sanity check for angle
 
     def test_generate_force_field_parameters(self, ethanol_mol_3d: Chem.Mol):
-        """Test the main generate_force_field_parameters method."""
+        """
+        Tests that generate_force_field_parameters produces all expected force field parameter keys and correct output lengths for a molecule with provided partial charges.
+        """
         mapper = ForceFieldMapper()
         # Dummy MGNN predictions (only charges for this test)
         num_atoms = ethanol_mol_3d.GetNumAtoms()
@@ -227,7 +251,11 @@ class TestForceFieldMapper:
         assert len(ff_params["angles"]) > 0
 
     def test_export_to_openmm(self, ethanol_mol_3d: Chem.Mol, temp_output_dir: str):
-        """Test OpenMM XML export functionality."""
+        """
+        Tests that the ForceFieldMapper can export force field parameters for a molecule to an OpenMM XML file.
+        
+        Verifies successful export, existence of the XML file, and presence of expected XML tags for force field components.
+        """
         mapper = ForceFieldMapper()
         num_atoms = ethanol_mol_3d.GetNumAtoms()
         charges_for_ff_params = [0.0 for _ in range(num_atoms)]  # Neutral for simplicity
@@ -269,7 +297,11 @@ class TestForceFieldMapper:
         assert validation_results["dihedrals_ok"]
 
     def test_validate_parameters_invalid_charge(self, ethanol_mol_3d: Chem.Mol):
-        """Test validate_parameters with imbalanced charges."""
+        """
+        Tests that validate_parameters detects imbalanced partial charges.
+        
+        Verifies that the charge balance validation fails when the sum of partial charges does not match the molecule's formal charge.
+        """
         mapper = ForceFieldMapper()
         num_atoms = ethanol_mol_3d.GetNumAtoms()
         charges_for_ff_params = [1.0] * num_atoms  # Highly imbalanced
@@ -280,7 +312,11 @@ class TestForceFieldMapper:
         assert not validation_results["charge_balance_ok"]
 
     def test_validate_parameters_invalid_bond(self, ethanol_mol_3d: Chem.Mol):
-        """Test validate_parameters with an invalid bond length."""
+        """
+        Tests that validate_parameters detects an invalid bond equilibrium length.
+        
+        Creates force field parameters for ethanol, sets a bond length to an unphysically short value, and asserts that bond validation fails.
+        """
         mapper = ForceFieldMapper()
         num_atoms = ethanol_mol_3d.GetNumAtoms()
         charges_for_ff_params = [0.0] * num_atoms
@@ -295,7 +331,11 @@ class TestForceFieldMapper:
         assert not validation_results["bonds_ok"]
 
     def test_validate_parameters_invalid_angle(self, ethanol_mol_3d: Chem.Mol):
-        """Test validate_parameters with an invalid angle."""
+        """
+        Tests that validate_parameters detects an invalid angle value in force field parameters.
+        
+        Creates force field parameters for ethanol with a deliberately impossible angle value and asserts that angle validation fails.
+        """
         mapper = ForceFieldMapper()
         num_atoms = ethanol_mol_3d.GetNumAtoms()
         charges_for_ff_params = [0.0] * num_atoms
@@ -309,7 +349,11 @@ class TestForceFieldMapper:
         assert not validation_results["angles_ok"]
 
     def test_validate_parameters_invalid_dihedral(self, ethanol_mol_3d: Chem.Mol):
-        """Test validate_parameters with an invalid dihedral energy."""
+        """
+        Tests that validate_parameters detects invalid dihedral parameters with excessively high energy.
+        
+        Creates force field parameters for ethanol, artificially sets a dihedral force constant to an unreasonably high value, and asserts that dihedral validation fails.
+        """
         mapper = ForceFieldMapper()
         num_atoms = ethanol_mol_3d.GetNumAtoms()
         charges_for_ff_params = [0.0] * num_atoms
@@ -325,7 +369,11 @@ class TestForceFieldMapper:
         assert not validation_results["dihedrals_ok"]
 
     def test_convert_mgnn_predictions_to_force_field(self, ethanol_mol_3d: Chem.Mol, temp_output_dir: str):
-        """Test the main conversion entry point."""
+        """
+        Tests the conversion of MGNN node predictions to force field parameters and OpenMM XML export.
+        
+        Verifies that the conversion process completes successfully, produces parameter and validation results, generates expected file paths, and creates the OpenMM XML file in the specified output directory.
+        """
         mapper = ForceFieldMapper()
         num_atoms = ethanol_mol_3d.GetNumAtoms()
         # Example MGNN output structure (assuming node_pred are charges)

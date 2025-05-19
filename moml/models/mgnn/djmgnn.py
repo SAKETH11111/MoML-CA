@@ -211,6 +211,29 @@ class DJMGNN(nn.Module):
         env_dim: int = 0,
         env_mlp: bool = False,
     ):
+        """
+        Initializes the DJMGNN model with configurable graph neural network architecture.
+        
+        Args:
+            in_dim: Dimension of input node features.
+            hidden_dim: Hidden feature dimension for all blocks and heads.
+            n_blocks: Number of dense GNN blocks.
+            layers_per_block: Number of graph convolution layers per block.
+            edge_attr_dim: Dimension of input edge attributes (excluding RBF features).
+            jk_mode: Jumping Knowledge aggregation mode ("concat", "max", "attention", or "lstm").
+            node_out_dim: Output dimension for node-level predictions.
+            graph_out_dim: Output dimension for graph-level predictions.
+            dropout: Dropout probability applied in prediction heads.
+            pool_type: Type of global pooling for graph-level readout ("mean", "add", or "max").
+            p_dropedge: Probability of randomly dropping edges during training.
+            use_supernode: Whether to add a supernode to each graph.
+            use_rbf: Whether to apply RBF encoding to edge distances.
+            rbf_K: Number of RBF kernels for distance encoding.
+            env_dim: Dimension of optional environment vector to fuse with node and graph features.
+            env_mlp: If True and env_dim > 0, applies an MLP to project the environment vector to hidden_dim before fusion.
+        
+        Creates dense GNN blocks, a Jumping Knowledge aggregator, optional environment vector projection, and separate heads for node and graph predictions. The model supports flexible edge attribute processing, supernode addition, edge dropout, and environment vector fusion.
+        """
         super().__init__()
         self.env_dim = env_dim
         self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = p_dropedge, use_supernode, use_rbf, rbf_K
@@ -332,6 +355,12 @@ class DJMGNN(nn.Module):
         return x_with_super, new_edge_index, new_edge_attr, final_new_batch
 
     def drop_edges(self, edge_index, edge_attr):
+        """
+        Randomly drops edges and corresponding edge attributes during training.
+        
+        Returns:
+            A tuple containing the filtered edge indices and edge attributes after applying edge dropout. If not in training mode or dropout probability is zero, returns the inputs unchanged.
+        """
         if not self.training or self.p_dropedge == 0:
             return edge_index, edge_attr
         if edge_index.numel() == 0:
@@ -340,6 +369,24 @@ class DJMGNN(nn.Module):
         return edge_index[:, mask], (edge_attr[mask] if edge_attr is not None and edge_attr.numel() > 0 else edge_attr)
 
     def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None, env_vec=None):
+        """
+        Performs a forward pass through the DJMGNN model, producing node-level and graph-level predictions.
+        
+        Args:
+            x: Node feature tensor of shape [num_nodes, input_dim].
+            edge_index: Edge indices tensor of shape [2, num_edges].
+            edge_attr: Optional edge attribute tensor of shape [num_edges, edge_attr_dim].
+            batch: Optional batch vector assigning nodes to graphs.
+            dist: Optional tensor of edge distances for RBF encoding.
+            env_vec: Optional environment vector tensor for each graph.
+        
+        Returns:
+            A dictionary with:
+                "node_pred": Node-level prediction tensor of shape [num_nodes, node_out_dim].
+                "graph_pred": Graph-level prediction tensor of shape [num_graphs, graph_out_dim].
+        
+        If enabled, incorporates RBF-encoded edge distances and/or environment vectors into the model. Handles empty inputs and missing edge attributes gracefully.
+        """
         if x.numel() == 0:
             # logger.warning("DJMGNN forward called with zero nodes.")
             return {

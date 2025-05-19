@@ -210,6 +210,28 @@ class HMGNN(nn.Module):
         edge_dim_cs: int = 0,
         pool_type: str = "mean",
     ):
+        """
+        Initializes a Hierarchical Molecular Graph Neural Network (HMGNN) with multi-scale GNN backbones, cross-scale attention, and optional environmental vector integration.
+        
+        Args:
+            scale_dims: List of input feature dimensions for each scale.
+            hidden_dim: Hidden feature dimension for all internal representations.
+            env_dim: Dimensionality of the optional environmental vector to be concatenated at the graph level.
+            env_mlp: If True and env_dim > 0, projects the environmental vector through an MLP to hidden_dim before concatenation.
+            n_blocks: Number of DenseGNNBlocks per scale.
+            layers_per_block: Number of layers in each DenseGNNBlock.
+            edge_attr_dims: List of edge attribute dimensions per scale.
+            jk_mode: Jumping Knowledge aggregation mode for each scale.
+            node_out_dim: Output dimension for node-level predictions.
+            graph_out_dim: Output dimension for graph-level predictions.
+            cross_scale_exchange: If True, enables cross-scale attention between scales.
+            dropout: Dropout probability used in prediction heads.
+            n_heads_cs: Number of attention heads in cross-scale attention.
+            edge_dim_cs: Edge attribute dimension for cross-scale attention.
+            pool_type: Type of global pooling ('mean', 'add', or 'max') for graph-level embeddings.
+        
+        The model constructs per-scale GNN backbones, Jumping Knowledge aggregators, cross-scale attention (if enabled), and prediction heads for both node and graph outputs. If an environmental vector is provided, it is optionally projected and concatenated to the graph embedding before prediction.
+        """
         super().__init__()
         self.S = len(scale_dims)
         self.hidden_dim = hidden_dim  # Store hidden_dim
@@ -289,9 +311,16 @@ class HMGNN(nn.Module):
         env_vec: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         """
-        scale_data[i] = {'x', 'edge_index', 'edge_attr'?, 'batch'?, 'mask'?}
-        maps          = (fine2coarse, coarse_count)   – each list length S-1
-        edge_pairs_cs = list length S-1 of (edge_index, edge_attr) for fine→coarse
+        Performs a forward pass through the hierarchical GNN, producing node and graph predictions at each scale and a combined graph prediction.
+        
+        Args:
+            scale_data: List of dictionaries containing per-scale graph data, with keys such as 'x', 'edge_index', optional 'edge_attr', 'batch', and 'mask'.
+            maps: Optional tuple of (fine2coarse, coarse_count) lists for cross-scale attention and aggregation.
+            edge_pairs_cs: Optional list of (edge_index, edge_attr) tuples for edge-conditioned cross-scale message passing.
+            env_vec: Optional environmental feature tensor to be concatenated to graph embeddings before graph-level prediction.
+        
+        Returns:
+            A dictionary containing per-scale node and graph predictions, as well as the combined graph-level prediction.
         """
         scale_feats, graph_embeds, node_preds, graph_preds = [], [], [], []
 
