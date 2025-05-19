@@ -44,7 +44,7 @@ from moml.utils import (
 
 # Define paths
 ROOT_DIR = Path(__file__).resolve().parents[3]
-RAW_DATA_PATH = ROOT_DIR / "data" / "raw" / "PFAS_Chemical_List.csv"
+RAW_DATA_PATH = ROOT_DIR / "moml" / "data" / "datasets" / "raw" / "PFAS_Chemical_List.csv"
 CLEANED_DATA_PATH = ROOT_DIR / "data" / "processed" / "chemical_list" / "PFAS_Chemical_List_cleaned.csv"
 ENGINEERED_DATA_PATH = ROOT_DIR / "data" / "processed" / "chemical_list" / "PFAS_Chemical_List_engineered.csv"
 RESULTS_DIR = ROOT_DIR / "experiments" / "results" / "chemical_list"
@@ -124,7 +124,7 @@ def clean_data():
 
     # Standardize text data
     text_columns = ["Preferred_Name", "IUPAC_Name", "SMILES", "InChI_String", "Molecular_Formula"]
-    df = standardize_text_data(df, text_columns)
+    df = standardize_text_data(df, text_columns, special_char_cols=[])
 
     # Create basic derived features
     df = create_basic_derived_features(df)
