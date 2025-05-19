@@ -113,6 +113,12 @@ def calculate_molecular_complexity(df: pd.DataFrame, mol_col: str = "ROMol") -> 
     """
     logger.info("=== Calculating Molecular Complexity ===")
 
+    def calc_f_percentage(mol, f_count):
+        if mol is None or f_count == 0:
+            return 0.0
+        total_atoms = mol.GetNumAtoms()
+        return (f_count / total_atoms) * 100
+
     # Calculate basic molecular descriptors
     df["MW_RDKit"] = df[mol_col].apply(lambda x: Chem.Descriptors.ExactMolWt(x) if x is not None else None)
     df["Rotatable_Bonds"] = df[mol_col].apply(
@@ -165,8 +171,8 @@ def calculate_molecular_complexity(df: pd.DataFrame, mol_col: str = "ROMol") -> 
 
     df["CF_Bonds"] = df[mol_col].apply(count_cf_bonds)
 
-    # F_Percentage should already be calculated in extract_fluorine_count function
-
+    # Calculate F percentage
+    df["F_Percentage"] = df.apply(lambda x: calc_f_percentage(x[mol_col], x["F_Count"]), axis=1)
 
     # Calculate F/C ratio
     # Ensure C_Count is not zero to avoid division by zero errors.

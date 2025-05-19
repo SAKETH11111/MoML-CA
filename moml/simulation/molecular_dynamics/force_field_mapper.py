@@ -736,7 +736,7 @@ class ForceFieldMapper:
                 # Write atom types (simplified)
                 for i, atype in parameters["atom_types"].items():
                     atom = mol.GetAtomWithIdx(i)
-                    # Element symbol not used in this simplified version
+                    element = atom.GetSymbol()
                     mass = atom.GetMass()
                     charge = parameters["partial_charges"][i]
 

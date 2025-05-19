@@ -576,7 +576,7 @@ class TestMolecularGraphProcessor:
             assert edge_index.max() < num_atoms
 
         # Optional: Convert to dense adjacency matrix and check properties
-
+        # from torch_geometric.utils import to_dense_adj
         # adj_matrix_dense = to_dense_adj(edge_index, max_num_nodes=num_atoms).squeeze(0)
         # assert adj_matrix_dense.shape == (num_atoms, num_atoms)
         # assert torch.all(adj_matrix_dense == adj_matrix_dense.t()) # Symmetric

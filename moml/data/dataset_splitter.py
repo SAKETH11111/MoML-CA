@@ -168,8 +168,7 @@ def scaffold_split_dataset(
     # Calculate split sizes
     train_size = int(train_ratio * len(dataset))
     val_size = int(val_ratio * len(dataset))
-    # test_size is calculated but not directly used, so we'll remove it
-    # The test set will get all remaining molecules
+    test_size = len(dataset) - train_size - val_size
 
     # Assign molecules to each set
     train_indices = []

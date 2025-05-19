@@ -7,6 +7,7 @@ training process by adding functionality like early stopping, model checkpointin
 
 import os
 import torch
+import copy  # for deep-copying state_dict tensors
 from typing import Optional, Callable
 
 
@@ -292,7 +293,7 @@ class LearningRateScheduler(Callback):
                 threshold=self.threshold,
                 cooldown=self.cooldown,
                 min_lr=self.min_lr,
-
+                # verbose=self.verbose, # Removed deprecated parameter
             )
 
     def on_epoch_end(self, trainer, epoch, logs=None):

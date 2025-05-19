@@ -241,7 +241,7 @@ class TestCreateOrcaInput:
 @patch("subprocess.run")
 @patch("os.path.exists")
 class TestRunOrcaCalculation:
-    def test_run_successful(self, mock_exists, mock_run):
+    def test_run_successful(self, mock_exists, mock_run):  # Removed temp_orca_output_file fixture
         with tempfile.NamedTemporaryFile(
             mode="w+b", suffix=".inp", delete=False
         ) as tmp_inp_f:  # Explicitly w+b, though default
@@ -280,7 +280,7 @@ class TestRunOrcaCalculation:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-
+                # check=False, # Removed as it's default and causes mismatch with mock representation
                 cwd=os.path.dirname(input_file_path),
             )
         finally:
@@ -290,7 +290,7 @@ class TestRunOrcaCalculation:
             if success and os.path.exists(output_file_expected):
                 os.remove(output_file_expected)
 
-    def test_run_orca_fail_returncode(self, mock_exists, mock_run):
+    def test_run_orca_fail_returncode(self, mock_exists, mock_run):  # Removed temp_orca_output_file fixture
         with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
             input_file_path = tmp_inp_f.name
             tmp_inp_f.write(b"dummy orca input content")  # Write bytes
@@ -325,7 +325,7 @@ class TestRunOrcaCalculation:
             if os.path.exists(output_file_expected):  # Cleanup if it was created
                 os.remove(output_file_expected)
 
-    def test_run_output_not_created(self, mock_exists, mock_run):
+    def test_run_output_not_created(self, mock_exists, mock_run):  # Removed temp_orca_output_file fixture
         with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
             input_file_path = tmp_inp_f.name
             tmp_inp_f.write(b"dummy orca input content")  # Write bytes
