@@ -163,11 +163,14 @@ class Watchdog:
     
     def as_reporter(self, reportInterval: int = 1000) -> app.StateDataReporter:
         """Create a StateDataReporter that calls this watchdog."""
+        def callback(state: State, step: int):
+            self._check_state(step, state)
+        
         return app.StateDataReporter(None, reportInterval,
                                    step=True,
                                    temperature=True,
                                    potentialEnergy=True,
-                                   callback=self._check_state)
+                                   callback=callback)
     
     def _check_state(self, step: int, state: State):
         """Check simulation state for divergence."""

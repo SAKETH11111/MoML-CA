@@ -521,9 +521,11 @@ class TestCreateTrainerFactory:
         # Configure the mock DJMGNN's parameters method
         MockDJMGNN.return_value.parameters.return_value = [nn.Parameter(torch.randn(1))]
         
-        # Create a mock train loader with sample data
+        # Create a mock train loader with sample data that includes x attribute
         mock_train_loader = MagicMock()
-        mock_train_loader.__iter__.return_value = iter([MagicMock(x=torch.randn(10, 16))])
+        mock_batch = MagicMock()
+        mock_batch.x = torch.randn(10, 16)  # 10 nodes with 16 features
+        mock_train_loader.__iter__.return_value = iter([mock_batch])
         
         create_trainer(config=config_no_dims, train_loader=mock_train_loader)
         

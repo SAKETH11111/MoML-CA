@@ -57,6 +57,19 @@ class MLflowConfig(BaseModel):
     experiment_name: str = Field(default="md_simulations", description="MLflow experiment name")
     tags: Dict[str, Any] = Field(default_factory=dict, description="Additional MLflow tags")
 
+class MonitoringConfig(BaseModel):
+    """Configuration for simulation monitoring"""
+    energy_threshold: float = Field(10000.0, description="Maximum allowed energy in kJ/mol")
+    energy_drift_threshold: float = Field(100.0, description="Maximum allowed energy drift in kJ/mol")
+    target_density: float = Field(1.0, description="Target system density in g/cm³")
+    density_tolerance: float = Field(0.1, description="Allowed density deviation from target")
+    density_drift_threshold: float = Field(0.01, description="Maximum allowed density drift")
+    target_temperature: float = Field(300.0, description="Target system temperature in Kelvin")
+    temperature_tolerance: float = Field(10.0, description="Allowed temperature deviation from target")
+    temperature_drift_threshold: float = Field(1.0, description="Maximum allowed temperature drift")
+    max_temperature: float = Field(1000.0, description="Maximum allowed temperature in Kelvin")
+    max_energy_drift: float = Field(5.0, description="Maximum allowed energy drift per step")
+
 class MDConfig(BaseModel):
     """Complete MD configuration"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -65,6 +78,7 @@ class MDConfig(BaseModel):
     integration: IntegrationConfig = Field(default_factory=IntegrationConfig)
     equilibration: EquilibrationConfig = Field(default_factory=EquilibrationConfig)
     production: ProductionConfig = Field(default_factory=ProductionConfig)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
     
     # Optional configurations

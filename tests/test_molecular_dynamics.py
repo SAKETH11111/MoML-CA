@@ -8,10 +8,7 @@ from pathlib import Path
 from openmm import app, System, Context, VerletIntegrator, MonteCarloBarostat
 from openmm import unit
 import tempfile
-import json
-import os
 import shutil
-from typing import Dict, Any
 
 from moml.simulation.molecular_dynamics.runner import MDRunner
 from moml.simulation.molecular_dynamics.equilibration import EquilibrationProtocol
@@ -19,7 +16,10 @@ from moml.simulation.molecular_dynamics.monitors import (
     EnergyMonitor, DensityMonitor, TemperatureMonitor, Watchdog,
     SimulationDiverged, BaseMonitor
 )
-from moml.simulation.molecular_dynamics.config.schema import MDConfig
+from moml.simulation.molecular_dynamics.config import (
+    MDConfig, SystemConfig, IntegrationConfig, EquilibrationConfig,
+    ProductionConfig, MonitoringConfig, MLflowConfig
+)
 from moml.simulation.molecular_dynamics.builder.system_builder import SystemBuilder
 
 # Test fixtures
@@ -27,26 +27,26 @@ from moml.simulation.molecular_dynamics.builder.system_builder import SystemBuil
 def md_config():
     """Create a test MD configuration."""
     return MDConfig(
-        system=MDConfig.SystemConfig(
+        system=SystemConfig(
             temperature=300.0,
             pressure=1.0
         ),
-        integration=MDConfig.IntegrationConfig(
+        integration=IntegrationConfig(
             timestep=2.0
         ),
-        equilibration=MDConfig.EquilibrationConfig(
+        equilibration=EquilibrationConfig(
             minimization_steps=100,
             nvt_steps=1000,
             npt_steps=1000,
             restraint_force=1000.0
         ),
-        production=MDConfig.ProductionConfig(
+        production=ProductionConfig(
             total_steps=10000,
             trajectory_interval=100,
             energy_interval=100,
             checkpoint_interval=1000
         ),
-        monitoring=MDConfig.MonitoringConfig(
+        monitoring=MonitoringConfig(
             energy_threshold=10000.0,
             energy_drift_threshold=100.0,
             target_density=1.0,
@@ -58,7 +58,7 @@ def md_config():
             max_temperature=1000.0,
             max_energy_drift=5.0
         ),
-        mlflow=MDConfig.MLflowConfig(
+        mlflow=MLflowConfig(
             tracking_uri="file:./mlruns",
             experiment_name="test_md",
             tags={}
@@ -294,7 +294,7 @@ def test_density_monitor(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal density
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getDensity=True)
     monitor.update(state)
     assert not monitor.is_unstable()
     
@@ -320,7 +320,7 @@ def test_temperature_monitor(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal temperature
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getTemperature=True)
     monitor.update(state)
     assert not monitor.is_unstable()
     
@@ -346,23 +346,23 @@ def test_watchdog(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal state
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getTemperature=True)
     watchdog._check_state(0, state)
     
     # Test high temperature
     context.setVelocitiesToTemperature(2000.0 * unit.kelvin)
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getTemperature=True)
     with pytest.raises(SimulationDiverged):
         watchdog._check_state(1, state)
     
     # Test energy drift
     context.setVelocitiesToTemperature(300.0 * unit.kelvin)
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getTemperature=True)
     watchdog._check_state(1, state)
     
     # Simulate energy drift
     context.setPositions(unit.Quantity(np.array([[100.0, 100.0, 100.0]]), unit.nanometers))
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getTemperature=True)
     with pytest.raises(SimulationDiverged):
         watchdog._check_state(1000, state)
 
@@ -373,4 +373,5 @@ def test_watchdog_reporter(md_config):
     
     assert isinstance(reporter, app.StateDataReporter)
     assert reporter._reportInterval == 100
-    assert reporter._callback is not None 
+    # The callback is now set through the reporter's constructor
+    assert hasattr(reporter, '_callback') 

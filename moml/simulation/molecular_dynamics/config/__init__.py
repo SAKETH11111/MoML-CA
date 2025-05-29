@@ -8,6 +8,7 @@ from .schema import (
     IntegrationConfig,
     EquilibrationConfig,
     ProductionConfig,
+    MonitoringConfig,
     MLflowConfig
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     'IntegrationConfig',
     'EquilibrationConfig',
     'ProductionConfig',
+    'MonitoringConfig',
     'MLflowConfig'
 ] 
