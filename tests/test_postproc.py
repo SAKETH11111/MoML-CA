@@ -68,22 +68,30 @@ def temp_files(sample_trajectory):
 
 def test_timeseries_extractor_initialization(sample_metrics_config):
     """Test TimeseriesExtractor initialization."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
         yaml.dump(sample_metrics_config, f)
         f.flush()
+        f.close()  # Close the file before using it
         
         extractor = TimeseriesExtractor(metrics_config=Path(f.name))
         assert extractor.metrics == sample_metrics_config
+        
+        # Clean up
+        Path(f.name).unlink()
 
 def test_metrics_validation(sample_metrics_config):
     """Test metrics configuration validation."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
         yaml.dump(sample_metrics_config, f)
         f.flush()
+        f.close()  # Close the file before using it
         
         extractor = TimeseriesExtractor(metrics_config=Path(f.name))
         errors = extractor.validate_metrics()
         assert len(errors) == 0
+        
+        # Clean up
+        Path(f.name).unlink()
 
 def test_invalid_metrics_validation():
     """Test validation of invalid metrics configuration."""
@@ -97,23 +105,28 @@ def test_invalid_metrics_validation():
         }
     }
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
         yaml.dump(invalid_config, f)
         f.flush()
+        f.close()  # Close the file before using it
         
         extractor = TimeseriesExtractor(metrics_config=Path(f.name))
         errors = extractor.validate_metrics()
         assert len(errors) > 0
         assert any('Invalid type for metric' in error for error in errors)
         assert any('Invalid ref_frame' in error for error in errors)
+        
+        # Clean up
+        Path(f.name).unlink()
 
 def test_extract_metrics(temp_files, sample_metrics_config):
     """Test metric extraction from trajectory."""
     traj_path, top_path, output_path = temp_files
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
         yaml.dump(sample_metrics_config, f)
         f.flush()
+        f.close()  # Close the file before using it
         
         extractor = TimeseriesExtractor(metrics_config=Path(f.name))
         metrics = extractor.extract(traj_path, top_path, output_path)
@@ -125,6 +138,9 @@ def test_extract_metrics(temp_files, sample_metrics_config):
         # Load saved metrics and verify
         saved_metrics = np.load(output_path, allow_pickle=True).item()
         assert saved_metrics.keys() == metrics.keys()
+        
+        # Clean up
+        Path(f.name).unlink()
 
 def test_compute_metric_rmsd(sample_trajectory, sample_metrics_config):
     """Test RMSD computation."""

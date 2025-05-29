@@ -505,14 +505,49 @@ class TestHMGNN:
                 continue
             assert param.grad is not None, f"Gradient is None for param {name}"
 
-    def test_create_hierarchical_mgnn_factory(self):
-        """Test the factory function."""
-        model = create_hierarchical_mgnn(
-            scale_dims=SCALE_NODE_DIMS_HMGNN, hidden_dim=HIDDEN_DIM_HMGNN, edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT
-        )
+    def test_create_hierarchical_mgnn_factory(self, dummy_hierarchical_graph_data):
+        """Test the factory function for creating hierarchical MGNN models."""
+        config = {
+            "scale_dims": [16, 32, 64],
+            "hidden_dim": 32,
+            "edge_attr_dims": [4, 8, 16],
+            "node_out_dim": 8,
+            "graph_out_dim": 1,
+            "dropout": 0.2,
+        }
+        
+        model = create_hierarchical_mgnn(config)
+        
         assert isinstance(model, HMGNN)
-        assert len(model.scale_gnns) == NUM_SCALES
-        # assert model.hidden_dim == HIDDEN_DIM_HMGNN # HMGNN class does not store hidden_dim as self.hidden_dim
+        assert len(model.scale_gnns) == len(config["scale_dims"])
+        assert model.hidden_dim == config["hidden_dim"]
+        assert model.node_out_dim == config["node_out_dim"]
+        assert model.graph_out_dim == config["graph_out_dim"]
+        assert model.dropout == config["dropout"]
+        
+        # Test forward pass
+        outputs = model(dummy_hierarchical_graph_data)
+        
+        # Check that outputs is a dictionary with expected keys
+        assert isinstance(outputs, dict)
+        assert "graph_pred" in outputs
+        assert "node_pred" in outputs
+        
+        # Check graph-level predictions
+        assert outputs["graph_pred"].shape == (1, config["graph_out_dim"])
+        
+        # Check node-level predictions for each scale
+        for i in range(len(config["scale_dims"])):
+            assert f"scale_{i}_node_pred" in outputs
+            assert f"scale_{i}_graph_pred" in outputs
+            
+            # Get number of nodes in this scale
+            num_nodes = dummy_hierarchical_graph_data[i]["x"].shape[0]
+            
+            # Check node predictions shape
+            assert outputs[f"scale_{i}_node_pred"].shape == (num_nodes, config["node_out_dim"])
+            # Check graph predictions shape for this scale
+            assert outputs[f"scale_{i}_graph_pred"].shape == (1, config["graph_out_dim"])
 
 
 # TODO: More detailed tests for CrossScaleAttention, especially helper methods,

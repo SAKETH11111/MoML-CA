@@ -572,75 +572,48 @@ def train_epoch(
     return epoch_loss
 
 
-def create_trainer(
-    config: Dict[str, Any],
-    train_loader: Optional[DataLoader] = None,
-    val_loader: Optional[DataLoader] = None,
-    callbacks: Optional[List] = None,
-) -> MGNNTrainer:
-    """
-    Create a trainer with a new model.
-
+def create_trainer(config: Dict, train_loader: Optional[DataLoader] = None, model: Optional[nn.Module] = None) -> MGNNTrainer:
+    """Create a trainer instance with the given configuration.
+    
     Args:
-        config: Configuration for training and model
-        train_loader: DataLoader with training data
-        val_loader: DataLoader with validation data
-        callbacks: List of callbacks to use during training
-
+        config: Configuration dictionary
+        train_loader: Optional training data loader
+        model: Optional pre-created model instance. If provided, this model will be used instead of creating a new one.
+    
     Returns:
-        Configured trainer with initialized model
+        MGNNTrainer instance
     """
-    # Create graph processor to get dimensions
-    processor = create_graph_processor(config)
-
-    # Prepare arguments for DJMGNN constructor
-    model_kwargs = {
-        "hidden_dim": config.get("hidden_dim", 64),
-        "n_blocks": config.get("n_blocks", 3),
-        "layers_per_block": config.get("layers_per_block", 2),
-        "jk_mode": config.get("jk_mode", "cat"),
-        "node_out_dim": config.get("node_out_dim", 1),
-        "graph_out_dim": config.get("graph_out_dim", 1),
-        "dropout": config.get("dropout", 0.2),
-    }
-
-    # Determine in_dim: from config, then from data, else not passed to DJMGNN
-    # (allowing DJMGNN to use its internal default if any, or raise error if mandatory)
-    in_dim_from_config = config.get("in_dim")
-    in_dim_from_data = None
-
-    # Determine edge_attr_dim similarly
-    edge_attr_dim_from_config = config.get("edge_attr_dim")
-    edge_attr_dim_from_data = None
-
-    if train_loader is not None and len(train_loader) > 0:
-        sample_batch = next(iter(train_loader))
-        if hasattr(sample_batch, "x") and sample_batch.x is not None:
-            in_dim_from_data = sample_batch.x.shape[1]
-        if hasattr(sample_batch, "edge_attr") and sample_batch.edge_attr is not None:
-            edge_attr_dim_from_data = sample_batch.edge_attr.shape[1]
-
-    # Prioritize data-derived dimensions, then config, then let DJMGNN handle absence
-    if in_dim_from_data is not None:
-        model_kwargs["in_dim"] = in_dim_from_data
-    elif in_dim_from_config is not None:
-        model_kwargs["in_dim"] = in_dim_from_config
-    # If neither, 'in_dim' is not added to model_kwargs
-
-    if edge_attr_dim_from_data is not None:
-        model_kwargs["edge_attr_dim"] = edge_attr_dim_from_data
-    elif edge_attr_dim_from_config is not None:
-        model_kwargs["edge_attr_dim"] = edge_attr_dim_from_config
-    # If neither, 'edge_attr_dim' is not added to model_kwargs
-
-    # Initialize model
-    model = DJMGNN(**model_kwargs)
-
+    if model is None:
+        # Create a new model if none provided
+        model_kwargs = {
+            "hidden_dim": config["hidden_dim"],
+            "n_blocks": config.get("n_blocks", 3),
+            "layers_per_block": config.get("layers_per_block", 2),
+            "edge_attr_dim": config.get("edge_attr_dim", 0),
+            "jk_mode": config.get("jk_mode", "cat"),
+            "node_out_dim": config["node_out_dim"],
+            "graph_out_dim": config["graph_out_dim"],
+            "dropout": config.get("dropout", 0.2),
+        }
+        
+        # Only add in_dim if it's in the config
+        if "in_dim" in config:
+            model_kwargs["in_dim"] = config["in_dim"]
+        
+        # Create graph processor to get dimensions if needed
+        if "in_dim" not in model_kwargs and train_loader is not None and len(train_loader) > 0:
+            processor = create_graph_processor(config)
+            sample_batch = next(iter(train_loader))
+            if hasattr(sample_batch, "x") and sample_batch.x is not None:
+                model_kwargs["in_dim"] = sample_batch.x.shape[1]
+        
+        model = DJMGNN(**model_kwargs)
+    
     # Set up optimizer
     optimizer_type = config.get("optimizer", "adam")
     lr = config.get("learning_rate", 0.001)
     weight_decay = config.get("weight_decay", 0)
-
+    
     if optimizer_type.lower() == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer_type.lower() == "sgd":
@@ -649,7 +622,7 @@ def create_trainer(
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_type}")
-
+    
     # Set up loss function
     task_type = config.get("task_type", "regression")
     if task_type == "regression":
@@ -658,16 +631,11 @@ def create_trainer(
         loss_fn = nn.BCEWithLogitsLoss()
     else:
         raise ValueError(f"Unsupported task type: {task_type}")
-
-    # Create trainer
-    trainer = MGNNTrainer(
+    
+    return MGNNTrainer(
         model=model,
         config=config,
         train_loader=train_loader,
-        val_loader=val_loader,
         optimizer=optimizer,
         loss_fn=loss_fn,
-        callbacks=callbacks,
     )
-
-    return trainer

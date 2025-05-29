@@ -401,34 +401,47 @@ class HMGNN(nn.Module):
 
 
 #  Factory convenience
-def create_hierarchical_mgnn(
-    scale_dims: List[int],
-    hidden_dim: int = 64,
-    n_blocks: int = 2,
-    layers_per_block: int = 3,
-    edge_attr_dims: Optional[List[int]] = None,
-    jk_mode: str = "attention",
-    node_out_dim: int = 1,
-    graph_out_dim: int = 1,
-    cross_scale_exchange: bool = True,
-    dropout: float = 0.2,
-    n_heads_cs: int = 4,
-    edge_dim_cs: int = 0,
-    pool_type: str = "mean",
-) -> HMGNN:
-    """Easy constructor mirroring DJMGNN.create_* style."""
+def create_hierarchical_mgnn(config: Dict) -> HMGNN:
+    """Create a hierarchical MGNN model from a configuration dictionary.
+    
+    Args:
+        config: Configuration dictionary containing model parameters:
+            - scale_dims: List of input dimensions for each scale
+            - hidden_dim: Hidden dimension size
+            - edge_attr_dims: Optional list of edge attribute dimensions for each scale
+            - node_out_dim: Output dimension for node predictions
+            - graph_out_dim: Output dimension for graph predictions
+            - n_blocks: Number of GNN blocks per scale
+            - layers_per_block: Number of layers per block
+            - jk_mode: Jumping knowledge mode
+            - cross_scale_exchange: Whether to use cross-scale attention
+            - dropout: Dropout rate
+            - n_heads_cs: Number of attention heads for cross-scale attention
+            - edge_dim_cs: Edge dimension for cross-scale attention
+            - pool_type: Pooling type for graph-level predictions
+    
+    Returns:
+        HMGNN instance
+    """
+    # If edge_attr_dims is None, create a list of zeros with same length as scale_dims
+    edge_attr_dims = config.get("edge_attr_dims")
+    if edge_attr_dims is None:
+        edge_attr_dims = [0] * len(config["scale_dims"])
+    
     return HMGNN(
-        scale_dims,
-        hidden_dim,
-        n_blocks,
-        layers_per_block,
-        edge_attr_dims,
-        jk_mode,
-        node_out_dim,
-        graph_out_dim,
-        cross_scale_exchange,
-        dropout,
-        n_heads_cs,
-        edge_dim_cs,
-        pool_type,
+        scale_dims=config["scale_dims"],
+        hidden_dim=config["hidden_dim"],
+        env_dim=0,  # Default to 0
+        env_mlp=False,  # Default to False
+        n_blocks=config.get("n_blocks", 2),
+        layers_per_block=config.get("layers_per_block", 3),
+        edge_attr_dims=edge_attr_dims,
+        jk_mode=config.get("jk_mode", "attention"),
+        node_out_dim=config["node_out_dim"],
+        graph_out_dim=config["graph_out_dim"],
+        cross_scale_exchange=config.get("cross_scale_exchange", True),
+        dropout=config.get("dropout", 0.2),
+        n_heads_cs=config.get("n_heads_cs", 4),
+        edge_dim_cs=config.get("edge_dim_cs", 0),
+        pool_type=config.get("pool_type", "mean"),
     )

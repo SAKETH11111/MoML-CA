@@ -9,7 +9,7 @@ import os
 import tempfile
 import shutil
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 from torch_geometric.data import Data
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -331,18 +331,21 @@ class TestMGNNPredictorMethods:
 class TestCreatePredictorFactory:
     def test_create_with_model_path(self, dummy_model_path):
         with patch("moml.models.mgnn.evaluation.predictor.MGNNPredictor") as MockPredictor:
-            create_predictor(model_path=dummy_model_path)  # config and device are optional
-            MockPredictor.assert_called_once_with(model_path=dummy_model_path, model=None, config={}, device=None)
+            create_predictor(config={}, model_path=dummy_model_path)
+            MockPredictor.assert_called_once_with(model=ANY, config={})
+            # Verify that the model was loaded from the checkpoint
+            args, kwargs = MockPredictor.call_args
+            assert isinstance(kwargs["model"], DJMGNN)
 
     def test_create_with_model_instance(self, dummy_model_instance_and_config):
-        model, _ = dummy_model_instance_and_config
+        model, config = dummy_model_instance_and_config
         with patch("moml.models.mgnn.evaluation.predictor.MGNNPredictor") as MockPredictor:
-            create_predictor(model=model)
-            MockPredictor.assert_called_once_with(model_path=None, model=model, config={}, device=None)
+            create_predictor(config=config, model=model)
+            MockPredictor.assert_called_once_with(model=model, config=config)
 
     def test_create_no_args(self):
         with pytest.raises(ValueError, match="Either model_path or model must be provided"):
-            create_predictor()
+            create_predictor(config={})
 
 
 @patch("moml.models.mgnn.evaluation.predictor.create_predictor")
