@@ -9,13 +9,13 @@ Public API:
 """
 
 # Molecular dynamics helpers
-from .molecular_dynamics.force_field_mapper import (
+from .molecular_dynamics.force_field.mapper import (
     ForceFieldMapper,
     create_force_field_mapper,
 )
 
 # Quantum mechanics (ORCA) parsers and I/O
-from .quantum_mechanics.parser.orca_parser import (
+from .qm.parser.orca_parser import (
     parse_orca_output,
     extract_partial_charges_from_orca,
     extract_orbital_contributions_from_orca,

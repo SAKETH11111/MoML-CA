@@ -14,7 +14,14 @@
 # limitations under the License.
 # ==============================================================================
 """
-ORCA PFAS Wrapper for Quantum Chemistry Calculations.
+ORCA PFAS Wrapper
+
+This script provides a command-line interface for running ORCA calculations on PFAS molecules.
+It handles the entire workflow from SMILES input to final quantum mechanical properties.
+
+Usage:
+    python moml/simulation/qm/orca_pfas_wrapper.py --input_csv path/to/input.csv --output_dir path/to/output
+    python moml/simulation/qm/orca_pfas_wrapper.py --help
 
 This module provides a command-line interface and utility functions to:
 1.  Process PFAS (Per- and Polyfluoroalkyl Substances) compounds from input CSV files.
@@ -30,11 +37,8 @@ calculations for PFAS, which are crucial for generating data for training
 machine learning models within the MoML-CA framework. Specific attention is
 given to the unique electronic properties of PFAS molecules.
 
-Usage:
-    python moml/simulation/quantum_mechanics/orca_pfas_wrapper.py --input_csv path/to/input.csv --output_dir path/to/output
-
 For detailed help:
-    python moml/simulation/quantum_mechanics/orca_pfas_wrapper.py --help
+    python moml/simulation/qm/orca_pfas_wrapper.py --help
 """
 
 import argparse
@@ -405,7 +409,7 @@ def run_orca_calculation(
             logger.warning("ORCA executable not found; switching to mock mode.")
             mock_run = True
             # Early return using the mock_run path to avoid using None as orca_executable
-            return run_orca_calculation_mock(input_file_path)
+            return run_orca_calculation(input_file_path, mock_run=True)
 
     env = os.environ.copy()
     if openmpi_bin_path:

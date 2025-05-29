@@ -1,0 +1,11 @@
+id: "nf_pa_v1"
+family: "flex_polymer"
+version: "1.0"
+description: "Cross-linked MPD-TMC polyamide nanofiltration membrane."
+default_build:
+  repeat_units: [4, 4, 2] # tile counts in X,Y,Z
+  target_density_g_cm3: 1.2
+  freeze_atoms: false
+required_env_vec: ["pH", "IonicStrength"]
+references:
+  - doi: 10.1039/D0EW01091F

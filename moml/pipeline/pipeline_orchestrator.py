@@ -22,14 +22,15 @@ import json
 import time
 import pickle  # Added for PFAS-specific checkpointing
 from datetime import datetime
+from pathlib import Path
+import numpy as np
+from moml.simulation.qm.parser.orca_parser import batch_process_molecules
 
 # Import consolidated core functionality
 from moml.core import (
     calculate_molecular_descriptors,
     create_graph_processor,
 )
-# Import QM batch processor from ORCA parser
-from moml.simulation.quantum_mechanics.parser.orca_parser import batch_process_molecules
 # Import consolidated data functionality
 from moml.data import process_dataset, process_mol_file_to_graph, graph_batch_process
 

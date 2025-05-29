@@ -24,10 +24,11 @@ from rdkit import Chem
 from typing import Dict, List, Tuple, Optional, Union
 import logging
 import numpy as np
+from pathlib import Path
 
 from moml.core.molecular_feature_extraction import FunctionalGroupDetector, MolecularFeatureExtractor
 from moml.core import create_graph_processor
-from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output
+from moml.simulation.qm.parser.orca_parser import parse_orca_output
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
