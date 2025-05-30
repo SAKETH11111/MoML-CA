@@ -9,7 +9,7 @@ import json
 import hashlib
 import structlog
 import mlflow
-from openmm import app, System, Context, VerletIntegrator
+from openmm import app, System, Context, VerletIntegrator, State
 from openmm import unit
 
 from .config.schema import MDConfig
@@ -54,9 +54,9 @@ class MDRunner:
         self.platform = system_builder.get_platform()
         
         # Setup monitors
-        self.energy_monitor = EnergyMonitor()
-        self.density_monitor = DensityMonitor()
-        self.watchdog = Watchdog(temp_max=1000, energy_drift_kj_per_ns=5)
+        self.energy_monitor = EnergyMonitor(config)
+        self.density_monitor = DensityMonitor(config)
+        self.watchdog = Watchdog(config)
         
         # MLflow tracking
         mlflow.set_tracking_uri(config.mlflow.tracking_uri)
@@ -179,10 +179,8 @@ class MDRunner:
             
             # Log progress
             elapsed = time.time() - start_time
-            logger.info("production_progress",
-                      step=i,
-                      elapsed=elapsed,
-                      energy=state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole))
+            energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
+            logger.info("production_progress", step=i, elapsed=elapsed, energy=energy)
             
             # Log to MLflow
             mlflow.log_metrics({

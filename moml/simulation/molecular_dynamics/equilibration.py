@@ -4,7 +4,7 @@ Implements a deterministic protocol: minimization → NVT → NPT.
 """
 
 from typing import Tuple
-from openmm import app, System, Context, VerletIntegrator, MonteCarloBarostat
+from openmm import app, System, Context, VerletIntegrator, MonteCarloBarostat, State
 from openmm import unit
 import structlog
 
@@ -50,12 +50,12 @@ class EquilibrationProtocol:
         app.LocalEnergyMinimizer.minimize(context, 
                                         maxIterations=self.config.equilibration.minimization_steps)
         
-        # Get minimized positions
-        state = context.getState(getPositions=True)
+        # Get minimized positions and energy
+        state = context.getState(getPositions=True, getEnergy=True)
         positions = state.getPositions()
+        energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
         
-        logger.info("minimization_complete", 
-                   energy=context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole))
+        logger.info("minimization_complete", energy=energy)
         return positions
     
     def _nvt_equilibration(self, system: System, positions: unit.Quantity) -> unit.Quantity:
@@ -76,9 +76,8 @@ class EquilibrationProtocol:
             integrator.step(1)
             if i % 1000 == 0:
                 state = context.getState(getEnergy=True)
-                logger.info("nvt_progress", 
-                          step=i,
-                          energy=state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole))
+                energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
+                logger.info("nvt_progress", step=i, energy=energy)
         
         # Get final positions
         state = context.getState(getPositions=True)
@@ -105,10 +104,9 @@ class EquilibrationProtocol:
             integrator.step(1)
             if i % 1000 == 0:
                 state = context.getState(getEnergy=True, getVolume=True)
-                logger.info("npt_progress",
-                          step=i,
-                          energy=state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole),
-                          volume=state.getVolume().value_in_unit(unit.nanometers**3))
+                energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
+                volume = state.getPeriodicBoxVolume().value_in_unit(unit.nanometers**3)
+                logger.info("npt_progress", step=i, energy=energy, volume=volume)
         
         # Get final positions
         state = context.getState(getPositions=True)

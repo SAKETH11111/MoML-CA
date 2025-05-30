@@ -39,8 +39,8 @@ def build_system(
 class SystemBuilder:
     """Builds OpenMM systems from force field components."""
     
-    def __init__(self, config: MDConfig):
-        self.config = config
+    def __init__(self, config: MDConfig | None = None):
+        self.config = config or MDConfig()
         self.validator = None  # Will be set when force field is loaded
         self.force_field_mapper = ForceFieldMapper()
     

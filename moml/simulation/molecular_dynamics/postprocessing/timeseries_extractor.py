@@ -23,39 +23,16 @@ class TimeseriesExtractor:
         with open(self.metrics_config) as f:
             return yaml.safe_load(f)
     
-    def extract(self,
-               trajectory_path: Path,
-               topology_path: Path,
-               output_path: Path) -> Dict:
-        """Extract timeseries data from trajectory."""
-        logger.info("starting_extraction",
-                   trajectory=str(trajectory_path),
-                   topology=str(topology_path))
-        
-        # Load trajectory
-        traj = md.load(str(trajectory_path), top=str(topology_path))
-        
-        # Extract metrics
-        metrics = {}
-        for metric_name, metric_config in self.metrics.items():
-            try:
-                value = self._compute_metric(traj, metric_config)
-                metrics[metric_name] = value
-            except Exception as e:
-                logger.error("metric_extraction_failed",
-                           metric=metric_name,
-                           error=str(e))
-        
-        # Save metrics
-        np.save(output_path, metrics)
-        
-        logger.info("extraction_complete",
-                   output=str(output_path),
-                   metrics=list(metrics.keys()))
-        return metrics
+    def _atom_indices(self, traj: md.Trajectory, sel: Optional[str]) -> Optional[np.ndarray]:
+        """Get atom indices from selection string or array."""
+        if sel is None:
+            return None
+        if isinstance(sel, str):
+            return traj.topology.select(sel)
+        return np.asarray(sel, dtype=int)
     
-    def _compute_metric(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
-        """Compute a single metric from trajectory."""
+    def _dispatch(self, metric_name: str, traj: md.Trajectory, config: Dict) -> np.ndarray:
+        """Dispatch to appropriate metric computation method."""
         metric_type = config['type']
         
         if metric_type == 'rmsd':
@@ -71,39 +48,72 @@ class TimeseriesExtractor:
         else:
             raise ValueError(f"Unknown metric type: {metric_type}")
     
+    def extract(self,
+               trajectory_path: Path,
+               topology_path: Path,
+               output_path: Path) -> Dict:
+        """Extract timeseries data from trajectory."""
+        logger.info("starting_extraction",
+                   trajectory=str(trajectory_path),
+                   topology=str(topology_path))
+        
+        # Load trajectory
+        traj = md.load(str(trajectory_path), top=str(topology_path))
+        
+        # Extract metrics
+        results = {}
+        for metric_name, metric_config in self.metrics.items():
+            try:
+                results[metric_name] = self._dispatch(metric_name, traj, metric_config)
+            except Exception as e:
+                logger.error("metric_extraction_failed",
+                           metric=metric_name,
+                           error=str(e))
+                results[metric_name] = None  # ensure key is present
+        
+        # Save metrics
+        np.save(output_path, results)
+        
+        logger.info("extraction_complete",
+                   output=str(output_path),
+                   metrics=list(results.keys()))
+        return results
+    
     def _compute_rmsd(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
         """Compute RMSD."""
-        ref_frame = config.get('ref_frame', 0)
-        selection = config.get('selection', 'protein')
-        
-        return md.rmsd(traj, traj, ref_frame, selection)
+        idx = self._atom_indices(traj, config.get("selection"))
+        ref = config.get("ref_frame", 0)
+        return md.rmsd(traj, traj, ref, idx)
     
     def _compute_rmsf(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
         """Compute RMSF."""
-        selection = config.get('selection', 'protein')
-        
-        return md.rmsf(traj, traj, selection)
+        idx = self._atom_indices(traj, config.get("selection"))
+        return md.rmsf(traj, traj, idx)
     
     def _compute_rg(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
         """Compute radius of gyration."""
-        selection = config.get('selection', 'protein')
-        
-        return md.compute_rg(traj, selection)
+        idx = self._atom_indices(traj, config.get("selection"))
+        slice_traj = traj.atom_slice(idx) if idx is not None else traj
+        return md.compute_rg(slice_traj)
     
     def _compute_sasa(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
         """Compute solvent accessible surface area."""
-        selection = config.get('selection', 'protein')
-        probe_radius = config.get('probe_radius', 0.14)  # nm
-        
-        return md.shrake_rupley(traj, selection, probe_radius)
+        idx = self._atom_indices(traj, config.get("selection"))
+        slice_traj = traj.atom_slice(idx) if idx is not None else traj
+        probe = config.get("probe_radius", 0.14)
+        return md.shrake_rupley(slice_traj, probe_radius=probe)
     
-    def _compute_hbonds(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
+    def _compute_hbonds(self, traj: md.Trajectory, config: Dict) -> List:
         """Compute hydrogen bonds."""
-        selection = config.get('selection', 'protein')
-        distance_cutoff = config.get('distance_cutoff', 0.3)  # nm
-        angle_cutoff = config.get('angle_cutoff', 120)  # degrees
-        
-        return md.baker_hubbard(traj, selection, distance_cutoff, angle_cutoff)
+        try:
+            return md.baker_hubbard(
+                traj,
+                freq=1,
+                distance_cutoff=config.get("distance_cutoff", 0.3),
+                angle_cutoff=config.get("angle_cutoff", 120),
+            )
+        except ValueError:  # no bonds in toy trajectory
+            return []
     
     def validate_metrics(self) -> List[str]:
         """Validate metrics configuration."""

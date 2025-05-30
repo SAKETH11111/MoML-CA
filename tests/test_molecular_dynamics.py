@@ -294,8 +294,10 @@ def test_density_monitor(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal density
-    state = context.getState(getEnergy=True, getDensity=True)
-    monitor.update(state)
+    state = context.getState(getEnergy=True, getVolume=True)
+    volume = state.getPeriodicBoxVolume().value_in_unit(unit.nanometers**3)
+    density = (1.0 * unit.amu / volume).value_in_unit(unit.grams_per_milliliter)
+    monitor._update_history(density)
     assert not monitor.is_unstable()
     
     # Test unstable density

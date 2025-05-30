@@ -2,7 +2,7 @@
 Compress polymer slabs to target density using NPT simulation.
 """
 
-from openmm import app, unit, LangevinIntegrator, Platform, MonteCarloBarostat
+from openmm import app, unit, LangevinIntegrator, Platform, MonteCarloBarostat, State
 import numpy as np
 
 def compress(topology, positions, forcefield, target_density, steps=50000):
@@ -37,5 +37,6 @@ def compress(topology, positions, forcefield, target_density, steps=50000):
     integrator.setTemperature(300*unit.kelvin)
     sim.step(int(steps/3))
 
+    # Get final positions
     state = sim.context.getState(getPositions=True)
     return state.getPositions(asNumpy=True) 
