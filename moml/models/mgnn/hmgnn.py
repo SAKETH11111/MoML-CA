@@ -211,6 +211,7 @@ class HMGNN(nn.Module):
         pool_type: str = "mean",
     ):
         super().__init__()
+        self.env_dim = env_dim  # Store env_dim
         self.S = len(scale_dims)
         self.hidden_dim = hidden_dim  # Store hidden_dim
         self.node_out_dim = node_out_dim  # Store node_out_dim
