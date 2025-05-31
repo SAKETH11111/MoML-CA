@@ -51,6 +51,19 @@ class GraphConvLayer(nn.Module):
                 0, self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], "in_features") else 1
             ).to(x.device)
 
+        # pad or slice so the feature width matches expectation
+        # Always keep at least 1 column because the Linear was built with
+        # in_features = 1 when edge_attr_dim == 0.
+        # 
+        if edge_attr_for_nnconv_input is not None and edge_attr_for_nnconv_input.numel() > 0:
+            cur_dim    = edge_attr_for_nnconv_input.size(1)
+            target_dim = max(self.actual_edge_attr_dim, 1)
+            if cur_dim < target_dim:
+                pad = x.new_zeros(edge_attr_for_nnconv_input.size(0), target_dim - cur_dim)
+                edge_attr_for_nnconv_input = torch.cat([edge_attr_for_nnconv_input, pad], dim=1)
+            elif cur_dim > target_dim:
+                edge_attr_for_nnconv_input = edge_attr_for_nnconv_input[:, :target_dim]
+
         h = self.conv(x, edge_index, edge_attr_for_nnconv_input)
         h = self.norm(h)
         h = F.relu(h)

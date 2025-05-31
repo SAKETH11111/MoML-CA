@@ -5,7 +5,7 @@ Tests for the molecular dynamics module.
 import pytest
 import numpy as np
 from pathlib import Path
-from openmm import app, System, Context, VerletIntegrator, MonteCarloBarostat
+from openmm import app, System, Context, VerletIntegrator, MonteCarloBarostat, Platform
 from openmm import unit
 import tempfile
 import shutil
@@ -26,6 +26,7 @@ from moml.simulation.molecular_dynamics.builder.system_builder import SystemBuil
 @pytest.fixture
 def md_config():
     """Create a test MD configuration."""
+    # TODO: Change platform to 'CUDA' before running on server
     return MDConfig(
         system=SystemConfig(
             temperature=300.0,
@@ -62,7 +63,8 @@ def md_config():
             tracking_uri="file:./mlruns",
             experiment_name="test_md",
             tags={}
-        )
+        ),
+        platform="CPU"  # Using CPU for local testing
     )
 
 @pytest.fixture
@@ -267,13 +269,13 @@ def test_energy_monitor(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal energy
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     monitor.update(state)
     assert not monitor.is_unstable()
     
     # Test high energy
     context.setPositions(unit.Quantity(np.array([[100.0, 100.0, 100.0]]), unit.nanometers))
-    state = context.getState(getEnergy=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     monitor.update(state)
     assert monitor.is_unstable()
     
@@ -294,7 +296,7 @@ def test_density_monitor(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal density
-    state = context.getState(getEnergy=True, getVolume=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     volume = state.getPeriodicBoxVolume().value_in_unit(unit.nanometers**3)
     density = (1.0 * unit.amu / volume).value_in_unit(unit.grams_per_milliliter)
     monitor._update_history(density)
@@ -322,7 +324,7 @@ def test_temperature_monitor(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal temperature
-    state = context.getState(getEnergy=True, getTemperature=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     monitor.update(state)
     assert not monitor.is_unstable()
     
@@ -348,23 +350,23 @@ def test_watchdog(md_config):
     context.setPositions(unit.Quantity(np.array([[0.0, 0.0, 0.0]]), unit.nanometers))
     
     # Test normal state
-    state = context.getState(getEnergy=True, getTemperature=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     watchdog._check_state(0, state)
     
     # Test high temperature
     context.setVelocitiesToTemperature(2000.0 * unit.kelvin)
-    state = context.getState(getEnergy=True, getTemperature=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     with pytest.raises(SimulationDiverged):
         watchdog._check_state(1, state)
     
     # Test energy drift
     context.setVelocitiesToTemperature(300.0 * unit.kelvin)
-    state = context.getState(getEnergy=True, getTemperature=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     watchdog._check_state(1, state)
     
     # Simulate energy drift
     context.setPositions(unit.Quantity(np.array([[100.0, 100.0, 100.0]]), unit.nanometers))
-    state = context.getState(getEnergy=True, getTemperature=True)
+    state = context.getState(getEnergy=True, getPositions=True)
     with pytest.raises(SimulationDiverged):
         watchdog._check_state(1000, state)
 

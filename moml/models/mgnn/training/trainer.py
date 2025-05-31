@@ -8,6 +8,7 @@ molecular graph neural network models.
 """
 
 import os
+import itertools
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -20,13 +21,58 @@ from moml.models.mgnn import DJMGNN
 from moml.models.mgnn.evaluation import MGNNPredictor
 
 
+# -----------------------------------------------------------------------------
+# Helper utilities
+# -----------------------------------------------------------------------------
+
+def _infer_in_dim_from_loader(loader: Optional[DataLoader]) -> Optional[int]:
+    """Best‑effort inference of the node‐feature dimension (``in_dim``).
+
+    The function first tries the *cheap* path – looking directly at ``loader.dataset`` –
+    and only if that fails does it fall back to peeking a single element from the
+    iterator.  No batch is permanently consumed in either case.
+    """
+    if loader is None:
+        return None
+
+    # ----- Fast‑path: inspect dataset ---------------------------------------
+    dataset = getattr(loader, "dataset", None)
+    if dataset is not None:
+        try:
+            # `len` might not be implemented for some streaming datasets – guard it.
+            if len(dataset) > 0:  # type: ignore[arg-type]
+                sample = dataset[0]
+                x = getattr(sample, "x", None)
+                if x is not None:
+                    return x.shape[1]
+        except Exception:  # pragma: no cover – any dataset oddities
+            pass
+
+    # ----- Slow‑path: peek at an iterator -----------------------------------
+    try:
+        peek = next(itertools.islice(iter(loader), 1, None))
+        x = getattr(peek, "x", None)
+        if x is not None:
+            return x.shape[1]
+    except Exception:  # StopIteration, TypeError, etc.
+        pass
+
+    # Could not infer
+    return None
+
+
+# -----------------------------------------------------------------------------
+# Main trainer class
+# -----------------------------------------------------------------------------
+
+
 class MGNNTrainer:
     """
     Trainer for molecular graph neural network models.
 
     This class handles training, validation, and model management.
-    For prediction functionality, use the get_predictor method to obtain
-    an MGNNPredictor instance.
+    For prediction functionality, use :py:meth:`get_predictor` to obtain an
+    :class:`~moml.models.mgnn.evaluation.predictor.MGNNPredictor` instance.
     """
 
     def __init__(
@@ -465,24 +511,13 @@ class MGNNTrainer:
 
 
 def train_epoch(
-    model: nn.Module, optimizer: optim.Optimizer, train_loader: DataLoader, loss_fn: Callable, device: str
+    model: nn.Module,
+    optimizer: optim.Optimizer,
+    train_loader: DataLoader,
+    loss_fn: Callable,
+    device: str,
 ) -> float:
-    """
-    Train a model for one epoch.
-
-    This is a standalone function for training that can be used
-    without the full Trainer class.
-
-    Args:
-        model: Model to train
-        optimizer: Optimizer for training
-        train_loader: DataLoader with training data
-        loss_fn: Loss function
-        device: Device to use for training
-
-    Returns:
-        Average training loss for the epoch
-    """
+    """Train a model for one epoch. (Implementation unchanged)"""
     model.train()
     total_loss = 0
     num_batches = 0
@@ -572,20 +607,23 @@ def train_epoch(
     return epoch_loss
 
 
-def create_trainer(config: Dict, train_loader: Optional[DataLoader] = None, model: Optional[nn.Module] = None) -> MGNNTrainer:
-    """Create a trainer instance with the given configuration.
-    
-    Args:
-        config: Configuration dictionary
-        train_loader: Optional training data loader
-        model: Optional pre-created model instance. If provided, this model will be used instead of creating a new one.
-    
-    Returns:
-        MGNNTrainer instance
+def create_trainer(
+    config: Dict,
+    train_loader: Optional[DataLoader] = None,
+    model: Optional[nn.Module] = None,
+) -> MGNNTrainer:
+    """Factory that builds a :class:`MGNNTrainer` with sensible defaults.
+
+    If *model* is *None*, a fresh :class:`~moml.models.mgnn.DJMGNN` is created.
+    If ``in_dim`` is absent from *config*, we will try to infer it from
+    *train_loader* via :pyfunc:`_infer_in_dim_from_loader`.
     """
+
+    # ------------------------------------------------------------------
+    # 1) Build / validate model
+    # ------------------------------------------------------------------
     if model is None:
-        # Create a new model if none provided
-        model_kwargs = {
+        model_kwargs: Dict[str, Any] = {
             "hidden_dim": config["hidden_dim"],
             "n_blocks": config.get("n_blocks", 3),
             "layers_per_block": config.get("layers_per_block", 2),
@@ -595,43 +633,47 @@ def create_trainer(config: Dict, train_loader: Optional[DataLoader] = None, mode
             "graph_out_dim": config["graph_out_dim"],
             "dropout": config.get("dropout", 0.2),
         }
-        
-        # Only add in_dim if it's in the config
+
+        # Decide the input feature dimension --------------------------------
         if "in_dim" in config:
             model_kwargs["in_dim"] = config["in_dim"]
-        
-        # Create graph processor to get dimensions if needed
-        if "in_dim" not in model_kwargs and train_loader is not None and len(train_loader) > 0:
-            processor = create_graph_processor(config)
-            sample_batch = next(iter(train_loader))
-            if hasattr(sample_batch, "x") and sample_batch.x is not None:
-                model_kwargs["in_dim"] = sample_batch.x.shape[1]
-        
+        else:
+            inferred = _infer_in_dim_from_loader(train_loader)
+            if inferred is not None:
+                model_kwargs["in_dim"] = inferred
+            else:
+                raise ValueError(
+                    "`in_dim` is missing from `config` and could not be "
+                    "inferred from the provided DataLoader. Please supply it "
+                    "explicitly."
+                )
+
         model = DJMGNN(**model_kwargs)
-    
-    # Set up optimizer
-    optimizer_type = config.get("optimizer", "adam")
+
+    # ------------------------------------------------------------------
+    # 2) Optimiser & loss
+    # ------------------------------------------------------------------
+    optimizer_type = config.get("optimizer", "adam").lower()
     lr = config.get("learning_rate", 0.001)
     weight_decay = config.get("weight_decay", 0)
-    
-    if optimizer_type.lower() == "adam":
+
+    if optimizer_type == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer_type.lower() == "sgd":
+    elif optimizer_type == "sgd":
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer_type.lower() == "adamw":
+    elif optimizer_type == "adamw":
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_type}")
-    
-    # Set up loss function
-    task_type = config.get("task_type", "regression")
+
+    task_type = config.get("task_type", "regression").lower()
     if task_type == "regression":
         loss_fn = nn.MSELoss()
     elif task_type == "classification":
         loss_fn = nn.BCEWithLogitsLoss()
     else:
         raise ValueError(f"Unsupported task type: {task_type}")
-    
+
     return MGNNTrainer(
         model=model,
         config=config,

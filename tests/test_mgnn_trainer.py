@@ -523,9 +523,12 @@ class TestCreateTrainerFactory:
         
         # Create a mock train loader with sample data that includes x attribute
         mock_train_loader = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.x = torch.randn(10, 16)  # 10 nodes with 16 features
-        mock_train_loader.__iter__.return_value = iter([mock_batch])
+        mock_dataset = MagicMock()
+        mock_sample = MagicMock()
+        mock_sample.x = torch.randn(10, 16)  # 10 nodes with 16 features
+        mock_dataset.__getitem__.return_value = mock_sample
+        mock_dataset.__len__.return_value = 1
+        mock_train_loader.dataset = mock_dataset
         
         create_trainer(config=config_no_dims, train_loader=mock_train_loader)
         

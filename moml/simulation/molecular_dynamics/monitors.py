@@ -99,7 +99,8 @@ class DensityMonitor(BaseMonitor):
         # Calculate density from volume and system mass
         # For now using 1 amu as test mass, in real usage this should be calculated from system
         mass = 1.0 * unit.amu
-        density = (mass / volume).value_in_unit(unit.grams_per_milliliter)
+        # Convert to g/mL: 1 amu/nm³ = 1.66053886e-21 g/mL
+        density = (mass.value_in_unit(unit.amu) / volume) * 1.66053886e-21
         self._update_history(density)
         
         if abs(density - self.target_density) > self.density_tolerance:
@@ -138,7 +139,8 @@ class TemperatureMonitor(BaseMonitor):
     def update(self, state: State):
         """Update with new temperature state."""
         # Get temperature from state
-        temp = state.getTemperature().value_in_unit(unit.kelvin)
+        ke = state.getKineticEnergy().value_in_unit(unit.kilojoules_per_mole)
+        temp = ke / (1.5 * unit.BOLTZMANN_CONSTANT_kB.value_in_unit(unit.kilojoules_per_mole/unit.kelvin))
         self._update_history(temp)
         
         if abs(temp - self.target_temp) > self.temp_tolerance:
@@ -191,7 +193,8 @@ class Watchdog:
     def _check_state(self, step: int, state: State):
         """Check simulation state for divergence."""
         # Get temperature and energy from state
-        temp = state.getTemperature().value_in_unit(unit.kelvin)
+        ke = state.getKineticEnergy().value_in_unit(unit.kilojoules_per_mole)
+        temp = ke / (1.5 * unit.BOLTZMANN_CONSTANT_kB.value_in_unit(unit.kilojoules_per_mole/unit.kelvin))
         energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
         
         # Check temperature
