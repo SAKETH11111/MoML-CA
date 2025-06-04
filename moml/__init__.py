@@ -32,20 +32,29 @@ Public API:
 
 __version__ = "0.1.0"
 
-# Subpackages
-from . import core
-from . import data
-from . import models
-from . import pipeline
-from . import simulation
-from . import utils
+import os
 
-__all__ = [
-    "__version__",
-    "core",
-    "data",
-    "models",
-    "pipeline",
-    "simulation",
-    "utils",
-]
+if os.getenv("MOML_LIGHT_IMPORT"):
+    # When running in lightweight mode (e.g. some tests), avoid importing
+    # heavy subpackages that pull in optional dependencies.
+    from . import simulation
+
+    __all__ = ["__version__", "simulation"]
+else:
+    # Standard full import of all subpackages
+    from . import core
+    from . import data
+    from . import models
+    from . import pipeline
+    from . import simulation
+    from . import utils
+
+    __all__ = [
+        "__version__",
+        "core",
+        "data",
+        "models",
+        "pipeline",
+        "simulation",
+        "utils",
+    ]
