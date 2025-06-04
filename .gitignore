@@ -91,10 +91,10 @@ logs/
 *.densitiesinfo
 *.engrad
 *.property.txt
-*.out
+*.pc_chelpg
 *.trj.xyz
 *_trj.xyz
-*.inp
+*.vpot
 *_results.json
 *_optimized.mol
 *.bibtex
