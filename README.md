@@ -79,6 +79,18 @@ predictions = predictor.predict_from_dataloader(val_loader)  # Or predictor.pred
 
 See the [examples directory](examples) for more comprehensive examples.
 
+### Generating force field labels
+
+After running ORCA calculations you can generate a JSON file containing atom
+types, partial charges and other force field parameters for each PFAS molecule:
+
+```bash
+python scripts/generate_force_field_labels.py
+```
+
+The output `force_field_labels.json` will be placed in
+`orca_results_b3lyp_sto3g/`.
+
 ## Project Structure
 
 ```
