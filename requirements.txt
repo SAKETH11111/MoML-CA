@@ -13,7 +13,7 @@ torch-geometric>=2.0.0
 # Molecular Dynamics
 openmm>=7.5.0
 mdtraj>=1.9.5
-pdbfixer>=1.11
+# pdbfixer>=1.11  # Install via conda: conda install -c conda-forge pdbfixer=1.11
 
 # Cheminformatics
 rdkit>=2022.03.2
