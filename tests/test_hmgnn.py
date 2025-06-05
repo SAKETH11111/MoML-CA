@@ -515,7 +515,4 @@ class TestHMGNN:
         # assert model.hidden_dim == HIDDEN_DIM_HMGNN # HMGNN class does not store hidden_dim as self.hidden_dim
 
 
-# TODO: More detailed tests for CrossScaleAttention, especially helper methods,
-#       once their implementation for aggregation/distribution is finalized.
-# TODO: Test HMGNN with cross_scale_exchange=True and batched data,
-#       this will require careful handling or mocking of cluster_mappings for batches.
+
