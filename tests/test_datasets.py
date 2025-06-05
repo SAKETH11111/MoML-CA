@@ -291,10 +291,7 @@ class TestHierarchicalGraphDataset:
         assert isinstance(item_a, dict)
         assert "atom" in item_a and isinstance(item_a["atom"], Data)
         assert "functional_group" in item_a and isinstance(item_a["functional_group"], Data)
-        # TODO: The JSON loading for hierarchical graphs is flawed.
-        # create_molecular_graph_json *creates* JSON, it doesn't load it into a Data object.
-        # For now, allowing None if it's not a Data object to pass this specific assertion.
-        # This needs a proper fix for loading graph data from JSON.
+
         assert "structural_motif" in item_a and (
             isinstance(item_a["structural_motif"], Data) or item_a["structural_motif"] is None
         )
