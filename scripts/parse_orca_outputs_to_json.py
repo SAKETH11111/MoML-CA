@@ -29,19 +29,20 @@ OUTPUT_JSON_FILE = os.path.join(ORCA_RESULTS_DIR, "qm_labels_subset.json")
 
 def parse_single_orca_output(orca_output_path: str) -> Optional[Dict[str, Any]]:
     """
-    Parses a single ORCA output file to extract key quantum mechanical properties.
-
+    Parses an ORCA output file to extract quantum mechanical properties.
+    
+    Extracts the final single point energy (in Hartrees), optimized atomic coordinates (in Angstroms), CHELPG atomic charges, and dipole moment components (X, Y, Z, and Total in Debye) from the specified ORCA output file. Handles multiple output formats and attempts to retrieve CHELPG charges from a corresponding `.property.txt` file if not present in the main output. Returns a dictionary with the extracted properties, or `None` if the file does not exist or a critical error occurs. If some properties cannot be parsed, returns a dictionary with available data and missing fields set to `None`.
+    
     Args:
-        orca_output_path: Path to the ORCA output file (.out).
-
+        orca_output_path: Path to the ORCA output file.
+    
     Returns:
-        A dictionary containing the extracted properties, or None if parsing fails
-        or the file doesn't exist.
-        Properties:
-            - "energy_hartree": Final single point energy in Hartrees.
-            - "coordinates_angstrom": List of [atom_symbol, x, y, z].
-            - "chelpg_charges": List of CHELPG atomic charges.
-            - "dipole_moment_debye": Dict with "X", "Y", "Z", "Total" dipole components.
+        A dictionary with keys:
+            - "energy_hartree": Final single point energy (float).
+            - "coordinates_angstrom": List of [atom_symbol, x, y, z] (float).
+            - "chelpg_charges": List of CHELPG atomic charges (float).
+            - "dipole_moment_debye": Dict with "X", "Y", "Z", "Total" (float).
+        Returns None if the file does not exist or a critical error occurs.
     """
     if not os.path.exists(orca_output_path):
         logger.warning(f"ORCA output file not found: {orca_output_path}")
@@ -194,8 +195,9 @@ def parse_single_orca_output(orca_output_path: str) -> Optional[Dict[str, Any]]:
 
 def main():
     """
-    Main function to parse ORCA outputs for successful PFAS calculations
-    and consolidate them into a single JSON file.
+    Parses ORCA output files for a predefined set of PFAS molecules and consolidates extracted quantum mechanical properties into a JSON file.
+    
+    Iterates over each molecule ID, attempts to extract energy, coordinates, CHELPG charges, and dipole moments from corresponding ORCA output files, and logs any parsing issues. The consolidated results are saved to a JSON file, with a summary report of any missing or failed-to-parse properties.
     """
     logger.info(f"Starting ORCA output parsing for {len(SUCCESSFUL_PFAS_IDS)} molecules.")
     logger.info(f"ORCA results directory: {ORCA_RESULTS_DIR}")

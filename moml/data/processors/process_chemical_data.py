@@ -80,7 +80,14 @@ def create_basic_derived_features(df):
 
 
 def clean_data():
-    """Main function to execute the data cleaning pipeline."""
+    """
+    Cleans and preprocesses the raw PFAS Chemical List dataset.
+    
+    Loads the raw data, standardizes column names and text fields, cleans DTXSID values, converts numeric columns, handles missing values, and creates basic derived features. Saves the cleaned dataset to disk and returns the cleaned DataFrame.
+    
+    Returns:
+        pandas.DataFrame: The cleaned and preprocessed PFAS Chemical List data.
+    """
     print("Starting PFAS Chemical List data cleaning process...")
 
     # Load and inspect data

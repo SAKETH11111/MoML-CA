@@ -506,7 +506,9 @@ class TestHMGNN:
             assert param.grad is not None, f"Gradient is None for param {name}"
 
     def test_create_hierarchical_mgnn_factory(self):
-        """Test the factory function."""
+        """
+        Tests that the `create_hierarchical_mgnn` factory function returns an `HMGNN` instance with the correct number of scales.
+        """
         model = create_hierarchical_mgnn(
             scale_dims=SCALE_NODE_DIMS_HMGNN, hidden_dim=HIDDEN_DIM_HMGNN, edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT
         )
