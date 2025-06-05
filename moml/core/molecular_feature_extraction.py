@@ -357,16 +357,24 @@ class FunctionalGroupDetector:
     def find_hydroxyl_groups(mol: Chem.Mol) -> List[int]:
         """
         Find all hydroxyl groups in the molecule.
-        Placeholder: Not fully implemented.
-
+        
         Args:
             mol: RDKit molecule
 
         Returns:
-            List of atom indices (currently empty)
+            List of atom indices corresponding to oxygen atoms in hydroxyl groups
         """
-        # Placeholder for hydroxyl group SMARTS detection
-        return []
+        # TODO: Implement hydroxyl group detection using SMARTS pattern '[OH]'
+        # This should match oxygen atoms bonded to hydrogen (hydroxyl groups)
+        # Example implementation:
+        # from rdkit import Chem
+        # hydroxyl_pattern = Chem.MolFromSmarts('[OH]')
+        # matches = mol.GetSubstructMatches(hydroxyl_pattern)
+        # return [match[0] for match in matches]  # Return oxygen atom indices
+        raise NotImplementedError(
+            "Hydroxyl group detection not implemented. "
+            "Use SMARTS pattern '[OH]' to detect O-H groups."
+        )
 
     @classmethod
     def get_all_functional_groups(cls, mol: Chem.Mol) -> dict:

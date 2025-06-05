@@ -16,12 +16,25 @@ def safe_parse_orca_output(path: str) -> Dict[str, Any]:
     very slow on large output files.  For the purpose of generating force-field
     labels we only need the final Mulliken charges and the optimised geometry.
     This helper parses those sections using a simple line based approach.
+    
+    Args:
+        path: Path to the ORCA output file
+        
+    Returns:
+        Dictionary containing parsed data, or empty structure if file cannot be read
     """
 
     data: Dict[str, Any] = {"mulliken_charges": [], "optimized_geometry": []}
 
-    with open(path, "r") as fh:
-        lines = fh.readlines()
+    try:
+        with open(path, "r") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        print(f"Warning: ORCA output file not found: {path}")
+        return data
+    except IOError as e:
+        print(f"Warning: Failed to read ORCA output file {path}: {e}")
+        return data
 
     # Mulliken charges -- use the last occurrence in the file
     last_idx = -1
