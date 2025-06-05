@@ -157,7 +157,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--solvent_model",
         type=str,
-        default="CPCM(Water)",  # Added to align with MoML-CA QM protocol
+        default="CPCM(Water)",
         help="Implicit solvent model to use (e.g., 'CPCM(Water)', 'SMD(Water)'). Set to None or empty string for gas phase.",
     )
 
@@ -304,7 +304,7 @@ def generate_orca_input(
         input_block += "%scf\n  MaxIter 300\n  Convergence Tight\nend\n\n"
 
         if optimize_geom and not sp_only:
-            input_block += "%geom\n  MaxIter 300\n  Convergence Tight\n  Trust -0.1\nend\n\n"  # Added trust radius
+            input_block += "%geom\n  MaxIter 300\n  Convergence Tight\n  Trust -0.1\nend\n\n"
 
         # Add CPCM/SMD block if solvent model requires it
         if solvent_model and solvent_model.strip():

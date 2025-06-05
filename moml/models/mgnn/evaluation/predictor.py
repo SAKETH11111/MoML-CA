@@ -209,7 +209,7 @@ class MGNNPredictor:
         Returns:
             Dictionary with predictions
         """
-        from torch_geometric.data import Batch  # Changed import
+        from torch_geometric.data import Batch
 
         # Create a custom dataset for compatibility with standard DataLoader
         class GraphDataset:
