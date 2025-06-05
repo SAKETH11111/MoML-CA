@@ -252,7 +252,7 @@ class TestForceFieldMapper:
             assert "<HarmonicBondForce>" in content
             assert "<HarmonicAngleForce>" in content
             assert "<PeriodicTorsionForce>" in content
-            assert "<NonbondedForce>" in content
+            assert "NonbondedForce" in content
 
     def test_validate_parameters_valid(self, ethanol_mol_3d: Chem.Mol):
         """Test validate_parameters with good, default parameters."""

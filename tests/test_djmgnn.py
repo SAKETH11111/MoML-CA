@@ -312,7 +312,9 @@ class TestDJMGNN:
             graph_out_dim=self.GRAPH_OUT_DIM,
         ).to(device)
         assert len(model.blocks) == self.N_BLOCKS
-        assert isinstance(model.jk, JKAggregator)        assert model.jk.mode == jk_mode        assert isinstance(model.node_head, nn.Sequential)
+        assert isinstance(model.jk, JKAggregator)
+        assert model.jk.mode == jk_mode
+        assert isinstance(model.node_head, nn.Sequential)
         assert isinstance(model.graph_head, nn.Sequential)
 
     def test_instantiation_no_edge_attr(self, device):

@@ -824,73 +824,6 @@ class ForceFieldMapper:
         Convert MGNN model predictions to force field files.
 
         This is the main entry point for converting ML predictions to MD parameters.
-                    i, j, k, l = dihedral_idxs
-                    type_i = parameters["atom_types"][i]
-                    type_j = parameters["atom_types"][j]
-                    type_k = parameters["atom_types"][k]
-                    type_l = parameters["atom_types"][l]
-                    
-                    # Skip if already written
-                    dihedral_key = tuple(sorted([type_i, type_j, type_k, type_l]))
-                    if dihedral_key in written_dihedrals:
-                        continue
-                    
-                    # Write each term in the dihedral
-                    terms = []
-                    for term in dihedral_params:
-                        if term["type"] == "proper":
-                            k = term["k"] * 4.184  # Convert to kJ/mol
-                            phase = term["phase"] * np.pi / 180.0  # Convert to radians
-                            n = term["n"]
-                            terms.append(f'periodicity{n}="{n}" phase{n}="{phase:.6f}" k{n}="{k:.6f}"')
-                    
-                    if terms:
-                        f.write(f'    <Proper type1="{type_i}" type2="{type_j}" type3="{type_k}" type4="{type_l}" {" ".join(terms)}/>\n')
-                    
-                    written_dihedrals.add(dihedral_key)
-                
-                f.write('  </PeriodicTorsionForce>\n\n')
-
-                # Write NonbondedForce section
-                f.write('  <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">\n')
-                f.write('    <UseAttributeFromResidue name="charge"/>\n')
-                
-                # Track written atom types to avoid duplicates
-                written_nb_types = set()
-                
-                for i, atype in parameters["atom_types"].items():
-                    if atype in written_nb_types:
-                        continue
-                    
-                    # Simplified LJ parameters
-                    sigma = 0.3  # nm
-                    epsilon = 0.5  # kJ/mol
-                    
-                    f.write(f'    <Atom type="{atype}" sigma="{sigma:.6f}" epsilon="{epsilon:.6f}"/>\n')
-                    written_nb_types.add(atype)
-                
-                f.write('  </NonbondedForce>\n\n')
-
-                # Close ForceField tag
-                f.write('</ForceField>\n')
-
-            return True, {"xml": xml_file}
-
-        except Exception as e:
-            logger.error(f"Error exporting to OpenMM: {str(e)}")
-            return False, {}
-
-    def convert_mgnn_predictions_to_force_field(
-        self,
-        mol: Chem.Mol,
-        node_predictions: Union[Dict, List[float]],
-        output_dir: str,
-        base_filename: str,
-    ) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Convert MGNN model predictions to force field files.
-
-        This is the main entry point for converting ML predictions to MD parameters.
 
         Args:
             mol: RDKit molecule
@@ -903,7 +836,11 @@ class ForceFieldMapper:
         """
         # Extract partial charges from node predictions
         if isinstance(node_predictions, dict) and "node_pred" in node_predictions:
-            partial_charges = node_predictions["node_pred"].tolist()
+            tensor_data = node_predictions["node_pred"]
+            if hasattr(tensor_data, 'tolist'):
+                partial_charges = tensor_data.squeeze().tolist()
+            else:
+                partial_charges = tensor_data
         elif isinstance(node_predictions, list):
             partial_charges = node_predictions
         else:
