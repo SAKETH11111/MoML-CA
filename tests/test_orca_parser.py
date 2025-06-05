@@ -8,8 +8,8 @@ import os
 import tempfile
 import shutil
 import subprocess
-import pandas as pd  # Added for batch_process_molecules
-import json  # Added for checking JSON output
+import pandas as pd
+import json
 from unittest.mock import patch, mock_open, MagicMock, call  # Added call for checking multiple calls
 
 from moml.simulation.quantum_mechanics.parser.orca_parser import (
@@ -19,7 +19,7 @@ from moml.simulation.quantum_mechanics.parser.orca_parser import (
     create_orca_input,
     run_orca_calculation,
     process_molecule,
-    batch_process_molecules,  # Added for testing
+    batch_process_molecules,
     # extract_orbital_contributions_from_orca, # Placeholder, skip for now
     # extract_electrostatic_potential_from_orca # Placeholder, skip for now
 )

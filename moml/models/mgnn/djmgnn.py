@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
-import logging  # Added for logging potential issues
+import logging
 
-logger = logging.getLogger(__name__)  # Added
+logger = logging.getLogger(__name__)
 
 
 # helpers

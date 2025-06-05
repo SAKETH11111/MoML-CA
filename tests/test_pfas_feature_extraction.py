@@ -55,7 +55,7 @@ except ImportError:
 # Import from consolidated moml modules
 try:
     from moml.core import calculate_molecular_descriptors
-    from moml.core import FunctionalGroupDetector  # Added for hydroxyl group testing
+    from moml.core import FunctionalGroupDetector
     from moml.utils import validate_smiles
     from moml.utils import (
         create_rdkit_mols,

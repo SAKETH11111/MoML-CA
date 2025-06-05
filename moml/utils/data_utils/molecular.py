@@ -12,7 +12,7 @@ import pandas as pd
 from rdkit import Chem
 import logging
 import numpy as np
-from moml.core.molecular_feature_extraction import FunctionalGroupDetector  # Added import
+from moml.core.molecular_feature_extraction import FunctionalGroupDetector
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

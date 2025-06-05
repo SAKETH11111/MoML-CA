@@ -20,17 +20,14 @@ import pandas as pd
 from typing import Dict, List, Optional
 import json
 import time
-import pickle  # Added for PFAS-specific checkpointing
+import pickle
 from datetime import datetime
 
-# Import consolidated core functionality
 from moml.core import (
     calculate_molecular_descriptors,
     create_graph_processor,
 )
-# Import QM batch processor from ORCA parser
 from moml.simulation.quantum_mechanics.parser.orca_parser import batch_process_molecules
-# Import consolidated data functionality
 from moml.data import process_dataset, process_mol_file_to_graph, graph_batch_process
 
 # For parallel processing
@@ -414,7 +411,6 @@ class MOMLPipelineOrchestrator:
                 )
             else:
                 # Create a QM-aware processor
-                # processor = create_graph_processor(config)  # Removed external instantiation
                 # Process each molecule with QM properties
                 graph_files = []
                 mol_file_paths = [os.path.join(mol_dir, f) for f in mol_files]

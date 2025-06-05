@@ -8,6 +8,7 @@ and visualizing predictions for molecular graph neural networks.
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import logging
 from typing import Dict, List, Optional, Union
 import torch
 from sklearn.utils.multiclass import type_of_target
@@ -22,6 +23,8 @@ from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_metrics(
