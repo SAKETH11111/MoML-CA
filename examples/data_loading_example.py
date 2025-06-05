@@ -10,13 +10,17 @@ from moml.data.data_loader import PFASDataLoader
 
 def main():
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data", "example_dataset")
-    loader = PFASDataLoader(data_dir)
+    config = {
+        "environmental_features": ["ph", "temperature", "flow_rate"],
+        "label_types": ["force_field_params", "molecular_properties"],
+    }
+    loader = PFASDataLoader(data_dir, config=config)
 
     # Load a single molecule
     try:
         graph, label, env = loader.load_molecule_by_id("molecule1")
         print("Loaded molecule1")
-        print(" label:", label)
+        print(" labels:", label)
         print(" env features:", env)
         print(" nodes:", graph.num_nodes)
     except Exception as e:

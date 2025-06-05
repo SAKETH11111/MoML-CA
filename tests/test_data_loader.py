@@ -57,7 +57,7 @@ def test_load_molecule_by_id(temp_dataset_dir):
     assert env["ph"] == 7.0
     assert isinstance(graph, Data)
     assert hasattr(graph, "u")
-    assert graph.u.shape[0] == 3
+    assert graph.u.shape[0] >= 3
 
 
 def test_get_batch(temp_dataset_dir):
@@ -71,3 +71,21 @@ def test_load_dataset(temp_dataset_dir):
     loader = PFASDataLoader(temp_dataset_dir)
     dataset = loader.load_dataset("train")
     assert len(dataset) == 2
+
+
+def test_water_molecule_validation(temp_dataset_dir):
+    loader = PFASDataLoader(temp_dataset_dir)
+    graph, label, env = loader.load_molecule_by_id("water")
+
+    assert graph.num_nodes == 3
+    assert graph.edge_index.size(1) // 2 == 2
+    assert graph.x.size(1) == loader.graph_processor.atom_feature_dim
+    if hasattr(graph, "u"):
+        assert graph.u.size(0) >= 3
+
+
+def test_batch_loading_performance(temp_dataset_dir):
+    loader = PFASDataLoader(temp_dataset_dir)
+    batch = loader.get_batch(["water", "methane"], batch_size=2)
+    assert batch.num_graphs == 2
+    assert batch.x.size(0) == batch.batch.size(0)

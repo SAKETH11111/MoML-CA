@@ -43,14 +43,35 @@ class PFASDataLoader:
     def __init__(self, data_dir: str, config: Optional[Dict[str, Any]] = None) -> None:
         self.data_dir = data_dir
         self.config = config or {}
+
+        # Graph processor configuration
         graph_cfg = self.config.get("graph", {})
         self.graph_processor = MolecularGraphProcessor(config=graph_cfg)
+
+        # Hierarchical graph support
         self.coarsener: Optional[GraphCoarsener] = None
         if self.config.get("hierarchical"):
             self.coarsener = GraphCoarsener(
                 use_3d_coords=graph_cfg.get("use_3d_coords", True),
                 use_pfas_features=graph_cfg.get("use_pfas_specific_features", True),
             )
+
+        # Environmental and label configuration
+        self.env_features = self.config.get(
+            "environmental_features",
+            [
+                "ph",
+                "temperature",
+                "ionic_strength",
+                "flow_rate",
+                "residence_time",
+                "pressure",
+                "dissolved_oxygen",
+            ],
+        )
+        self.label_types = self.config.get("label_types")
+        self.cache_enabled = self.config.get("cache_graphs", True)
+        self.validation_mode = self.config.get("validation_mode", False)
 
         self.mol_dir = os.path.join(self.data_dir, "molecules")
         self.qm_dir = os.path.join(self.data_dir, "qm")
@@ -59,7 +80,7 @@ class PFASDataLoader:
 
         self.environment = self._load_json(self.env_path)
         self.labels = self._load_json(self.labels_path)
-        self.index = self._create_index()
+        self.index = self._find_molecule_files()
         self.cache: Dict[str, Any] = {}
 
     # ------------------------------------------------------------------
@@ -74,32 +95,77 @@ class PFASDataLoader:
                     return {}
         return {}
 
-    def _create_index(self) -> Dict[str, str]:
-        idx = {}
-        if not os.path.isdir(self.mol_dir):
-            return idx
-        for path in glob.glob(os.path.join(self.mol_dir, "*")):
-            if os.path.isfile(path) and path.lower().endswith((".mol", ".sdf", ".pdb", ".mol2")):
-                base = os.path.splitext(os.path.basename(path))[0]
-                idx[base] = path
+    def _find_molecule_files(self) -> Dict[str, str]:
+        """Search various directories for molecule files."""
+        search_paths = [
+            os.path.join(self.data_dir, "molecules"),
+            os.path.join(self.data_dir, "mol_files"),
+            os.path.join(self.data_dir, "structures"),
+            self.data_dir,
+        ]
+        idx: Dict[str, str] = {}
+        for spath in search_paths:
+            if not os.path.isdir(spath):
+                continue
+            for path in glob.glob(os.path.join(spath, "*")):
+                if os.path.isfile(path) and path.lower().endswith((".mol", ".sdf", ".pdb", ".mol2")):
+                    base = os.path.splitext(os.path.basename(path))[0]
+                    idx[base] = path
         return idx
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def add_environmental_features(self, graph_data: Data, env_params: Dict[str, float]) -> Data:
-        """Attach environmental context to a graph as global features."""
+        """Add comprehensive environmental context as global features.
+
+        Parameters
+        ----------
+        graph_data : Data
+            Graph object to augment.
+        env_params : Dict[str, float]
+            Dictionary containing environmental variables such as pH and
+            temperature.
+
+        Returns
+        -------
+        Data
+            Graph with additional ``u`` attribute representing the environment.
+        """
+
         if not env_params:
             return graph_data
-        vec = torch.tensor(
-            [
-                float(env_params.get("ph", 7.0)),
-                float(env_params.get("temperature", 298.15)),
-                float(env_params.get("ionic_strength", 0.0)),
-            ],
-            dtype=torch.float,
-        )
-        graph_data.u = vec
+
+        features = [
+            env_params.get("ph", 7.0),
+            env_params.get("temperature", 298.15),
+            env_params.get("ionic_strength", 0.0),
+            env_params.get("flow_rate", 0.0),
+            env_params.get("residence_time", 0.0),
+            env_params.get("pressure", 101325.0),
+            env_params.get("dissolved_oxygen", 0.0),
+        ]
+
+        feature_order = [
+            "ph",
+            "temperature",
+            "ionic_strength",
+            "flow_rate",
+            "residence_time",
+            "pressure",
+            "dissolved_oxygen",
+        ]
+        vec = []
+        for name in self.env_features:
+            if name in feature_order:
+                idx = feature_order.index(name)
+                vec.append(features[idx])
+        graph_data.u = torch.tensor(vec, dtype=torch.float)
+
+        # Store co-contaminants separately if present
+        if "co_contaminants" in env_params:
+            graph_data.co_contaminants = env_params["co_contaminants"]
+
         return graph_data
 
     def load_molecule_by_id(self, mol_id: str) -> Tuple[Any, Optional[float], Optional[Dict[str, float]]]:
@@ -108,7 +174,7 @@ class PFASDataLoader:
         Returns the graph data (atom level or hierarchical dict), the label if
         available and the environmental context dictionary.
         """
-        if mol_id in self.cache:
+        if self.cache_enabled and mol_id in self.cache:
             return self.cache[mol_id]
 
         mol_path = self.index.get(mol_id)
@@ -130,9 +196,17 @@ class PFASDataLoader:
         env = self.environment.get(mol_id, {})
         if env:
             graph = self.add_environmental_features(graph, env)
-        label = self.labels.get(mol_id)
-        if label is not None:
-            graph.y = torch.tensor([label], dtype=torch.float)
+        labels_data = self.labels.get(mol_id)
+        label = labels_data
+        if isinstance(labels_data, dict):
+            if "force_field_params" in labels_data:
+                graph.y_ff = torch.tensor(labels_data["force_field_params"], dtype=torch.float)
+            if "molecular_properties" in labels_data:
+                graph.y_props = torch.tensor(labels_data["molecular_properties"], dtype=torch.float)
+            if "adsorption_potential" in labels_data:
+                graph.y_ads = torch.tensor([labels_data["adsorption_potential"]], dtype=torch.float)
+        elif labels_data is not None:
+            graph.y = torch.tensor([labels_data], dtype=torch.float)
 
         result: Any = graph
         if self.coarsener is not None:
@@ -141,12 +215,21 @@ class PFASDataLoader:
             if env:
                 for g in hier_graphs.values():
                     self.add_environmental_features(g, env)
-            if label is not None:
+            if isinstance(labels_data, dict):
                 for g in hier_graphs.values():
-                    g.y = torch.tensor([label], dtype=torch.float)
+                    if "force_field_params" in labels_data:
+                        g.y_ff = torch.tensor(labels_data["force_field_params"], dtype=torch.float)
+                    if "molecular_properties" in labels_data:
+                        g.y_props = torch.tensor(labels_data["molecular_properties"], dtype=torch.float)
+                    if "adsorption_potential" in labels_data:
+                        g.y_ads = torch.tensor([labels_data["adsorption_potential"]], dtype=torch.float)
+            elif labels_data is not None:
+                for g in hier_graphs.values():
+                    g.y = torch.tensor([labels_data], dtype=torch.float)
             result = hier_graphs
 
-        self.cache[mol_id] = (result, label, env)
+        if self.cache_enabled:
+            self.cache[mol_id] = (result, label, env)
         return result, label, env
 
     def get_batch(self, mol_ids: List[str], batch_size: int = 32) -> Data:
@@ -175,6 +258,11 @@ class PFASDataLoader:
         for path in glob.glob(os.path.join(split_dir, "*")):
             if os.path.isfile(path) and path.lower().endswith((".mol", ".sdf", ".pdb", ".mol2")):
                 mol_ids.append(os.path.splitext(os.path.basename(path))[0])
+        if not mol_ids:
+            # fallback to index intersection if split dir contains ids only
+            for mid in os.listdir(split_dir):
+                if mid in self.index:
+                    mol_ids.append(mid)
         dataset = []
         for mid in mol_ids:
             dataset.append(self.load_molecule_by_id(mid)[0])
