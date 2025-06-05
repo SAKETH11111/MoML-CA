@@ -196,6 +196,8 @@ class HMGNN(nn.Module):
         self,
         scale_dims: List[int],
         hidden_dim: int = 64,
+        env_dim: int = 0,
+        env_mlp: bool = False,
         n_blocks: int = 2,
         layers_per_block: int = 3,
         edge_attr_dims: Optional[List[int]] = None,
@@ -234,6 +236,15 @@ class HMGNN(nn.Module):
         if cross_scale_exchange:
             self.cross_scale = CrossScaleAttentionMH(self.S, hidden_dim, n_heads_cs, edge_dim_cs)
 
+        # env projection
+        env_in = env_dim if not env_mlp else hidden_dim
+        if env_dim and env_mlp:
+            self.env_proj = nn.Sequential(nn.Linear(env_dim, hidden_dim), nn.SiLU())
+        else:
+            self.env_proj = None
+
+        fused_dim = hidden_dim + env_in
+
         # heads
         self.node_heads = nn.ModuleList(
             [
@@ -251,7 +262,7 @@ class HMGNN(nn.Module):
         self.graph_heads = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Linear(hidden_dim, hidden_dim // 2),
+                    nn.Linear(fused_dim, hidden_dim // 2),
                     nn.ReLU(),
                     nn.Dropout(dropout),
                     nn.Linear(hidden_dim // 2, graph_out_dim),
@@ -260,7 +271,7 @@ class HMGNN(nn.Module):
             ]
         )
         self.combined_graph_head = nn.Sequential(
-            nn.Linear(hidden_dim * self.S, hidden_dim),
+            nn.Linear(fused_dim * self.S, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, graph_out_dim),
@@ -275,6 +286,7 @@ class HMGNN(nn.Module):
         scale_data: List[Dict[str, Any]],
         maps: Optional[Tuple[List[torch.Tensor], List[torch.Tensor]]] = None,
         edge_pairs_cs: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        env_vec: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         """
         scale_data[i] = {'x', 'edge_index', 'edge_attr'?, 'batch'?, 'mask'?}
@@ -329,8 +341,12 @@ class HMGNN(nn.Module):
                     if batch_vec is None
                     else self.graph_pool(current_scale_node_feats, batch_vec)
                 )
+                if self.env_dim:
+                    if env_vec is None:
+                        env_vec = x.new_zeros(g_emb.size(0), self.env_dim)
+                    env_emb = self.env_proj(env_vec) if self.env_proj else env_vec
+                    g_emb = torch.cat([g_emb, env_emb], dim=1)
                 current_graph_pred = self.graph_heads[i](g_emb)
-
             graph_embeds.append(g_emb)
             graph_preds.append(current_graph_pred)
             output_dict[f"scale_{i}_graph_pred"] = current_graph_pred
