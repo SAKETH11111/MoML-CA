@@ -365,8 +365,7 @@ class FunctionalGroupDetector:
         Returns:
             List of atom indices (currently empty)
         """
-        # TODO: Implement actual hydroxyl group detection logic
-        # Example SMARTS for hydroxyl: '[OX2H]'
+        # Placeholder for hydroxyl group SMARTS detection
         return []
 
     @classmethod
