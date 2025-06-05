@@ -215,6 +215,7 @@ class HMGNN(nn.Module):
         self.hidden_dim = hidden_dim  # Store hidden_dim
         self.node_out_dim = node_out_dim  # Store node_out_dim
         self.graph_out_dim = graph_out_dim  # Store graph_out_dim
+        self.env_dim = env_dim  # Store env_dim
         edge_attr_dims = edge_attr_dims or [0] * self.S
 
         # backbone per scale
@@ -418,17 +419,19 @@ def create_hierarchical_mgnn(
 ) -> HMGNN:
     """Easy constructor mirroring DJMGNN.create_* style."""
     return HMGNN(
-        scale_dims,
-        hidden_dim,
-        n_blocks,
-        layers_per_block,
-        edge_attr_dims,
-        jk_mode,
-        node_out_dim,
-        graph_out_dim,
-        cross_scale_exchange,
-        dropout,
-        n_heads_cs,
-        edge_dim_cs,
-        pool_type,
+        scale_dims=scale_dims,
+        hidden_dim=hidden_dim,
+        env_dim=0,
+        env_mlp=False,
+        n_blocks=n_blocks,
+        layers_per_block=layers_per_block,
+        edge_attr_dims=edge_attr_dims,
+        jk_mode=jk_mode,
+        node_out_dim=node_out_dim,
+        graph_out_dim=graph_out_dim,
+        cross_scale_exchange=cross_scale_exchange,
+        dropout=dropout,
+        n_heads_cs=n_heads_cs,
+        edge_dim_cs=edge_dim_cs,
+        pool_type=pool_type,
     )
