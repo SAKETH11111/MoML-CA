@@ -6,7 +6,7 @@ import pytest
 import torch
 import torch.nn as nn
 from torch_geometric.data import Data, Batch
-from torch_geometric.nn import GraphNorm  # Added
+from torch_geometric.nn import GraphNorm
 
 from moml.models.mgnn.djmgnn import GraphConvLayer, DenseGNNBlock, JKAggregator, DJMGNN
 
@@ -76,8 +76,7 @@ class TestGraphConvLayer:
         layer = GraphConvLayer(NODE_IN_DIM, HIDDEN_DIM, EDGE_ATTR_DIM_PRESENT).to(device)
         assert isinstance(layer.conv, nn.Module)
         assert isinstance(layer.edge_mlp, nn.Sequential)
-        assert isinstance(layer.norm, GraphNorm)  # Changed from layer.bn and nn.BatchNorm1d
-
+        assert isinstance(layer.norm, GraphNorm)
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
     def test_forward_pass_with_edge_attr(self, dummy_graph_data_single, device):
         x, edge_index, edge_attr = dummy_graph_data_single
@@ -313,9 +312,7 @@ class TestDJMGNN:
             graph_out_dim=self.GRAPH_OUT_DIM,
         ).to(device)
         assert len(model.blocks) == self.N_BLOCKS
-        assert isinstance(model.jk, JKAggregator)  # Changed from model.jk_aggregator
-        assert model.jk.mode == jk_mode  # Changed from model.jk_aggregator
-        assert isinstance(model.node_head, nn.Sequential)
+        assert isinstance(model.jk, JKAggregator)        assert model.jk.mode == jk_mode        assert isinstance(model.node_head, nn.Sequential)
         assert isinstance(model.graph_head, nn.Sequential)
 
     def test_instantiation_no_edge_attr(self, device):

@@ -59,18 +59,14 @@ try:
     from moml.utils import validate_smiles
     from moml.utils import (
         create_rdkit_mols,
-        categorize_molecular_features as categorize_pfas_types,  # Alias to match test usage
-        # The following might need to be sourced from moml.utils as well, or are part of categorize_molecular_features
-        # calculate_pfas_statistics,
-        # identify_fluorinated_groups
+        categorize_molecular_features as categorize_pfas_types,
     )
 
-    # Attempting to import these directly to see if they exist in moml.utils or if tests need update
     from moml.utils import (
         calculate_molecular_complexity as calculate_pfas_statistics,
-    )  # Assuming calculate_molecular_complexity is the new name
+    )
     from moml.utils import extract_fluorine_count
-    from moml.utils import add_fluorinated_group_counts  # Added import
+    from moml.utils import add_fluorinated_group_counts
     from moml.core import MolecularGraphProcessor
     from moml.utils import visualize_molecular_graph
 
@@ -128,11 +124,11 @@ class TestPFASFeatures(unittest.TestCase):
         # Apply PFAS statistics (which includes Chain_Length) first
         test_df = calculate_pfas_statistics(
             self.test_df.copy(), mol_col="rdkit_mol"
-        )  # Use a copy to avoid modifying self.test_df for other tests
+        )
         # Then apply PFAS categorization
         test_df = categorize_pfas_types(test_df, mol_col="rdkit_mol")
         # Also ensure fluorinated group counts are added if pfas_type depends on them
-        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")  # Ensures num_cfX_groups columns
+        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")
 
         # The first three should be flagged as PFAS (using Has_Fluorine as proxy)
         pfas_compounds = test_df[test_df["Has_Fluorine"] == True]
@@ -169,8 +165,7 @@ class TestPFASFeatures(unittest.TestCase):
     def test_pfas_statistics(self):
         """Test calculation of PFAS statistics."""
         # Apply PFAS statistics (which includes Chain_Length) first
-        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")  # Use a copy
-        # Then apply PFAS categorization (if its outputs are also checked, otherwise this might not be needed here)
+        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")        # Then apply PFAS categorization (if its outputs are also checked, otherwise this might not be needed here)
         test_df = categorize_pfas_types(test_df, mol_col="rdkit_mol")
 
         # Check PFAS statistics columns (updated column names)
@@ -199,17 +194,11 @@ class TestPFASFeatures(unittest.TestCase):
     def test_fluorinated_groups(self):
         """Test identification of fluorinated groups."""
         # Apply PFAS statistics (which includes Chain_Length) first
-        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")  # Use a copy
-        # Then apply PFAS categorization
+        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")        # Then apply PFAS categorization
         test_df = categorize_pfas_types(test_df, mol_col="rdkit_mol")
-        # The identify_fluorinated_groups function call is still suspicious, may need removal or replacement
-        # For now, let's assume it's meant to operate on the output of the above.
-        # If identify_fluorinated_groups is the actual source of num_cfX_groups, it needs to be fixed/found.
-        # This test will likely still fail if identify_fluorinated_groups is not correctly defined/imported.
-        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")  # Replaced call
+        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")
 
         # Check group identification columns
-        # Removed 'fluorinated_groups' as its generation is unclear and not done by add_fluorinated_group_counts
         required_cols = ["num_cf3_groups", "num_cf2_groups", "num_cf_groups"]
         for col in required_cols:
             self.assertIn(col, test_df.columns, f"Missing required column: {col}")

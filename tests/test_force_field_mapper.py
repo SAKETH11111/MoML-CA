@@ -83,7 +83,7 @@ class TestForceFieldMapper:
         assert "Force field type 'invalid_ff' not in supported formats" in caplog.text
         assert "Defaulting to 'amber' force field type." in caplog.text
         assert "Simulation engine 'invalid_engine' not in supported engines" in caplog.text
-        assert "Defaulting to 'gromacs' simulation engine." in caplog.text  # Added "simulation engine."
+        assert "Defaulting to 'gromacs' simulation engine." in caplog.text
 
         # Check that defaults were applied
         mapper = ForceFieldMapper(force_field_type="invalid_ff", simulation_engine="invalid_engine")
@@ -238,12 +238,10 @@ class TestForceFieldMapper:
         ff_params = mapper.generate_force_field_parameters(ethanol_mol_3d, partial_charges=mgnn_charges_list)
 
         assert "atom_types" in ff_params
-        assert "partial_charges" in ff_params  # Corrected key from 'charges'
-        assert "bonds" in ff_params
+        assert "partial_charges" in ff_params        assert "bonds" in ff_params
         assert "angles" in ff_params
         assert "dihedrals" in ff_params
-        assert len(ff_params["partial_charges"]) == num_atoms  # Corrected key from 'charges'
-        assert len(ff_params["bonds"]) > 0
+        assert len(ff_params["partial_charges"]) == num_atoms        assert len(ff_params["bonds"]) > 0
         assert len(ff_params["angles"]) > 0
         # Dihedrals might be empty for very small molecules if logic is strict
 
@@ -268,9 +266,7 @@ class TestForceFieldMapper:
         ff_params = ff_params_list[0]
 
         assert "atom_types" in ff_params
-        assert "partial_charges" in ff_params  # Corrected key
-        assert len(ff_params["partial_charges"]) == num_atoms  # Corrected key
-        # Check if charges from mgnn_predictions were used (after potential normalization)
+        assert "partial_charges" in ff_params        assert len(ff_params["partial_charges"]) == num_atoms        # Check if charges from mgnn_predictions were used (after potential normalization)
         # This requires knowing the exact mapping logic within convert_mgnn_predictions_to_force_field
         # For now, just check structure.
 
@@ -477,8 +473,7 @@ class TestForceFieldMapper:
             # Assuming ff_params_detailed['partial_charges'] is a dict {atom_idx: charge_val}
             assert (
                 abs(ff_params_detailed["partial_charges"][i] - expected_charges_normalized[i]) < 1e-5
-            )  # Corrected key
-
+            )
         # Generate parameters using only charge predictions (for comparison)
         mgnn_predictions_charges_only = {"node_pred": predicted_charges_tensor}
         ff_params_list_charges_only = mapper.convert_mgnn_predictions_to_force_field(
