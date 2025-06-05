@@ -59,7 +59,9 @@ class FunctionalGroupDetector:
                 elif bond.GetBondType() == Chem.rdchem.BondType.SINGLE:
                     # Check if this O is bonded to H
                     for o_bond in other_atom.GetBonds():
-                        if o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1:  # Hydrogen
+                        if (
+                            o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1
+                        ):  # Hydrogen
                             o_single_bond = True
                             break
 
@@ -140,7 +142,9 @@ class FunctionalGroupDetector:
 
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
 
                 if f_neighbors == 1:
                     group_assignments[atom.GetIdx()] = "CF"
@@ -165,7 +169,9 @@ class FunctionalGroupDetector:
         cf3_groups = []
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
                 if f_neighbors == 3:
                     cf3_groups.append(atom.GetIdx())
         return cf3_groups
@@ -184,7 +190,9 @@ class FunctionalGroupDetector:
         cf2_groups = []
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
                 if f_neighbors == 2:
                     cf2_groups.append(atom.GetIdx())
         return cf2_groups
@@ -203,7 +211,9 @@ class FunctionalGroupDetector:
         cf1_groups = []
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
                 if f_neighbors == 1:
                     cf1_groups.append(atom.GetIdx())
         return cf1_groups
@@ -323,12 +333,18 @@ class FunctionalGroupDetector:
         """
         functional_groups = []
         for atom in mol.GetAtoms():
-            if cls.is_in_carboxylic_group(atom) or cls.is_in_sulfonic_group(atom) or cls.is_in_phosphonic_group(atom):
+            if (
+                cls.is_in_carboxylic_group(atom)
+                or cls.is_in_sulfonic_group(atom)
+                or cls.is_in_phosphonic_group(atom)
+            ):
                 functional_groups.append(atom.GetIdx())
         return functional_groups
 
     @classmethod
-    def identify_all_functional_groups(cls, mol: Chem.Mol) -> Tuple[Dict[int, str], List[Set[int]]]:
+    def identify_all_functional_groups(
+        cls, mol: Chem.Mol
+    ) -> Tuple[Dict[int, str], List[Set[int]]]:
         """
         Identify all functional groups in the molecule.
 
@@ -357,24 +373,27 @@ class FunctionalGroupDetector:
     def find_hydroxyl_groups(mol: Chem.Mol) -> List[int]:
         """
         Find all hydroxyl groups in the molecule.
-        
+
         Args:
             mol: RDKit molecule
 
         Returns:
             List of atom indices corresponding to oxygen atoms in hydroxyl groups
         """
-        # TODO: Implement hydroxyl group detection using SMARTS pattern '[OH]'
-        # This should match oxygen atoms bonded to hydrogen (hydroxyl groups)
-        # Example implementation:
-        # from rdkit import Chem
-        # hydroxyl_pattern = Chem.MolFromSmarts('[OH]')
-        # matches = mol.GetSubstructMatches(hydroxyl_pattern)
-        # return [match[0] for match in matches]  # Return oxygen atom indices
-        raise NotImplementedError(
-            "Hydroxyl group detection not implemented. "
-            "Use SMARTS pattern '[OH]' to detect O-H groups."
-        )
+        if mol is None:
+            return []
+
+        try:
+            hydroxyl_pattern = Chem.MolFromSmarts("[OH]")
+            if hydroxyl_pattern is None:
+                logger.warning("Failed to create SMARTS pattern for hydroxyl groups")
+                return []
+
+            matches = mol.GetSubstructMatches(hydroxyl_pattern)
+            return [match[0] for match in matches]  # Return oxygen atom indices
+        except Exception as e:
+            logger.error(f"Error finding hydroxyl groups: {e}")
+            return []
 
     @classmethod
     def get_all_functional_groups(cls, mol: Chem.Mol) -> dict:
@@ -506,7 +525,9 @@ class MolecularFeatureExtractor:
                         if dist < min_dist_func:
                             min_dist_func = dist
                 if min_dist_func == float("inf"):  # If still inf, means no path found
-                    min_dist_func = 0.0  # CORRECTED: Test expects 0.0 if no path / no group
+                    min_dist_func = (
+                        0.0  # CORRECTED: Test expects 0.0 if no path / no group
+                    )
 
             # Determine if atom is in head group or fluorinated tail
             is_head_group = False  # Default to False
@@ -550,7 +571,9 @@ class MolecularFeatureExtractor:
 
             # Reverting to the structure that was in the file when I last read it for lines 504-505,
             # as the test seems to pass with that structure given the 0.0 changes for distances.
-            if min_dist_func != -1 and min_dist_cf3 != -1:  # This line was from the original file content
+            if (
+                min_dist_func != -1 and min_dist_cf3 != -1
+            ):  # This line was from the original file content
                 is_head_group = min_dist_func < min_dist_cf3
             # If the test expects 0.0 for not found, then the above condition should be:
             # if min_dist_func != 0.0 and min_dist_cf3 != 0.0: # This means both groups were found AND are not the atom itself
@@ -581,7 +604,7 @@ class MolecularFeatureExtractor:
 
             distances[atom_idx] = {
                 "dist_to_cf3": min_dist_cf3,
-                "dist_to_functional": min_dist_func, 
+                "dist_to_functional": min_dist_func,
                 "is_head_group": float(is_head_group),
             }
 
@@ -611,7 +634,9 @@ class MolecularFeatureExtractor:
             pos2 = conf.GetAtomPosition(idx2)
 
             # Calculate Euclidean distance
-            length = np.sqrt((pos1.x - pos2.x) ** 2 + (pos1.y - pos2.y) ** 2 + (pos1.z - pos2.z) ** 2)
+            length = np.sqrt(
+                (pos1.x - pos2.x) ** 2 + (pos1.y - pos2.y) ** 2 + (pos1.z - pos2.z) ** 2
+            )
 
             # Store bond length (both directions)
             bond_lengths[(idx1, idx2)] = length
