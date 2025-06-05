@@ -356,14 +356,9 @@ class FunctionalGroupDetector:
     @staticmethod
     def find_hydroxyl_groups(mol: Chem.Mol) -> List[int]:
         """
-        Find all hydroxyl groups in the molecule.
-        Placeholder: Not fully implemented.
-
-        Args:
-            mol: RDKit molecule
-
-        Returns:
-            List of atom indices (currently empty)
+        Returns an empty list as a placeholder for hydroxyl group detection in the molecule.
+        
+        This method is not yet implemented and currently does not identify any hydroxyl groups.
         """
         # Placeholder for hydroxyl group SMARTS detection
         return []
