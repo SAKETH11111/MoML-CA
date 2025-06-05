@@ -284,6 +284,9 @@ class TestHierarchicalGraphDataset:
         assert len(dataset) == 3  # molA, molB, molC_empty
 
     def test_getitem(self, dummy_hierarchical_data_dir: str, dummy_labels_for_hier_data: Dict[str, float]):
+        """
+        Tests retrieval of hierarchical graph data for molecules, verifying that each returned item is a dictionary containing graph objects for available levels (e.g., "atom", "functional_group", "structural_motif"). Ensures that present graphs are instances of `Data`, missing levels are handled gracefully, and label tensors `y` match expected values from the dummy labels.
+        """
         dataset = HierarchicalGraphDataset(data_dir=dummy_hierarchical_data_dir, labels=dummy_labels_for_hier_data)
 
         # Test molA

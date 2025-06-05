@@ -9,6 +9,11 @@ from moml.data.data_loader import PFASDataLoader
 
 
 def main():
+    """
+    Demonstrates loading and batching molecular graph data using PFASDataLoader.
+    
+    Loads a single molecule by ID and prints its labels, environmental features, and node count. Then creates a batch from a list of molecule IDs and prints the number of graphs in the batch. Exceptions during loading and batching are caught and reported.
+    """
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data", "example_dataset")
     config = {
         "environmental_features": ["ph", "temperature", "flow_rate"],

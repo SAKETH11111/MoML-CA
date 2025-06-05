@@ -26,13 +26,9 @@ logger = logging.getLogger(__name__)
 
 def generate_3d_mol(smiles: str) -> Optional[Chem.Mol]:
     """
-    Generates an RDKit molecule object with 3D coordinates from a SMILES string.
-
-    Args:
-        smiles: The SMILES string of the molecule.
-
-    Returns:
-        An RDKit Mol object with 3D coordinates, or None if conversion fails.
+    Converts a SMILES string into an RDKit molecule with 3D coordinates.
+    
+    Attempts to parse the SMILES string, add hydrogens, generate 3D coordinates using ETKDGv3 embedding, and optimize geometry with MMFF94. Returns the resulting molecule with hydrogens, or None if any critical step fails.
     """
     try:
         mol = Chem.MolFromSmiles(smiles)
@@ -84,16 +80,14 @@ def save_molecule_file(
     mol: Chem.Mol, output_dir: Path, identifier: str, file_format: str
 ) -> bool:
     """
-    Saves an RDKit molecule object to a file (MOL or SDF).
-
+    Saves an RDKit molecule to a file in MOL or SDF format using a sanitized identifier.
+    
     Args:
-        mol: The RDKit Mol object to save.
-        output_dir: The directory to save the file in.
-        identifier: A unique identifier to use for the filename.
-        file_format: The desired output format ('mol' or 'sdf').
-
+        identifier: Used to generate a safe filename for the output file.
+        file_format: Output file format; must be 'mol' or 'sdf'.
+    
     Returns:
-        True if saving was successful, False otherwise.
+        True if the molecule was saved successfully; False otherwise.
     """
     if not mol:
         return False
@@ -127,7 +121,9 @@ def save_molecule_file(
 
 def main():
     """
-    Main function to parse arguments and process the SMILES strings.
+    Parses command-line arguments and processes SMILES strings to generate 3D molecular structure files.
+    
+    Reads lists of SMILES strings and corresponding identifiers, generates 3D molecular structures for each valid pair, and saves them as MOL or SDF files in the specified output directory. Logs progress, warnings for invalid inputs, and a summary of results upon completion.
     """
     parser = argparse.ArgumentParser(
         description="Generate MOL/SDF files from lists of SMILES strings and identifiers."

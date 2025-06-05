@@ -53,17 +53,9 @@ DATASET_CSV: str = "qm_dataset.csv" # Added
 
 def get_orca_executable(args_path: Optional[str], default_exe_path: str = "/opt/orca/orca") -> Optional[str]: # Added default_exe_path
     """
-    Determines the ORCA executable path.
-
-    Priority:
-    1. Command-line argument (--orca_path)
-    2. Environment variable (ORCA_PATH)
-
-    Args:
-        args_path: Path from command-line arguments.
-
-    Returns:
-        The path to the ORCA executable, or None if not found.
+    Determines the path to the ORCA executable based on command-line argument, environment variable, or a default location.
+    
+    Checks for the executable in the following order: command-line argument (`args_path`), `ORCA_PATH` environment variable, and a default path. Returns the path if found, or None if not found.
     """
     if args_path:
         if os.path.isfile(args_path):
@@ -97,7 +89,15 @@ def get_orca_executable(args_path: Optional[str], default_exe_path: str = "/opt/
 
 def get_molecule_charge_multiplicity(mol: Chem.Mol) -> Tuple[int, int]: # Renamed from get_molecule_charge_mult
     """
-    Calculates the total formal charge and spin multiplicity for a molecule.
+    Calculates the formal charge and spin multiplicity of a molecule.
+    
+    The spin multiplicity is set to 2 if the total number of electrons is odd, otherwise 1.
+    
+    Args:
+    	mol: RDKit molecule object.
+    
+    Returns:
+    	A tuple containing the formal charge and spin multiplicity.
     """
     q = Chem.GetFormalCharge(mol)
     electrons = sum(a.GetAtomicNum() for a in mol.GetAtoms()) - q
@@ -110,8 +110,9 @@ def generate_orca_input_content( # Renamed from generate_orca_input
     mol: Chem.Mol, charge: int, mult: int, ncores: int # Renamed multiplicity to mult
 ) -> Optional[str]:
     """
-    Generates the content for an ORCA input file.
-    Incorporates new ORCA_KEYWORDS and ORCA_OUTPUT_BLOCK.
+    Generates the content for an ORCA input file for a given molecule.
+    
+    Includes calculation keywords, optional parallelization settings, output block, and the molecule's 3D coordinates in XYZ format. Returns None if the molecule lacks a 3D conformer.
     """
     try:
         conformer = mol.GetConformer()
@@ -140,7 +141,12 @@ _re_dipole = re.compile(r"Total Dipole Moment.*?\n\s+X\s+Y\s+Z.*?\n"
 _re_chelpg = re.compile(r"CHELPG Charges.*?\n(.*?)\n\n", re.S)
 
 def parse_orca_out(out_path: Path) -> Optional[dict]:
-    """Parses ORCA output file for energy, dipole moment, and CHELPG charges."""
+    """
+    Parses an ORCA output file to extract the final single point energy, total dipole moment magnitude, and CHELPG atomic charges.
+    
+    Returns:
+        A dictionary containing the molecule ID, energy in Hartree, dipole moment in Debye, and per-atom CHELPG charges (as `q_atom_1`, `q_atom_2`, ...), or None if any essential data is missing or cannot be parsed.
+    """
     if not out_path.exists():
         logger.error(f"ORCA output file not found for parsing: {out_path}")
         return None
@@ -186,9 +192,9 @@ def parse_orca_out(out_path: Path) -> Optional[dict]:
 
 def cleanup_previous_orca_files(base_name: str, directory: str) -> None:
     """
-    Deletes ORCA output files from previous runs for a given molecule.
-    Common ORCA extensions: .out, .err, .gbw, .prop, .xyz (structure), .hess, .pc_chelpg, etc.
-    Also removes .tmp files that ORCA might leave.
+    Removes previous ORCA output and temporary files for a given molecule in the specified directory.
+    
+    Deletes files matching the molecule's base name with common ORCA-related extensions to prevent conflicts with new calculations.
     """
     logger.info(f"Cleaning up previous ORCA files for {base_name} in {directory}...")
     count_deleted = 0
@@ -225,15 +231,9 @@ def run_orca_calculation(
     orca_executable: str, input_file_path_str: str, output_dir_str: str
 ) -> bool:
     """
-    Runs an ORCA calculation using subprocess, redirecting stdout/stderr to files.
-
-    Args:
-        orca_executable: Path to the ORCA executable.
-        input_file_path_str: Path to the ORCA input file (as string).
-        output_dir_str: Directory where ORCA should run and write output files (as string).
-
-    Returns:
-        True if ORCA run completed successfully (exit code 0), False otherwise.
+    Runs an ORCA quantum chemistry calculation using the specified input file.
+    
+    Executes the ORCA program as a subprocess in the given output directory, redirecting standard output and error streams to corresponding files. Returns True if the calculation completes successfully (exit code 0), otherwise returns False.
     """
     input_file_path = Path(input_file_path_str)
     output_dir = Path(output_dir_str)
@@ -317,8 +317,9 @@ def process_sdf_file( # Renamed from process_molecule in new script, kept existi
     num_cores: int
 ) -> Optional[dict]: # Returns dict or None
     """
-    Processes a single SDF file: reads molecule, generates ORCA input, runs ORCA, and parses output.
-    Includes cleanup of previous output files.
+    Processes a single SDF file by preparing the molecule, generating an ORCA input file, running the ORCA calculation, and parsing the output for quantum mechanical properties.
+    
+    Attempts to generate a 3D conformer if missing, optimizes geometry, and cleans up previous ORCA files before calculation. Returns a dictionary of parsed results if successful, or None if any step fails.
     """
     logger.info(f"Processing {sdf_file_path}...")
     base_name = sdf_file_path.stem
@@ -387,7 +388,9 @@ def process_sdf_file( # Renamed from process_molecule in new script, kept existi
 
 def main():
     """
-    Main function to parse arguments, run the ORCA batch process, and assemble QM dataset.
+    Coordinates the batch ORCA quantum mechanical calculations for a list of SDF files and compiles the results into a CSV dataset.
+    
+    Parses command-line arguments for SDF file paths, ORCA executable location, output directory, and number of processor cores. For each molecule, it prepares input files, runs ORCA, parses outputs, and collects results. Successfully parsed results are appended to a CSV file, with logging of progress and summary statistics.
     """
     parser = argparse.ArgumentParser(
         description="Run ORCA calculations for a list of SDF files and assemble QM dataset."
