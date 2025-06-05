@@ -9,13 +9,10 @@ from moml.simulation.molecular_dynamics.force_field_mapper import ForceFieldMapp
 
 
 def safe_parse_orca_output(path: str) -> Dict[str, Any]:
-    """Lightweight ORCA output parser extracting geometry and Mulliken charges.
-
-    The full parser in :mod:`moml.simulation.quantum_mechanics.parser.orca_parser`
-    uses a complex regular expression for the dipole moment section which can be
-    very slow on large output files.  For the purpose of generating force-field
-    labels we only need the final Mulliken charges and the optimised geometry.
-    This helper parses those sections using a simple line based approach.
+    """
+    Parses an ORCA output file to extract the final Mulliken atomic charges and optimized Cartesian geometry.
+    
+    Reads the file line by line to locate the last occurrence of the Mulliken charges and Cartesian coordinates sections, extracting the relevant data for each. Returns a dictionary with keys "mulliken_charges" (list of floats) and "optimized_geometry" (list of atom dictionaries with symbol and coordinates).
     """
 
     data: Dict[str, Any] = {"mulliken_charges": [], "optimized_geometry": []}
@@ -70,12 +67,29 @@ def safe_parse_orca_output(path: str) -> Dict[str, Any]:
 
 
 def load_smiles_map(csv_path: str) -> Dict[str, str]:
+    """
+    Loads a mapping from molecule IDs to SMILES strings from a CSV file.
+    
+    The CSV file must contain columns named 'DTXSID' and 'SMILES'. Returns a dictionary mapping each 'DTXSID' value (as a string) to its corresponding 'SMILES' string.
+    """
     df = pd.read_csv(csv_path)
     return dict(zip(df['DTXSID'].astype(str), df['SMILES']))
 
 
 def create_mol_from_orca_geom(geom, smiles: str) -> Chem.Mol:
-    """Create an RDKit molecule with geometry from ORCA output."""
+    """
+    Constructs an RDKit molecule from a SMILES string and assigns 3D coordinates from an ORCA geometry.
+    
+    Args:
+        geom: List of atom dictionaries with 'coordinates' (x, y, z) from ORCA output.
+        smiles: The SMILES string representing the molecule.
+    
+    Returns:
+        An RDKit molecule with explicit hydrogens and a conformer set to the provided geometry.
+    
+    Raises:
+        ValueError: If the SMILES string is invalid or if the atom count does not match the geometry.
+    """
 
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -97,6 +111,18 @@ def create_mol_from_orca_geom(geom, smiles: str) -> Chem.Mol:
 
 
 def generate_labels(orca_dir: str, smiles_map: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Generates force field parameter labels for molecules using ORCA output files and a SMILES mapping.
+    
+    Iterates over ORCA output files in a directory, extracts Mulliken charges and optimized geometries, constructs RDKit molecules, and generates force field parameters using a force field mapper. Parameter keys are converted to string format for JSON serialization. Molecules without geometry or SMILES are skipped.
+    
+    Args:
+        orca_dir: Path to the directory containing ORCA output files.
+        smiles_map: Dictionary mapping molecule IDs to SMILES strings.
+    
+    Returns:
+        A dictionary mapping molecule IDs to their generated force field parameters.
+    """
     mapper = ForceFieldMapper()
     labels = {}
     for fname in os.listdir(orca_dir):
@@ -127,6 +153,11 @@ def generate_labels(orca_dir: str, smiles_map: Dict[str, str]) -> Dict[str, Any]
 
 
 def main():
+    """
+    Runs the workflow to generate force field parameter labels from ORCA output files.
+    
+    Loads a mapping of molecule IDs to SMILES strings from a CSV file, processes ORCA output files to extract molecular geometries and charges, generates force field parameters, and writes the results to a JSON file.
+    """
     csv_path = os.path.join('data', 'processed', 'chemical_list', 'PFAS_Chemical_List_cleaned.csv')
     orca_dir = 'orca_results_b3lyp_sto3g'
     smiles_map = load_smiles_map(csv_path)

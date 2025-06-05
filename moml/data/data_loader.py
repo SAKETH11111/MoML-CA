@@ -41,6 +41,11 @@ class PFASDataLoader:
     """
 
     def __init__(self, data_dir: str, config: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Initializes the PFASDataLoader with data directory and configuration.
+        
+        Sets up molecular graph processing, optional hierarchical graph construction, environmental feature keys, label types, caching, and validation mode. Loads environment and label data from JSON files, indexes available molecule files, and prepares internal cache.
+        """
         self.data_dir = data_dir
         self.config = config or {}
 
@@ -87,6 +92,11 @@ class PFASDataLoader:
     # Helper methods
     # ------------------------------------------------------------------
     def _load_json(self, path: str) -> Dict[str, Any]:
+        """
+        Safely loads and parses a JSON file from the specified path.
+        
+        Returns an empty dictionary if the file does not exist or if parsing fails.
+        """
         if os.path.exists(path):
             with open(path) as f:
                 try:
@@ -96,7 +106,12 @@ class PFASDataLoader:
         return {}
 
     def _find_molecule_files(self) -> Dict[str, str]:
-        """Search various directories for molecule files."""
+        """
+        Indexes molecule files by searching multiple directories for supported file types.
+        
+        Returns:
+            A dictionary mapping molecule IDs (filenames without extension) to their file paths for all found molecule files with extensions .mol, .sdf, .pdb, or .mol2.
+        """
         search_paths = [
             os.path.join(self.data_dir, "molecules"),
             os.path.join(self.data_dir, "mol_files"),
@@ -117,20 +132,17 @@ class PFASDataLoader:
     # Public API
     # ------------------------------------------------------------------
     def add_environmental_features(self, graph_data: Data, env_params: Dict[str, float]) -> Data:
-        """Add comprehensive environmental context as global features.
-
-        Parameters
-        ----------
-        graph_data : Data
-            Graph object to augment.
-        env_params : Dict[str, float]
-            Dictionary containing environmental variables such as pH and
-            temperature.
-
-        Returns
-        -------
-        Data
-            Graph with additional ``u`` attribute representing the environment.
+        """
+        Adds environmental context features to a molecular graph as global attributes.
+        
+        The function encodes environmental variables such as pH, temperature, ionic strength, flow rate, residence time, pressure, and dissolved oxygen into a fixed-order vector and attaches it as the `u` attribute of the graph. If co-contaminants are present in the environment parameters, they are added as a separate attribute.
+        
+        Args:
+            graph_data: The molecular graph to augment.
+            env_params: Dictionary of environmental variables to encode.
+        
+        Returns:
+            The graph with added environmental features.
         """
 
         if not env_params:
@@ -169,10 +181,16 @@ class PFASDataLoader:
         return graph_data
 
     def load_molecule_by_id(self, mol_id: str) -> Tuple[Any, Optional[float], Optional[Dict[str, float]]]:
-        """Load a molecule by identifier.
-
-        Returns the graph data (atom level or hierarchical dict), the label if
-        available and the environmental context dictionary.
+        """
+        Loads a molecule graph by its identifier, optionally enriching it with quantum mechanical charges, environmental features, and labels.
+        
+        If hierarchical graph construction is enabled, returns a dictionary of hierarchical graphs with corresponding features and labels. Otherwise, returns a single atom-level graph. Also returns the label data and environmental context dictionary if available.
+        
+        Args:
+            mol_id: The identifier of the molecule to load.
+        
+        Returns:
+            A tuple containing the graph data (atom-level or hierarchical), the label data (if available), and the environmental context dictionary.
         """
         if self.cache_enabled and mol_id in self.cache:
             return self.cache[mol_id]
@@ -233,7 +251,18 @@ class PFASDataLoader:
         return result, label, env
 
     def get_batch(self, mol_ids: List[str], batch_size: int = 32) -> Data:
-        """Return a batched PyG ``Data`` object for a list of molecule ids."""
+        """
+        Loads and batches molecular graphs for a list of molecule IDs.
+        
+        For each molecule ID, loads the corresponding graph (extracting the atom-level graph if hierarchical graphs are present) and collates them into a single batched PyTorch Geometric Data object.
+        
+        Args:
+            mol_ids: List of molecule identifiers to load and batch.
+            batch_size: Maximum number of molecules to include in the batch.
+        
+        Returns:
+            A batched PyTorch Geometric Data object containing up to batch_size molecular graphs.
+        """
         graphs = []
         for mid in mol_ids:
             graph, _, _ = self.load_molecule_by_id(mid)
@@ -244,11 +273,16 @@ class PFASDataLoader:
         return collate_graphs(graphs[:batch_size])
 
     def load_dataset(self, split: str = "train") -> List[Any]:
-        """Load all molecules from a split directory.
-
-        The split directories are expected to be located under
-        ``<data_dir>/<split>`` and contain molecule files named by the
-        molecule identifier.
+        """
+        Loads all molecule graphs from a specified dataset split directory.
+        
+        Scans the split directory for molecule files or molecule IDs, loads each molecule graph by its identifier, and returns a list of graph objects suitable for model training or evaluation.
+        
+        Args:
+            split: Name of the dataset split to load (e.g., "train", "test").
+        
+        Returns:
+            A list of graph objects corresponding to the molecules in the specified split.
         """
         split_dir = os.path.join(self.data_dir, split)
         if not os.path.isdir(split_dir):
