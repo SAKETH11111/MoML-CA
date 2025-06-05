@@ -334,7 +334,7 @@ class TestHMGNN:
             cross_scale_exchange=True,
         )
         assert len(model.scale_gnns) == NUM_SCALES
-        assert hasattr(model, "scale_jk") and len(model.scale_jk) == NUM_SCALES  # Corrected attribute name
+        assert hasattr(model, "scale_jk") and len(model.scale_jk) == NUM_SCALES
         if model.use_cs:  # cross_scale is only created if cross_scale_exchange is True
             assert hasattr(model, "cross_scale")
             assert isinstance(model.cross_scale, CrossScaleAttentionMH)
@@ -378,8 +378,7 @@ class TestHMGNN:
         outputs = model(dummy_hierarchical_graph_data_single, dummy_cluster_mappings)
 
         assert isinstance(outputs, dict)
-        assert "graph_pred" in outputs  # Changed from 'combined_graph_pred' to match HMGNN output dict
-        assert outputs["graph_pred"].shape == (1, self.GRAPH_OUT_DIM_HMGNN)
+        assert "graph_pred" in outputs        assert outputs["graph_pred"].shape == (1, self.GRAPH_OUT_DIM_HMGNN)
         assert "node_pred" in outputs  # Default node_pred is scale 0
         assert outputs["node_pred"].shape == (NODES_COUNTS_PER_SCALE[0], self.NODE_OUT_DIM_HMGNN)
 
@@ -491,8 +490,7 @@ class TestHMGNN:
 
         outputs = model(dummy_hierarchical_graph_data_batch, None)
 
-        loss = outputs["graph_pred"].sum()  # Changed from 'combined_graph_pred'
-        for i in range(NUM_SCALES):
+        loss = outputs["graph_pred"].sum()        for i in range(NUM_SCALES):
             loss += outputs[f"scale_{i}_node_pred"].sum()
             loss += outputs[f"scale_{i}_graph_pred"].sum()
 

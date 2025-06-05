@@ -53,14 +53,14 @@ class ForceFieldMapper:
         # Validate and set force field type
         if force_field_type.lower() not in SUPPORTED_FF_FORMATS:
             logger.warning(f"Force field type '{force_field_type}' not in supported formats: {SUPPORTED_FF_FORMATS}")
-            logger.info("Defaulting to 'amber' force field type.")  # Added logger.info
+            logger.info("Defaulting to 'amber' force field type.")
             force_field_type = "amber"
         self.force_field_type = force_field_type.lower()
 
         # Validate and set simulation engine
         if simulation_engine.lower() not in SUPPORTED_ENGINES:
             logger.warning(f"Simulation engine '{simulation_engine}' not in supported engines: {SUPPORTED_ENGINES}")
-            logger.info("Defaulting to 'gromacs' simulation engine.")  # Added logger.info
+            logger.info("Defaulting to 'gromacs' simulation engine.")
             simulation_engine = "gromacs"
         self.simulation_engine = simulation_engine.lower()
 
@@ -692,7 +692,7 @@ class ForceFieldMapper:
         return validation
 
     def export_to_gromacs(
-        self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str  # Added base_filename
+        self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str
     ) -> Tuple[bool, Dict[str, str]]:
         """
         Export force field parameters to GROMACS format files.
@@ -941,7 +941,7 @@ class ForceFieldMapper:
             return False, {}
 
     def export_to_amber(
-        self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str  # Added base_filename
+        self, parameters: Dict[str, Any], mol: Chem.Mol, output_dir: str, base_filename: str
     ) -> Tuple[bool, Dict[str, str]]:
         """
         Export force field parameters to AMBER format files.
@@ -1115,7 +1115,7 @@ class ForceFieldMapper:
         parameters: Dict[str, Any],
         mol: Chem.Mol,
         output_dir: str,
-        base_filename: str,  # Added base_filename
+        base_filename: str,
         engine: Optional[str] = None,
     ) -> Tuple[bool, Dict[str, str]]:
         """
@@ -1156,7 +1156,7 @@ class ForceFieldMapper:
         mol: Chem.Mol,
         node_predictions: Union[Dict, List[float]],
         output_dir: str,
-        base_filename: str,  # Added base_filename
+        base_filename: str,
         engine: Optional[str] = None,
     ) -> Tuple[bool, Dict[str, Any]]:
         """

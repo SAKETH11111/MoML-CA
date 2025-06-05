@@ -491,7 +491,7 @@ class TestMolecularGraphProcessor:
                     assert os.path.exists(pt_path)
                     assert pt_path.startswith(tmp_out_dir)
                     try:
-                        loaded_data = torch.load(pt_path, weights_only=False)  # Added weights_only=False
+                        loaded_data = torch.load(pt_path, weights_only=False)
                         assert isinstance(loaded_data, Data)
 
                         original_mol = None

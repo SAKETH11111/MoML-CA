@@ -148,7 +148,7 @@ def dummy_pfas_csv_file(temp_data_dir: str) -> str:
     """Creates a dummy CSV file for PFASDataset."""
     csv_path = os.path.join(temp_data_dir, "pfas_data.csv")
     data = {
-        "smiles": ["CC(F)(F)C(=O)O", "CCC(F)(F)C(=O)O", "InvalidSMILES", "CCCC", "C"],  # Added single carbon
+        "smiles": ["CC(F)(F)C(=O)O", "CCC(F)(F)C(=O)O", "InvalidSMILES", "CCCC", "C"],
         "feature1": [1.0, 2.0, 3.0, 4.0, 5.0],
         "feature2": [0.1, 0.2, 0.3, 0.4, 0.5],
         "target_property": [100.0, 200.0, 300.0, 400.0, 500.0],
@@ -221,10 +221,8 @@ class TestMolecularGraphDataset:
         dataset = MolecularGraphDataset(mol_files=[dummy_mol_files_sdf[0]], config=custom_config)
         graph = dataset[0]
         # atomic_num (11 choices) + formal_charge (6 choices) = 17 features
-        assert graph.x.shape[1] == 17  # Updated from 2 to 17
-
-    def test_error_mol_file_not_found(self, temp_data_dir: str, caplog):  # Changed capsys to caplog
-        """Test MolecularGraphDataset with a non-existent molecule file."""
+        assert graph.x.shape[1] == 17
+    def test_error_mol_file_not_found(self, temp_data_dir: str, caplog):        """Test MolecularGraphDataset with a non-existent molecule file."""
         non_existent_file = os.path.join(temp_data_dir, "not_here.sdf")
 
         with caplog.at_level(logging.WARNING):  # Capture WARNING and ERROR (default for ERROR)
@@ -357,16 +355,14 @@ class TestHierarchicalGraphDataset:
 
 
 class TestPFASDataset:
-    def test_initialization_and_len(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
-        with caplog.at_level(logging.WARNING):  # To catch SMILES parsing warnings
+    def test_initialization_and_len(self, dummy_pfas_csv_file: str, caplog):        with caplog.at_level(logging.WARNING):  # To catch SMILES parsing warnings
             dataset = PFASDataset(
                 data_path=dummy_pfas_csv_file, smiles_column="smiles", target_column="target_property"
             )
         # Valid SMILES: CC(F)(F)C(=O)O, CCC(F)(F)C(=O)O, CCCC, C -> 4 graphs
         assert len(dataset) == 4
 
-    def test_getitem_and_labels(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
-        dataset = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles", target_column="target_property")
+    def test_getitem_and_labels(self, dummy_pfas_csv_file: str, caplog):        dataset = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles", target_column="target_property")
         expected_targets = [100.0, 200.0, 400.0, 500.0]  # Targets for valid SMILES
         assert len(dataset) == len(expected_targets)
         for i in range(len(dataset)):
@@ -375,16 +371,14 @@ class TestPFASDataset:
             assert hasattr(item, "y")
             assert torch.allclose(item.y, torch.tensor([expected_targets[i]], dtype=torch.float))
 
-    def test_features_extraction(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
-        with caplog.at_level(logging.WARNING):
+    def test_features_extraction(self, dummy_pfas_csv_file: str, caplog):        with caplog.at_level(logging.WARNING):
             dataset = PFASDataset(
                 data_path=dummy_pfas_csv_file, smiles_column="smiles", feature_columns=["feature1", "feature2"]
             )
         assert dataset.features is not None
         assert dataset.features.shape == (5, 2)  # 5 rows in CSV, 2 feature columns
 
-    def test_transform_pfas(self, dummy_pfas_csv_file: str, caplog):  # Renamed & Added caplog
-        with caplog.at_level(logging.WARNING):
+    def test_transform_pfas(self, dummy_pfas_csv_file: str, caplog):        with caplog.at_level(logging.WARNING):
             dataset_no_transform = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles")
             original_x_0 = dataset_no_transform[0].x.clone() if dataset_no_transform[0].x is not None else None
 
@@ -402,18 +396,16 @@ class TestPFASDataset:
         with pytest.raises(FileNotFoundError):
             PFASDataset(data_path=non_existent_csv, smiles_column="smiles")
 
-    def test_init_missing_smiles_column(self, temp_data_dir: str, caplog):  # Added caplog
-        """Test PFASDataset when smiles_column is missing from CSV."""
+    def test_init_missing_smiles_column(self, temp_data_dir: str, caplog):        """Test PFASDataset when smiles_column is missing from CSV."""
         csv_path = os.path.join(temp_data_dir, "no_smiles_col.csv")
         df = pd.DataFrame({"feature1": [1.0, 2.0], "target_property": [10.0, 20.0]})
         df.to_csv(csv_path, index=False)
-        with caplog.at_level(logging.WARNING):  # Added caplog context
+        with caplog.at_level(logging.WARNING):
             dataset = PFASDataset(data_path=csv_path, smiles_column="non_existent_smiles")
         assert len(dataset) == 0  # No SMILES, so no graphs
         assert dataset.smiles is None
 
-    def test_init_missing_target_column(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
-        """Test PFASDataset when target_column is specified but missing."""
+    def test_init_missing_target_column(self, dummy_pfas_csv_file: str, caplog):        """Test PFASDataset when target_column is specified but missing."""
         with caplog.at_level(logging.WARNING):  # To catch SMILES parsing warnings
             dataset = PFASDataset(
                 data_path=dummy_pfas_csv_file, smiles_column="smiles", target_column="non_existent_target"
@@ -430,15 +422,13 @@ class TestPFASDataset:
                 graph, "label"
             ), f"Graph {i} should not have 'label' attribute when target_column is missing."
 
-    def test_init_no_feature_columns(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
-        """Test PFASDataset initialization without feature_columns."""
+    def test_init_no_feature_columns(self, dummy_pfas_csv_file: str, caplog):        """Test PFASDataset initialization without feature_columns."""
         with caplog.at_level(logging.WARNING):
             dataset = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles")
         assert dataset.features is None
         assert len(dataset) == 4  # Graphs should still be created
 
-    def test_graph_content_basic(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
-        """Test basic content of graphs generated by PFASDataset."""
+    def test_graph_content_basic(self, dummy_pfas_csv_file: str, caplog):        """Test basic content of graphs generated by PFASDataset."""
         with caplog.at_level(logging.WARNING):
             dataset = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles")
         assert len(dataset) > 0

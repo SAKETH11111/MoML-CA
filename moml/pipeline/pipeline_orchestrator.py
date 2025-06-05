@@ -30,7 +30,6 @@ from moml.core import (
 from moml.simulation.quantum_mechanics.parser.orca_parser import batch_process_molecules
 from moml.data import process_dataset, process_mol_file_to_graph, graph_batch_process
 
-# For parallel processing
 import concurrent.futures
 
 # Set up logging
@@ -772,7 +771,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         df_final.to_csv(processed_file_path, index=False)
         logger.info(f"PFAS-specific processed data saved to {processed_file_path}")
 
-        self.state["preprocessing_completed"] = True  # Corrected state key
+        self.state["preprocessing_completed"] = True
         if "preprocessed_files" not in self.state:
             self.state["preprocessed_files"] = {}
         self.state["preprocessed_files"][input_file] = processed_file_path  # Track specific file
