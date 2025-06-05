@@ -5,8 +5,7 @@ name: moml_ca_env
 channels:
   - pytorch        # Primary channel for PyTorch
   - pyg            # For PyTorch Geometric
-  - conda-forge    # For many community-maintained packages including OpenMM, Hydra
-  - rdkit          # For RDKit
+  - conda-forge    # For many community-maintained packages including OpenMM, Hydra, RDKit
   - nvidia         # Sometimes needed for specific CUDA-related builds if not in pytorch channel
   - defaults
 dependencies:
@@ -24,7 +23,7 @@ dependencies:
   - pyg::pyg
 
   # Molecular Modeling
-  - rdkit::rdkit                # Latest stable RDKit
+  - conda-forge::rdkit                # Latest stable RDKit from conda-forge
   - conda-forge::openmm>=8.0    # Latest stable OpenMM (e.g., 8.0 or newer)
                                 # The conda-forge package should utilize the system CUDA.
 

@@ -8,9 +8,9 @@ import os
 import tempfile
 import shutil
 import subprocess
-import pandas as pd  # Added for batch_process_molecules
-import json  # Added for checking JSON output
-from unittest.mock import patch, mock_open, MagicMock, call  # Added call for checking multiple calls
+import pandas as pd
+import json
+from unittest.mock import patch, mock_open, MagicMock, call
 
 from moml.simulation.quantum_mechanics.parser.orca_parser import (
     parse_orca_output,
@@ -19,7 +19,7 @@ from moml.simulation.quantum_mechanics.parser.orca_parser import (
     create_orca_input,
     run_orca_calculation,
     process_molecule,
-    batch_process_molecules,  # Added for testing
+    batch_process_molecules,
     # extract_orbital_contributions_from_orca, # Placeholder, skip for now
     # extract_electrostatic_potential_from_orca # Placeholder, skip for now
 )
@@ -241,8 +241,7 @@ class TestCreateOrcaInput:
 @patch("subprocess.run")
 @patch("os.path.exists")
 class TestRunOrcaCalculation:
-    def test_run_successful(self, mock_exists, mock_run):  # Removed temp_orca_output_file fixture
-        with tempfile.NamedTemporaryFile(
+    def test_run_successful(self, mock_exists, mock_run):        with tempfile.NamedTemporaryFile(
             mode="w+b", suffix=".inp", delete=False
         ) as tmp_inp_f:  # Explicitly w+b, though default
             input_file_path = tmp_inp_f.name
@@ -280,7 +279,6 @@ class TestRunOrcaCalculation:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                # check=False, # Removed as it's default and causes mismatch with mock representation
                 cwd=os.path.dirname(input_file_path),
             )
         finally:
@@ -290,8 +288,7 @@ class TestRunOrcaCalculation:
             if success and os.path.exists(output_file_expected):
                 os.remove(output_file_expected)
 
-    def test_run_orca_fail_returncode(self, mock_exists, mock_run):  # Removed temp_orca_output_file fixture
-        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
+    def test_run_orca_fail_returncode(self, mock_exists, mock_run):        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
             input_file_path = tmp_inp_f.name
             tmp_inp_f.write(b"dummy orca input content")  # Write bytes
 
@@ -325,8 +322,7 @@ class TestRunOrcaCalculation:
             if os.path.exists(output_file_expected):  # Cleanup if it was created
                 os.remove(output_file_expected)
 
-    def test_run_output_not_created(self, mock_exists, mock_run):  # Removed temp_orca_output_file fixture
-        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
+    def test_run_output_not_created(self, mock_exists, mock_run):        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
             input_file_path = tmp_inp_f.name
             tmp_inp_f.write(b"dummy orca input content")  # Write bytes
 

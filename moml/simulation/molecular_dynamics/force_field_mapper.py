@@ -836,7 +836,11 @@ class ForceFieldMapper:
         """
         # Extract partial charges from node predictions
         if isinstance(node_predictions, dict) and "node_pred" in node_predictions:
-            partial_charges = node_predictions["node_pred"].tolist()
+            tensor_data = node_predictions["node_pred"]
+            if hasattr(tensor_data, 'tolist'):
+                partial_charges = tensor_data.squeeze().tolist()
+            else:
+                partial_charges = tensor_data
         elif isinstance(node_predictions, list):
             partial_charges = node_predictions
         else:

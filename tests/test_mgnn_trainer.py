@@ -14,7 +14,7 @@ import shutil
 from unittest.mock import MagicMock, patch
 from torch_geometric.data import Data, Batch
 import matplotlib
-import matplotlib.pyplot as plt  # Added import
+import matplotlib.pyplot as plt
 
 from moml.models.mgnn.training.trainer import (
     MGNNTrainer,

@@ -34,9 +34,16 @@ pytest -xvs test_graph_coarsening.py::TestFunctionalGroupIdentifier
 
 Tests require the following packages:
 - pytest
-- torch
+- torch (a CPU build is sufficient, e.g. `pip install torch==2.0.1+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html`)
 - torch_geometric
-- rdkit
+- rdkit (the `rdkit-pypi` wheel works well in minimal environments)
 - numpy
+- seaborn
 
-These should be installed as part of the overall project environment. 
+If the project is not installed as a package you can run the tests by adding the
+repository root to ``PYTHONPATH``::
+
+    export PYTHONPATH=$PYTHONPATH:/path/to/MoML-CA
+
+These dependencies should be installed as part of the overall project
+environment.

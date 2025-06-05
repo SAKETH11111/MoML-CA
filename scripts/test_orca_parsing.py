@@ -21,7 +21,7 @@
 import subprocess
 import argparse
 import logging
-import json # Added for writing JSON output
+import json
 from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output # Corrected import
 
 logging.basicConfig(level=logging.INFO)

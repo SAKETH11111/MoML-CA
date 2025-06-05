@@ -13,7 +13,7 @@ import tempfile
 import os
 import json
 import pandas as pd
-import time  # Added for sleep
+import time
 
 from moml.core.molecular_graph_processor import (
     MolecularGraphProcessor,
@@ -24,9 +24,9 @@ from moml.core.molecular_graph_processor import (
     find_charges_file,
     read_charges_from_file,
     create_molecular_graph_json,
-    batch_create_graphs_from_molecules,  # Added for testing
+    batch_create_graphs_from_molecules,
 )
-from moml.core.molecular_feature_extraction import MolecularFeatureExtractor  # For ATOM_FEATURES, BOND_FEATURES
+from moml.core.molecular_feature_extraction import MolecularFeatureExtractor
 
 
 # Helper function to create a simple RDKit molecule
@@ -491,7 +491,7 @@ class TestMolecularGraphProcessor:
                     assert os.path.exists(pt_path)
                     assert pt_path.startswith(tmp_out_dir)
                     try:
-                        loaded_data = torch.load(pt_path, weights_only=False)  # Added weights_only=False
+                        loaded_data = torch.load(pt_path, weights_only=False)
                         assert isinstance(loaded_data, Data)
 
                         original_mol = None
