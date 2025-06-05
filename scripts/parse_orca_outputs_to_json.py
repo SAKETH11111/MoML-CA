@@ -2,7 +2,7 @@ import os
 import json
 import re
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, Optional, Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -187,9 +187,9 @@ def parse_single_orca_output(orca_output_path: str) -> Optional[Dict[str, Any]]:
     # Check if all required fields were populated
     if all(properties[key] is not None for key in ["energy_hartree", "coordinates_angstrom", "chelpg_charges", "dipole_moment_debye"]):
         return properties
-    else:
-        logger.warning(f"One or more key properties were not found for {orca_output_path}. Returning partial data: {properties}")
-        return properties
+    
+    logger.warning(f"One or more key properties were not found for {orca_output_path}. Returning partial data: {properties}")
+    return properties
 
 
 def main():

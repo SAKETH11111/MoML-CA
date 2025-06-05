@@ -7,8 +7,6 @@ import argparse
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-DEFAULT_ORCA_PATH = "/Users/saketh/Library/orca_6_0_1/orca" # Default path from previous findings
-
 def get_water_xyz() -> str:
     """Returns the XYZ coordinates for a water molecule."""
     return """O   0.000000    0.000000    0.117300
@@ -108,8 +106,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--orca_path",
         type=str,
-        default=os.environ.get("ORCA_PATH", DEFAULT_ORCA_PATH),
-        help="Full path to the ORCA executable. Defaults to ORCA_PATH env var or a common location."
+        default=os.environ.get("ORCA_PATH"),
+        help="Full path to the ORCA executable. Must be provided via this argument or the ORCA_PATH environment variable."
     )
     parser.add_argument(
         "--output_dir",
@@ -119,9 +117,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if not Path(args.orca_path).is_file():
+    if not args.orca_path or not Path(args.orca_path).is_file():
         logging.error(f"ORCA executable not found at the specified path: {args.orca_path}")
-        logging.error("Please ensure ORCA is installed and the path is correct, or set the ORCA_PATH environment variable.")
+        logging.error("Please provide the ORCA path using --orca_path or set the ORCA_PATH environment variable.")
     else:
         logging.info(f"Using ORCA executable from: {args.orca_path}")
         run_orca_water_test(orca_executable_path=args.orca_path, output_dir_name=args.output_dir)
