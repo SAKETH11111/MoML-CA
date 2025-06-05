@@ -10,7 +10,7 @@ import tempfile
 import shutil
 from rdkit import Chem
 from rdkit.Chem import AllChem
-import torch  # Added for MGNN prediction mocking
+import torch
 
 from moml.simulation.molecular_dynamics.force_field_mapper import ForceFieldMapper
 

@@ -9,15 +9,13 @@ import os
 import tempfile
 import shutil
 import json
-import logging  # Added import logging
 from typing import List, Dict
 from torch_geometric.data import Data
 from rdkit import Chem
-from rdkit.Chem import AllChem  # Added import
+from rdkit.Chem import AllChem
 
 from moml.data.datasets import MolecularGraphDataset, HierarchicalGraphDataset, PFASDataset
 
-# from moml.core import create_molecular_graph_json # Corrected, but HierarchicalGraphDataset handles its own import
 
 
 # Helper function to create dummy molecule files (e.g., SDF)
