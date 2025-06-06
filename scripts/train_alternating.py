@@ -224,6 +224,15 @@ def main():
         logger.info("Starting alternating training...")
         start_time = time.time()
         
+        # Initialize metrics with default values to handle case where max_steps is 0
+        metrics = {
+            'total_loss': 0.0,
+            'node_loss': 0.0,
+            'graph_loss': 0.0,
+            'loss_node_weight': 0,
+            'loss_graph_weight': 0
+        }
+        
         for step in range(args.max_steps):
             if step % 2 == 0:
                 batch = next(graph_cycle)
