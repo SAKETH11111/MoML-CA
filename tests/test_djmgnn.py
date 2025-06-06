@@ -302,14 +302,14 @@ class TestDJMGNN:
     @pytest.mark.parametrize("jk_mode", ["concat", "max", "attention", "lstm"])
     def test_instantiation(self, jk_mode, device):
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_PRESENT,
+            in_edge_dim=EDGE_ATTR_DIM_PRESENT,
             jk_mode=jk_mode,
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
         assert len(model.blocks) == self.N_BLOCKS
         assert isinstance(model.jk, JKAggregator)
@@ -319,16 +319,16 @@ class TestDJMGNN:
 
     def test_instantiation_no_edge_attr(self, device):
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_ABSENT,  # Key change
+            in_edge_dim=EDGE_ATTR_DIM_ABSENT,
             jk_mode="concat",
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
-        assert len(model.blocks) == self.N_BLOCKS  # Should still instantiate
+        assert len(model.blocks) == self.N_BLOCKS
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
     def test_forward_pass_single_graph_with_edge_attr(self, dummy_graph_data_single, device):
@@ -336,42 +336,41 @@ class TestDJMGNN:
         x, edge_index = x.to(device), edge_index.to(device)
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_PRESENT,
+            in_edge_dim=EDGE_ATTR_DIM_PRESENT,
             jk_mode="concat",
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
         outputs = model(x, edge_index, edge_attr, batch=None)
 
         assert "node_pred" in outputs
-        assert "graph_pred" in outputs
-        # Account for supernode if use_supernode is True (default)
-        expected_num_nodes = NUM_NODES + (1 if model.use_super else 0)
-        assert outputs["node_pred"].shape == (expected_num_nodes, self.NODE_OUT_DIM)
-        assert outputs["graph_pred"].shape == (1, self.GRAPH_OUT_DIM)
+        assert "graph_pred_main" in outputs
+        assert "graph_pred_spice_energy" in outputs
+        assert outputs["node_pred"].shape == (NUM_NODES, self.NODE_OUT_DIM)
+        assert outputs["graph_pred_main"].shape == (1, self.GRAPH_OUT_DIM)
+        assert outputs["graph_pred_spice_energy"].shape == (1, 1)
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
     def test_forward_pass_single_graph_no_edge_attr(self, dummy_graph_data_single, device):
         x, edge_index, _ = dummy_graph_data_single
         x, edge_index = x.to(device), edge_index.to(device)
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_ABSENT,
+            in_edge_dim=EDGE_ATTR_DIM_ABSENT,
             jk_mode="concat",
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
         outputs = model(x, edge_index, edge_attr=None, batch=None)
         assert "node_pred" in outputs
-        expected_num_nodes = NUM_NODES + (1 if model.use_super else 0)
-        assert outputs["node_pred"].shape == (expected_num_nodes, self.NODE_OUT_DIM)
+        assert outputs["node_pred"].shape == (NUM_NODES, self.NODE_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
     def test_forward_pass_batch_graph_with_edge_attr(self, dummy_graph_data_batch, device):
@@ -380,23 +379,23 @@ class TestDJMGNN:
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
         batch_vector = batch_vector.to(device)
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_PRESENT,
+            in_edge_dim=EDGE_ATTR_DIM_PRESENT,
             jk_mode="concat",
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
         outputs = model(x, edge_index, edge_attr, batch=batch_vector)
 
         assert "node_pred" in outputs
-        assert "graph_pred" in outputs
-        # x.shape[0] is total nodes in batch. Add BATCH_SIZE supernodes if use_supernode is True.
-        expected_num_nodes_batch = x.shape[0] + (BATCH_SIZE if model.use_super else 0)
-        assert outputs["node_pred"].shape == (expected_num_nodes_batch, self.NODE_OUT_DIM)
-        assert outputs["graph_pred"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
+        assert "graph_pred_main" in outputs
+        assert "graph_pred_spice_energy" in outputs
+        assert outputs["node_pred"].shape == (x.shape[0], self.NODE_OUT_DIM)
+        assert outputs["graph_pred_main"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
+        assert outputs["graph_pred_spice_energy"].shape == (BATCH_SIZE, 1)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
     def test_forward_pass_batch_graph_no_edge_attr(self, dummy_graph_data_batch, device):
@@ -404,20 +403,19 @@ class TestDJMGNN:
         x, edge_index = x.to(device), edge_index.to(device)
         batch_vector = batch_vector.to(device)
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_ABSENT,
+            in_edge_dim=EDGE_ATTR_DIM_ABSENT,
             jk_mode="concat",
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
         outputs = model(x, edge_index, edge_attr=None, batch=batch_vector)
         assert "node_pred" in outputs
-        expected_num_nodes_batch = x.shape[0] + (BATCH_SIZE if model.use_super else 0)
-        assert outputs["node_pred"].shape == (expected_num_nodes_batch, self.NODE_OUT_DIM)
-        assert outputs["graph_pred"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
+        assert outputs["node_pred"].shape == (x.shape[0], self.NODE_OUT_DIM)
+        assert outputs["graph_pred_main"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
     def test_gradient_flow(self, dummy_graph_data_batch, device):
@@ -428,14 +426,14 @@ class TestDJMGNN:
             x.requires_grad_(True)
 
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_PRESENT,
+            in_edge_dim=EDGE_ATTR_DIM_PRESENT,
             jk_mode="concat",
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
             dropout=0.0,
         ).to(device)
 
@@ -446,7 +444,7 @@ class TestDJMGNN:
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
         batch_vector = batch_vector.to(device)
         outputs = model(x, edge_index, edge_attr, batch=batch_vector)
-        loss = outputs["node_pred"].sum() + outputs["graph_pred"].sum()
+        loss = outputs["node_pred"].sum() + outputs["graph_pred_main"].sum() + outputs["graph_pred_spice_energy"].sum()
         loss.backward()
 
         # Check input gradients
@@ -535,14 +533,14 @@ class TestDJMGNN:
         x, edge_index = x.to(device), edge_index.to(device)
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
         model = DJMGNN(
-            in_dim=NODE_IN_DIM,
+            in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
             n_blocks=self.N_BLOCKS,
             layers_per_block=self.LAYERS_PER_BLOCK,
-            edge_attr_dim=EDGE_ATTR_DIM_PRESENT,
+            in_edge_dim=EDGE_ATTR_DIM_PRESENT,
             jk_mode="concat",
-            node_out_dim=self.NODE_OUT_DIM,
-            graph_out_dim=self.GRAPH_OUT_DIM,
+            node_output_dims=self.NODE_OUT_DIM,
+            graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
         outputs = model(x, edge_index, edge_attr, batch=None)  # batch=None for single graph
         # If x has 0 nodes, but use_supernode is True, node_pred shape will be (1, NODE_OUT_DIM) due to supernode
@@ -571,10 +569,10 @@ class TestDJMGNN:
             # The DJMGNN.forward handles h_aggregated.numel()==0 to make graph_pred (batch_size, dim)
             # If batch is None, it's treated as a single graph, so batch_size is 1.
 
-        assert outputs["graph_pred"].shape == (expected_graph_pred_shape_dim0, self.GRAPH_OUT_DIM)
+        assert outputs["graph_pred_main"].shape == (expected_graph_pred_shape_dim0, self.GRAPH_OUT_DIM)
         # Depending on pool behavior, this might need adjustment.
         # For mean pool, if input is (0, D), output is (1, D) with NaNs or zeros.
         # Let's assume it produces zeros for now.
-        if torch.isnan(outputs["graph_pred"]).any():  # More robust check
-            print("Warning: graph_pred contains NaNs for zero-node graph.")
+        if torch.isnan(outputs["graph_pred_main"]).any():  # More robust check
+            print("Warning: graph_pred_main contains NaNs for zero-node graph.")
         # assert not torch.isnan(outputs['graph_pred']).any() # Ideal case
