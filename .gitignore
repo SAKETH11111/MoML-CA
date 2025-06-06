@@ -76,6 +76,10 @@ data/qm9/processed/*.pt
 # Add exceptions for any small .pt files that should be included
 # !data/qm9/processed/small_file.pt
 
+# SPICE dataset files (large HDF5 files)
+data/spice/*.hdf5
+data/spice/SPICE-*.hdf5
+
 # Logs and temp files
 *.log
 *.tmp
@@ -111,3 +115,4 @@ memory-bank/productContext.md
 memory-bank/progress.md
 memory-bank/systemPatterns.md
 docs/
+CLAUDE.md
