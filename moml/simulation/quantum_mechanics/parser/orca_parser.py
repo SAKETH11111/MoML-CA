@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 
 import numpy as np
 import pandas as pd
-from rdkit import Chem
+from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 
 # Define FLOAT constant for robust matching of numeric data
@@ -27,8 +27,6 @@ FLOAT = r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?"
 logger = logging.getLogger("orca_parser")
 
 # Suppress RDKit logging except for warnings and errors
-from rdkit import RDLogger
-
 RDLogger.logger().setLevel(RDLogger.WARNING)
 
 # -------------------------------------

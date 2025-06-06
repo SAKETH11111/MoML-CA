@@ -350,11 +350,17 @@ def generate_orca_input(
         return False, ""
 
 
+def run_orca_calculation_mock(input_file_path: str) -> Tuple[bool, str]:
+    """Mock function for ORCA calculation."""
+    logger.info(f"Mocking ORCA calculation for {input_file_path}")
+    return True, ""
+
+
 def run_orca_calculation(
     input_file_path: str, orca_executable: Optional[str], openmpi_bin_path: Optional[str], mock_run: bool
 ) -> Tuple[bool, str]:
     """
-    Runs an ORCA calculation using the specified input file.
+    Runs a single ORCA calculation, either for real or in mock mode.
 
     Handles locating the ORCA executable and setting up the environment
     for parallel execution if OpenMPI path is provided.

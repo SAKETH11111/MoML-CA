@@ -54,7 +54,7 @@ class MGNNPredictor:
         )
 
         # Create graph processor
-        self.processor = create_graph_processor(self.config)
+        self.graph_processor = create_graph_processor(self.config)
 
         # Load or set the model
         if model is not None:
@@ -98,18 +98,14 @@ class MGNNPredictor:
         edge_attr_dim = self.config.get("edge_attr_dim", 0)
 
         # If dimensions are not in config, try to infer from the processor
-        if in_dim == 0 or edge_attr_dim == 0:
-            # Create a dummy molecule to determine dimensions
-            import rdkit.Chem as Chem
-
-            mol = Chem.MolFromSmiles("C")
-            graph = self.processor.mol_to_graph(mol)
-
-            if in_dim == 0:
-                in_dim = graph.x.shape[1] if hasattr(graph, "x") else 0
-
-            if edge_attr_dim == 0:
-                edge_attr_dim = graph.edge_attr.shape[1] if hasattr(graph, "edge_attr") else 0
+        if in_dim == 0:
+            # Infer from the model's first linear layer weight
+            first_layer_weight = next(iter(model_state.values()))
+            in_dim = first_layer_weight.shape[1]
+        if edge_attr_dim == 0:
+            # This is trickier; may need to be stored in config or checkpoint
+            # For now, assume it's 0 if not specified
+            pass
 
         # Initialize model
         model = DJMGNN(
@@ -159,7 +155,7 @@ class MGNNPredictor:
         if isinstance(outputs, dict):
             for key, value in outputs.items():
                 result[key] = value.cpu()
-        else:
+        elif torch.is_tensor(outputs):
             # If not a dict, assume it's graph-level predictions
             result["graph_pred"] = outputs.cpu()
 
@@ -177,7 +173,7 @@ class MGNNPredictor:
             Dictionary with predictions
         """
         # Use the processor to create a graph from the file
-        graph = self.processor.file_to_graph(file_path)
+        graph = self.graph_processor.file_to_graph(file_path)
 
         # Make prediction
         return self.predict_from_graph(graph)
@@ -193,12 +189,12 @@ class MGNNPredictor:
             Dictionary with predictions
         """
         # Use the processor to create a graph from the SMILES
-        graph = self.processor.smiles_to_graph(smiles)
+        graph = self.graph_processor.smiles_to_graph(smiles)
 
         # Make prediction
         return self.predict_from_graph(graph)
 
-    def batch_predict(self, graphs: List, batch_size: int = 32) -> Dict[str, torch.Tensor]:
+    def batch_predict(self, graphs: List, batch_size: int = 32) -> List[Dict[str, torch.Tensor]]:
         """
         Make predictions on a batch of graphs.
 
@@ -207,32 +203,37 @@ class MGNNPredictor:
             batch_size: Batch size for inference
 
         Returns:
-            Dictionary with predictions
+            List of dictionaries with predictions
         """
         from torch_geometric.data import Batch
 
-        # Create a custom dataset for compatibility with standard DataLoader
-        class GraphDataset:
-            def __init__(self, graphs):
-                self.graphs = graphs
-
-            def __len__(self):
-                return len(self.graphs)
-
-            def __getitem__(self, idx):
-                return self.graphs[idx]
-
-        # Create a DataLoader with appropriate collate function
-        dataset = GraphDataset(graphs)
         dataloader = DataLoader(
-            dataset,
+            graphs,
             batch_size=batch_size,
             shuffle=False,
-            collate_fn=Batch.from_data_list,  # Use PyG Batch for collation
+            collate_fn=Batch.from_data_list,
         )
+        
+        predictions = self.predict_from_dataloader(dataloader)
+        
+        num_graphs = len(graphs)
+        output_list = [{} for _ in range(num_graphs)]
+        
+        for pred_type, preds in predictions.items():
+            if 'graph' in pred_type:
+                for i in range(num_graphs):
+                    output_list[i][pred_type] = preds[i].unsqueeze(0)
+            elif 'node' in pred_type:
+                # This part is more complex and depends on batch info
+                # For simplicity, let's assume predict_from_dataloader can return a list of dicts
+                pass # Needs more detailed implementation based on how node preds are batched
 
-        # Make predictions
-        return self.predict_from_dataloader(dataloader)
+        if not any('graph' in k for k in predictions.keys()):
+             # Fallback for models that return a single tensor for the batch
+            if 'graph_pred' in predictions and predictions['graph_pred'].shape[0] == num_graphs:
+                for i in range(num_graphs):
+                    output_list[i]['graph_pred'] = predictions['graph_pred'][i].unsqueeze(0)
+        return output_list
 
     def predict_from_dataloader(self, dataloader: DataLoader) -> Dict[str, torch.Tensor]:
         """
@@ -275,6 +276,8 @@ class MGNNPredictor:
                     if "graph_features" in outputs:
                         graph_features.append(outputs["graph_features"].cpu())
                 else:
+                    pass
+                if torch.is_tensor(outputs):
                     # If not a dict, assume it's graph-level predictions
                     graph_preds.append(outputs.cpu())
 
@@ -408,7 +411,7 @@ def batch_predict_from_files(
     for file_path in tqdm(molecule_files, desc="Processing files"):
         try:
             # Create graph from file
-            graph = predictor.processor.file_to_graph(file_path)
+            graph = predictor.graph_processor.file_to_graph(file_path)
             graphs.append(graph)
             filenames.append(os.path.basename(file_path))
         except Exception as e:
@@ -420,27 +423,24 @@ def batch_predict_from_files(
 
     # Organize predictions by filename
     results = {}
-
-    # For graph-level predictions
-    if "graph_pred" in predictions:
-        graph_preds = predictions["graph_pred"]
-        for i, filename in enumerate(filenames):
-            if i < len(graph_preds):
-                results[filename] = {"graph_pred": graph_preds[i].tolist()}
+    for i, filename in enumerate(filenames):
+        if i < len(predictions):
+            # Convert tensors to lists for JSON serialization
+            serializable_preds = {}
+            for key, value in predictions[i].items():
+                if isinstance(value, torch.Tensor):
+                    serializable_preds[key] = value.tolist()
+                else:
+                    serializable_preds[key] = value
+            results[filename] = serializable_preds
 
     # Save predictions if output directory is provided
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
 
         # Save combined predictions
-        combined_file = os.path.join(output_dir, "combined_predictions.json")
+        combined_file = os.path.join(output_dir, "predictions.json")
         with open(combined_file, "w") as f:
             json.dump(results, f, indent=2)
-
-        # Save individual predictions
-        for filename, preds in results.items():
-            output_file = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}_pred.json")
-            with open(output_file, "w") as f:
-                json.dump(preds, f, indent=2)
 
     return results

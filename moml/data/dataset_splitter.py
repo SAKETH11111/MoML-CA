@@ -7,6 +7,7 @@ This module provides functions for splitting datasets into training, validation,
 import logging
 from typing import List, Tuple
 from torch.utils.data import Dataset, Subset
+from typing import Any
 from sklearn.model_selection import train_test_split
 
 # Configure logging
@@ -14,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def split_dataset(
-    dataset: Dataset, train_ratio: float = 0.8, val_ratio: float = 0.1, test_ratio: float = 0.1, random_seed: int = 42
-) -> Tuple[Dataset, Dataset, Dataset]:
+    dataset: Dataset[Any], train_ratio: float = 0.8, val_ratio: float = 0.1, test_ratio: float = 0.1, random_seed: int = 42
+) -> Tuple[Subset[Any], Subset[Any], Subset[Any]]:
     """
     Split a dataset into training, validation, and test sets.
 
@@ -55,13 +56,13 @@ def split_dataset(
 
 
 def stratified_split_dataset(
-    dataset: Dataset,
+    dataset: Dataset[Any],
     labels: List[int],
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     random_seed: int = 42,
-) -> Tuple[Dataset, Dataset, Dataset]:
+) -> Tuple[Subset[Any], Subset[Any], Subset[Any]]:
     """
     Split a dataset into training, validation, and test sets with stratification.
 
@@ -111,13 +112,13 @@ def stratified_split_dataset(
 
 
 def scaffold_split_dataset(
-    dataset: Dataset,
+    dataset: Dataset[Any],
     smiles_list: List[str],
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     random_seed: int = 42,
-) -> Tuple[Dataset, Dataset, Dataset]:
+) -> Tuple[Subset[Any], Subset[Any], Subset[Any]]:
     """
     Split a dataset based on molecular scaffolds.
 
@@ -168,7 +169,6 @@ def scaffold_split_dataset(
     # Calculate split sizes
     train_size = int(train_ratio * len(dataset))
     val_size = int(val_ratio * len(dataset))
-    test_size = len(dataset) - train_size - val_size
 
     # Assign molecules to each set
     train_indices = []

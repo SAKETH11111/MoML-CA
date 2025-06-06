@@ -4,7 +4,7 @@ from itertools import repeat
 from typing import Callable, List, Optional
 import torch
 import numpy as np
-from torch_geometric.data import Dataset, Data
+from torch_geometric.data import InMemoryDataset, Data
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
 
@@ -13,7 +13,7 @@ from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.*')
 
 
-class PFASSDFDataset(Dataset):
+class PFASSDFDataset(InMemoryDataset):
     """
     Dataset for PFAS molecules from SDF files.
     Computes 19-dimensional molecular descriptors as graph-level targets.
@@ -81,9 +81,10 @@ class PFASSDFDataset(Dataset):
             data_list = [self.pre_transform(data) for data in data_list]
         
         # Save processed data
+        data, slices = self.collate(data_list)
         split_suffix = f"_{self.split}" if self.split else ""
         processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        torch.save(self.collate(data_list), processed_path)
+        torch.save((data, slices), processed_path)
     
     def _mol_to_data(self, mol: Chem.Mol) -> Optional[Data]:
         """Convert RDKit molecule to PyTorch Geometric Data object."""
@@ -174,29 +175,3 @@ class PFASSDFDataset(Dataset):
             # Return zeros if computation fails
             return torch.zeros(19, dtype=torch.float)
     
-    def len(self) -> int:
-        """Return the number of samples in the dataset."""
-        # Load processed data to get length
-        split_suffix = f"_{self.split}" if self.split else ""
-        processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        if not hasattr(self, '_data_list_len'):
-            # Load only if not already loaded or length not cached
-            if not hasattr(self, 'data') or self.data is None:
-                self.data, self.slices = torch.load(processed_path, weights_only=False)
-            self._data_list_len = self.slices[list(self.slices.keys())[0]].size(0) -1 if self.slices else 0
-        return self._data_list_len
-
-    def get(self, idx: int) -> Data:
-        """Get a single sample from the dataset."""
-        split_suffix = f"_{self.split}" if self.split else ""
-        processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        if not hasattr(self, 'data') or self.data is None:
-             self.data, self.slices = torch.load(processed_path, weights_only=False)
-        
-        data = Data()
-        for key in self.data.keys:
-            item, slices = self.data[key], self.slices[key]
-            s = list(repeat(slice(None), item.dim()))
-            s[self.data.__cat_dim__(key, item)] = slice(slices[idx], slices[idx+1])
-            data[key] = item[s]
-        return data

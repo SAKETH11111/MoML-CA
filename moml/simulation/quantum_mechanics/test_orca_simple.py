@@ -93,10 +93,14 @@ def detect_platform_specific_settings():
 
 def build_command(args, wrapper_path, input_csv, output_dir, orca_path, openmpi_path):
     cmd = [sys.executable, str(wrapper_path), "--input_csv", input_csv, "--output_dir", str(output_dir), "--functional", args.functional, "--basis_set", args.basis_set, "--num_procs", str(args.num_procs), "--memory", str(args.memory), "--max_jobs", str(args.max_jobs)]
-    if args.smiles_col != "canonical_smiles": cmd += ["--smiles_col", args.smiles_col]
-    if args.id_col != "common_name": cmd += ["--id_col", args.id_col]
-    if orca_path: cmd += ["--orca_path", orca_path]
-    if openmpi_path: cmd += ["--openmpi_path", openmpi_path]
+    if args.smiles_col != "canonical_smiles":
+        cmd += ["--smiles_col", args.smiles_col]
+    if args.id_col != "common_name":
+        cmd += ["--id_col", args.id_col]
+    if orca_path:
+        cmd += ["--orca_path", orca_path]
+    if openmpi_path:
+        cmd += ["--openmpi_path", openmpi_path]
     return cmd
 
 
@@ -108,7 +112,8 @@ def run_orca_wrapper(command):
         logger.error(f"Error executing wrapper: {e}")
         sys.exit(1)
     if result.returncode == 0:
-        for line in result.stdout.splitlines(): logger.info(line)
+        for line in result.stdout.splitlines():
+            logger.info(line)
     else:
         logger.error(f"Execution failed: {result.stderr}")
 

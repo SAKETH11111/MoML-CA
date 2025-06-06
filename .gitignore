@@ -102,6 +102,7 @@ logs/
 *_results.json
 *_optimized.mol
 *.bibtex
+*.hdf5
 
 config/pipeline_config.json
 .roo
@@ -115,4 +116,5 @@ memory-bank/productContext.md
 memory-bank/progress.md
 memory-bank/systemPatterns.md
 docs/
+
 CLAUDE.md

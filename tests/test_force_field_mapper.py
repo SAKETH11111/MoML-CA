@@ -5,7 +5,6 @@ moml.simulation.molecular_dynamics.force_field_mapper.
 
 import pytest
 import os
-import logging
 import tempfile
 import shutil
 from rdkit import Chem

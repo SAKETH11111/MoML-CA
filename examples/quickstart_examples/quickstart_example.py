@@ -184,7 +184,7 @@ def prediction_example(model_path, val_loader):
     os.makedirs(output_dir, exist_ok=True)
     vis_path = os.path.join(output_dir, "predictions.png")
 
-    fig = visualize_predictions(true_values, predicted_values, title="Example Predictions", save_path=vis_path)
+    visualize_predictions(true_values, predicted_values, title="Example Predictions", save_path=vis_path)
 
     print(f"Prediction visualization saved to {vis_path}")
 
@@ -200,7 +200,7 @@ def main():
     graph = simple_example()
 
     # Hierarchical graph creation
-    hierarchical_graphs = hierarchical_graph_example(graph)
+    hierarchical_graph_example(graph)
 
     # Model training
     model, model_path, val_loader = model_training_example()

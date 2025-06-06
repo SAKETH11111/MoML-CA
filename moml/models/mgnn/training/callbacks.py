@@ -7,8 +7,7 @@ training process by adding functionality like early stopping, model checkpointin
 
 import os
 import torch
-import copy  # for deep-copying state_dict tensors
-from typing import Optional, Callable
+from typing import Optional, Callable, Any, Dict
 
 
 class Callback:
@@ -16,27 +15,27 @@ class Callback:
     Base callback class.
     """
 
-    def on_train_begin(self, trainer):
+    def on_train_begin(self, trainer: Any) -> None:
         """Called at the beginning of training."""
         pass
 
-    def on_train_end(self, trainer):
+    def on_train_end(self, trainer: Any) -> None:
         """Called at the end of training."""
         pass
 
-    def on_epoch_begin(self, trainer, epoch):
+    def on_epoch_begin(self, trainer: Any, epoch: int) -> None:
         """Called at the beginning of an epoch."""
         pass
 
-    def on_epoch_end(self, trainer, epoch, logs=None):
+    def on_epoch_end(self, trainer: Any, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
         """Called at the end of an epoch."""
         pass
 
-    def on_batch_begin(self, trainer, batch):
+    def on_batch_begin(self, trainer: Any, batch: Any) -> None:
         """Called at the beginning of a batch."""
         pass
 
-    def on_batch_end(self, trainer, batch, logs=None):
+    def on_batch_end(self, trainer: Any, batch: Any, logs: Optional[Dict[str, Any]] = None) -> None:
         """Called at the end of a batch."""
         pass
 
@@ -76,14 +75,14 @@ class EarlyStopping(Callback):
         self.stopped_epoch = 0
         self.best_weights = None
 
-    def on_train_begin(self, trainer):
+    def on_train_begin(self, trainer: Any) -> None:
         """Reset early stopping state at the beginning of training."""
         self.wait = 0
         self.stopped_epoch = 0
         self.best_value = float("inf") if self.mode == "min" else float("-inf")
         self.best_weights = None
 
-    def on_epoch_end(self, trainer, epoch, logs=None):
+    def on_epoch_end(self, trainer: Any, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
         """Check if training should be stopped after this epoch."""
         logs = logs or {}
 
@@ -106,7 +105,7 @@ class EarlyStopping(Callback):
             self.wait = 0
             # Deep-copy state_dict to freeze best_weights
             state = trainer.model.state_dict()
-            self.best_weights = {k: v.clone().detach() for k, v in state.items()}
+            self.best_weights = {k: v.clone().detach() for k, v in state.items()} if state else None
         else:
             # Increment wait counter
             self.wait += 1
@@ -159,7 +158,7 @@ class ModelCheckpoint(Callback):
         self.best_value = float("inf") if mode == "min" else float("-inf")
         self.epochs_since_last_save = 0
 
-    def on_train_begin(self, trainer):
+    def on_train_begin(self, trainer: Any) -> None:
         """Reset checkpoint state at the beginning of training."""
         self.best_value = float("inf") if self.mode == "min" else float("-inf")
         self.epochs_since_last_save = 0
@@ -167,7 +166,7 @@ class ModelCheckpoint(Callback):
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
 
-    def on_epoch_end(self, trainer, epoch, logs=None):
+    def on_epoch_end(self, trainer: Any, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
         """Save checkpoint if conditions are met."""
         logs = logs or {}
         self.epochs_since_last_save += 1
@@ -210,10 +209,10 @@ class ModelCheckpoint(Callback):
                 # Save checkpoint
                 self._save_checkpoint(trainer, epoch, logs)
 
-    def _save_checkpoint(self, trainer, epoch, logs):
+    def _save_checkpoint(self, trainer: Any, epoch: int, logs: Optional[Dict[str, Any]]) -> None:
         """Save the actual checkpoint."""
         # Format filepath if it contains placeholders
-        filepath = self.filepath.format(epoch=epoch, **logs)
+        filepath = self.filepath.format(epoch=epoch, **(logs or {}))
 
         # Create checkpoint dictionary
         checkpoint = {
@@ -238,7 +237,7 @@ class LearningRateScheduler(Callback):
 
     def __init__(
         self,
-        schedule: Callable,
+        schedule: Callable[[int], float],
         monitor: Optional[str] = None,
         mode: str = "min",
         factor: float = 0.1,
@@ -279,11 +278,11 @@ class LearningRateScheduler(Callback):
 
             self.is_callable = False
         else:
-            self.is_callable = True
+            self.is_callable: bool = True
 
-    def on_train_begin(self, trainer):
+    def on_train_begin(self, trainer: Any) -> None:
         """Initialize scheduler at the beginning of training."""
-        if not self.is_callable:
+        if not self.is_callable and hasattr(trainer, "optimizer") and trainer.optimizer is not None:
             # Create ReduceLROnPlateau scheduler
             self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 trainer.optimizer,
@@ -295,11 +294,11 @@ class LearningRateScheduler(Callback):
                 min_lr=self.min_lr,
             )
 
-    def on_epoch_end(self, trainer, epoch, logs=None):
+    def on_epoch_end(self, trainer: Any, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
         """Update learning rate at the end of the epoch."""
         logs = logs or {}
 
-        if not self.is_callable:
+        if not self.is_callable and hasattr(self, "scheduler"):
             # For ReduceLROnPlateau
             if self.monitor not in logs:
                 if self.verbose:

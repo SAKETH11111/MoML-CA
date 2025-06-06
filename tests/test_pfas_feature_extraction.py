@@ -27,14 +27,12 @@ sys.path.append(project_root)
 # Check for RDKit
 try:
     from rdkit import Chem
-    from rdkit.Chem import AllChem
     print("RDKit import successful!")
 except ImportError:
     pytest.skip("RDKit not installed, skipping PFAS feature extraction tests", allow_module_level=True)
 
 # Try to import torch and matplotlib (for visualization)
 try:
-    import torch
     TORCH_AVAILABLE = True
     print("PyTorch import successful!")
 except ImportError:
@@ -54,9 +52,7 @@ except ImportError:
 
 # Import from consolidated moml modules
 try:
-    from moml.core import calculate_molecular_descriptors
     from moml.core import FunctionalGroupDetector
-    from moml.utils import validate_smiles
     from moml.utils import (
         create_rdkit_mols,
         categorize_molecular_features as categorize_pfas_types,
@@ -65,7 +61,6 @@ try:
     from moml.utils import (
         calculate_molecular_complexity as calculate_pfas_statistics,
     )
-    from moml.utils import extract_fluorine_count
     from moml.utils import add_fluorinated_group_counts
     from moml.core import MolecularGraphProcessor
     from moml.utils import visualize_molecular_graph
@@ -131,8 +126,8 @@ class TestPFASFeatures(unittest.TestCase):
         test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")
 
         # The first three should be flagged as PFAS (using Has_Fluorine as proxy)
-        pfas_compounds = test_df[test_df["Has_Fluorine"] == True]
-        non_pfas_compounds = test_df[test_df["Has_Fluorine"] == False]
+        pfas_compounds = test_df[test_df["Has_Fluorine"]]
+        non_pfas_compounds = test_df[~test_df["Has_Fluorine"]]
 
         self.assertEqual(len(pfas_compounds), 3, "Expected 3 PFAS compounds based on Has_Fluorine")
         self.assertEqual(len(non_pfas_compounds), 1, "Expected 1 non-PFAS compound based on Has_Fluorine")
@@ -373,7 +368,7 @@ class TestHydroxylGroupDetection(unittest.TestCase):
             if empty_mol is not None:
                 result = FunctionalGroupDetector.find_hydroxyl_groups(empty_mol)
                 self.assertEqual(result, [])
-        except:
+        except Exception:
             pass  # Skip if cannot create empty molecule
 
     def test_hydroxyl_oxygen_indices(self):

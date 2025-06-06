@@ -241,7 +241,8 @@ class TestCreateOrcaInput:
 @patch("subprocess.run")
 @patch("os.path.exists")
 class TestRunOrcaCalculation:
-    def test_run_successful(self, mock_exists, mock_run):        with tempfile.NamedTemporaryFile(
+    def test_run_successful(self, mock_exists, mock_run):
+        with tempfile.NamedTemporaryFile(
             mode="w+b", suffix=".inp", delete=False
         ) as tmp_inp_f:  # Explicitly w+b, though default
             input_file_path = tmp_inp_f.name
@@ -249,7 +250,7 @@ class TestRunOrcaCalculation:
 
         # Expected output path based on input_file_path
         output_file_expected = input_file_path.replace(".inp", ".out")
-
+        success = False
         try:
             # mock_exists needs to return True for 'orca', the input_file_path, and potentially the output_file_expected
             # if run_orca_calculation checks for output dir or pre-existing output.
@@ -288,7 +289,8 @@ class TestRunOrcaCalculation:
             if success and os.path.exists(output_file_expected):
                 os.remove(output_file_expected)
 
-    def test_run_orca_fail_returncode(self, mock_exists, mock_run):        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
+    def test_run_orca_fail_returncode(self, mock_exists, mock_run):
+        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
             input_file_path = tmp_inp_f.name
             tmp_inp_f.write(b"dummy orca input content")  # Write bytes
 
@@ -322,7 +324,8 @@ class TestRunOrcaCalculation:
             if os.path.exists(output_file_expected):  # Cleanup if it was created
                 os.remove(output_file_expected)
 
-    def test_run_output_not_created(self, mock_exists, mock_run):        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
+    def test_run_output_not_created(self, mock_exists, mock_run):
+        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".inp", delete=False) as tmp_inp_f:  # Explicitly w+b
             input_file_path = tmp_inp_f.name
             tmp_inp_f.write(b"dummy orca input content")  # Write bytes
 
@@ -332,38 +335,23 @@ class TestRunOrcaCalculation:
         try:
             if os.path.exists(output_file_path):
                 os.remove(output_file_path)
-        except FileNotFoundError:
-            pass # It's okay if it doesn't exist, that's the point
+        except Exception:
+            pass # Ignore if it can't be removed
 
-        try:
-            # Simulate ORCA executable and input file exist, but output file does not.
-            def mock_exists_logic(path_to_check):
-                if path_to_check == "orca":
-                    return True
-                if path_to_check == input_file_path:
-                    return True
-                if path_to_check == output_file_path:
-                    return False  # Simulate output not created
-                return False
+        def mock_exists_logic(path_to_check):
+            if path_to_check == input_file_path:
+                return True
+            if path_to_check == output_file_path:
+                return False  # Simulate output file not being created
+            return False
 
-            mock_exists.side_effect = mock_exists_logic
-
-            # ORCA subprocess itself "succeeds" (returncode 0), but the output file is missing.
-            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="OK", stderr="")
-
-            success, out_path = run_orca_calculation(input_file_path, orca_path="orca")
-
-            # run_orca_calculation checks os.path.exists(output_file) after the run.
-            # If it's False (as per our mock_exists_logic), it returns False, "".
-            assert not success
-            assert out_path == ""
-            assert not os.path.exists(output_file_path)  # Double check on disk
-
-        finally:
-            if os.path.exists(input_file_path):
-                os.remove(input_file_path)
-            if os.path.exists(output_file_path):  # Should not exist, but cleanup if it does
-                os.remove(output_file_path)
+        mock_exists.side_effect = mock_exists_logic
+        # Simulate a successful ORCA run, but the test's premise is that we want to check
+        # what happens if the output file is *still* not found.
+        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="OK", stderr="")
+        success, out_path = run_orca_calculation(input_file_path, orca_path="orca")
+        assert not success
+        assert out_path == ""
 
 
 @patch("moml.simulation.quantum_mechanics.parser.orca_parser.smiles_to_3d_structure")

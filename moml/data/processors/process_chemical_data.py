@@ -21,13 +21,6 @@ import logging
 import pandas as pd
 from pathlib import Path
 from rdkit import Chem
-
-# Configure logger
-logger = logging.getLogger(__name__)
-
-# Import consolidated MoML functions
-
-# Import utility functions
 from moml.utils import (
     load_data,
     inspect_data,
@@ -41,6 +34,13 @@ from moml.utils import (
     calculate_molecular_complexity,
     categorize_molecular_features,
 )
+
+# Configure logger
+logger = logging.getLogger(__name__)
+
+# Import consolidated MoML functions
+
+# Import utility functions
 
 # Define paths
 ROOT_DIR = Path(__file__).resolve().parents[3]

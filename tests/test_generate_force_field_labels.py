@@ -13,7 +13,7 @@ def test_load_smiles_map(tmp_path):
 
 
 @patch("scripts.generate_force_field_labels.ForceFieldMapper")
-@patch("scripts.generate_force_field_labels.parse_orca_output")
+@patch("scripts.generate_force_field_labels.safe_parse_orca_output")
 def test_generate_labels(mock_parse, mock_mapper_cls, tmp_path):
     out_file = tmp_path / "mol1.out"
     out_file.write_text("dummy")
@@ -26,8 +26,15 @@ def test_generate_labels(mock_parse, mock_mapper_cls, tmp_path):
     mock_mapper.generate_force_field_parameters.return_value = {"charges": {"H1": 0.1}}
     mock_mapper_cls.return_value = mock_mapper
 
-    labels = generate_labels(str(tmp_path), {"mol1": "H"})
+    labels = generate_labels(str(tmp_path), {"mol1": "[H]"})
 
     mock_parse.assert_called_with(str(out_file))
     mock_mapper.generate_force_field_parameters.assert_called_once()
-    assert labels == {"mol1": {"charges": {"H1": 0.1}}} 
+    assert labels == {
+        "mol1": {
+            "charges": {"H1": 0.1},
+            "bonds": {},
+            "angles": {},
+            "dihedrals": {},
+        }
+    } 

@@ -67,7 +67,7 @@ def main():
         npz_file,
     ]
     try:
-        result_process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
         logger.info(f"Successfully converted JSON to NPZ: {npz_file}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error converting JSON to NPZ: {e}")

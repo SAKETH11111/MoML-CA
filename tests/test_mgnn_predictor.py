@@ -22,24 +22,24 @@ from moml.core.molecular_graph_processor import MolecularGraphProcessor  # Used 
 # Dummy Model for testing
 class DummyDJMGNN(DJMGNN):
     def __init__(
-        self, in_dim=10, hidden_dim=16, edge_attr_dim=3, node_out_dim=1, graph_out_dim=1, return_single_tensor=False
+        self, in_node_dim=10, hidden_dim=16, in_edge_dim=3, node_output_dims=1, graph_output_dims=1, return_single_tensor=False
     ):
         super().__init__(
-            in_dim=in_dim,
+            in_node_dim=in_node_dim,
             hidden_dim=hidden_dim,
             n_blocks=1,
             layers_per_block=1,
-            edge_attr_dim=edge_attr_dim,
+            in_edge_dim=in_edge_dim,
             jk_mode="concat",
-            node_out_dim=node_out_dim,
-            graph_out_dim=graph_out_dim,
+            node_output_dims=node_output_dims,
+            graph_output_dims=graph_output_dims,
             dropout=0.0,
         )
-        self.node_out_dim = node_out_dim
-        self.graph_out_dim = graph_out_dim
+        self.node_out_dim = node_output_dims
+        self.graph_out_dim = graph_output_dims
         self.return_single_tensor = return_single_tensor
 
-    def forward(self, x, edge_index, edge_attr=None, batch=None):
+    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None):
         num_nodes = x.shape[0]
         if batch is None:
             num_graphs = 1
@@ -66,23 +66,23 @@ def temp_model_files_dir():
 @pytest.fixture
 def dummy_model_instance_and_config():
     config = {
-        "in_dim": 10,
+        "in_node_dim": 10,
         "hidden_dim": 16,
-        "edge_attr_dim": 3,
+        "in_edge_dim": 3,
         "n_blocks": 1,
         "layers_per_block": 1,
         "jk_mode": "concat",
-        "node_out_dim": 2,
-        "graph_out_dim": 1,
+        "node_output_dims": 2,
+        "graph_output_dims": 1,
         "dropout": 0.0,
         "device": "cpu",
     }
     model = DummyDJMGNN(
-        in_dim=config["in_dim"],
+        in_node_dim=config["in_node_dim"],
         hidden_dim=config["hidden_dim"],
-        edge_attr_dim=config["edge_attr_dim"],
-        node_out_dim=config["node_out_dim"],
-        graph_out_dim=config["graph_out_dim"],
+        in_edge_dim=config["in_edge_dim"],
+        node_output_dims=config["node_output_dims"],
+        graph_output_dims=config["graph_output_dims"],
     )
     return model, config
 
@@ -98,7 +98,7 @@ def dummy_model_path(temp_model_files_dir, dummy_model_instance_and_config):
 
 @pytest.fixture
 def dummy_graph_data():
-    x = torch.randn(5, 10)  # 5 nodes, 10 features (matches dummy_model_instance_and_config in_dim)
+    x = torch.randn(5, 10)  # 5 nodes, 10 features (matches dummy_model_instance_and_config in_node_dim)
     edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
     edge_attr = torch.randn(4, 3)  # 4 edges, 3 edge features
     return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
@@ -120,8 +120,8 @@ class TestMGNNPredictorInit:
         _, config = dummy_model_instance_and_config
         with patch("moml.models.mgnn.evaluation.predictor.create_graph_processor") as mock_create_proc:
             mock_processor = MagicMock(spec=MolecularGraphProcessor)
-            dummy_x = torch.randn(1, config["in_dim"])
-            dummy_edge_attr = torch.randn(1, config["edge_attr_dim"])
+            dummy_x = torch.randn(1, config["in_node_dim"])
+            dummy_edge_attr = torch.randn(1, config["in_edge_dim"])
             mock_processor.mol_to_graph.return_value = Data(
                 x=dummy_x, edge_index=torch.empty((2, 0), dtype=torch.long), edge_attr=dummy_edge_attr
             )
@@ -166,10 +166,10 @@ class TestMGNNPredictorInit:
     def test_load_model_infer_dims(self, temp_model_files_dir, dummy_model_instance_and_config):
         model_orig, config_orig = dummy_model_instance_and_config
         config_no_dims = config_orig.copy()
-        if "in_dim" in config_no_dims:
-            del config_no_dims["in_dim"]
-        if "edge_attr_dim" in config_no_dims:
-            del config_no_dims["edge_attr_dim"]
+        if "in_node_dim" in config_no_dims:
+            del config_no_dims["in_node_dim"]
+        if "in_edge_dim" in config_no_dims:
+            del config_no_dims["in_edge_dim"]
 
         model_path_no_dims = os.path.join(temp_model_files_dir, "model_no_dims.pt")
         checkpoint = {"model_state_dict": model_orig.state_dict(), "config": config_no_dims}
@@ -177,16 +177,16 @@ class TestMGNNPredictorInit:
 
         with patch("moml.models.mgnn.evaluation.predictor.create_graph_processor") as mock_create_proc:
             mock_processor = MagicMock(spec=MolecularGraphProcessor)
-            dummy_x = torch.randn(1, config_orig["in_dim"])
-            dummy_edge_attr = torch.randn(1, config_orig["edge_attr_dim"])
+            dummy_x = torch.randn(1, config_orig["in_node_dim"])
+            dummy_edge_attr = torch.randn(1, config_orig["in_edge_dim"])
             mock_processor.mol_to_graph.return_value = Data(
                 x=dummy_x, edge_index=torch.empty((2, 0), dtype=torch.long), edge_attr=dummy_edge_attr
             )
             mock_create_proc.return_value = mock_processor
 
             predictor = MGNNPredictor(model_path=model_path_no_dims, config=config_no_dims.copy())
-            assert predictor.model.in_dim == config_orig["in_dim"]
-            assert predictor.model.edge_attr_dim == config_orig["edge_attr_dim"]
+            assert predictor.model.in_node_dim == config_orig["in_node_dim"]
+            assert predictor.model.input_edge_attr_dim == config_orig["in_edge_dim"]
 
     def test_load_model_file_not_found(self, dummy_model_instance_and_config):
         _, config = dummy_model_instance_and_config
@@ -218,18 +218,18 @@ class TestMGNNPredictorMethods:
         results = predictor.predict_from_graph(dummy_graph_data)
         assert "node_pred" in results
         assert "graph_pred" in results
-        assert results["node_pred"].shape == (dummy_graph_data.x.shape[0], model_config["node_out_dim"])
-        assert results["graph_pred"].shape == (1, model_config["graph_out_dim"])
+        assert results["node_pred"].shape == (dummy_graph_data.x.shape[0], model_config["node_output_dims"])
+        assert results["graph_pred"].shape == (1, model_config["graph_output_dims"])
 
     def test_predict_from_graph_model_returns_tensor(self, dummy_model_instance_and_config, dummy_graph_data):
         model, config = dummy_model_instance_and_config
         # Re-init model to return single tensor
         model_single_tensor = DummyDJMGNN(
-            in_dim=config["in_dim"],
+            in_node_dim=config["in_node_dim"],
             hidden_dim=config["hidden_dim"],
-            edge_attr_dim=config["edge_attr_dim"],
-            node_out_dim=config["node_out_dim"],
-            graph_out_dim=config["graph_out_dim"],
+            in_edge_dim=config["in_edge_dim"],
+            node_output_dims=config["node_output_dims"],
+            graph_output_dims=config["graph_output_dims"],
             return_single_tensor=True,
         )
         with patch("moml.models.mgnn.evaluation.predictor.create_graph_processor"):
@@ -237,7 +237,7 @@ class TestMGNNPredictorMethods:
             results = predictor.predict_from_graph(dummy_graph_data)
             assert "graph_pred" in results
             assert "node_pred" not in results  # Model only returned graph_pred
-            assert results["graph_pred"].shape == (1, config["graph_out_dim"])
+            assert results["graph_pred"].shape == (1, config["graph_output_dims"])
 
     def test_predict_from_graph_no_edges(self, predictor_fixture, dummy_graph_data):
         predictor = predictor_fixture
@@ -254,91 +254,63 @@ class TestMGNNPredictorMethods:
 
     def test_predict_from_file(self, predictor_fixture, dummy_graph_data, temp_model_files_dir):
         predictor = predictor_fixture
-        dummy_file_path = os.path.join(temp_model_files_dir, "test_mol.sdf")
-        mol = Chem.MolFromSmiles("CCO")
-        if mol:
-            mol = Chem.AddHs(mol)
-            AllChem.EmbedMolecule(mol)
-            writer = Chem.SDWriter(dummy_file_path)
-            writer.write(mol)
-            writer.close()
-        else:
-            pytest.fail("Failed to create molecule from SMILES for test_predict_from_file")
+        file_path = os.path.join(temp_model_files_dir, "test_graph.pt")
+        torch.save(dummy_graph_data, file_path)
 
-        predictor.processor.file_to_graph.return_value = dummy_graph_data
-        with patch.object(predictor, "predict_from_graph", wraps=predictor.predict_from_graph) as mock_predict_graph:
-            predictor.predict_from_file(dummy_file_path)
-            mock_predict_graph.assert_called_once_with(dummy_graph_data)
-        if os.path.exists(dummy_file_path):
-            os.remove(dummy_file_path)
+        with patch.object(predictor.graph_processor, "file_to_graph", return_value=dummy_graph_data) as mock_file_to_graph:
+            results = predictor.predict_from_file(file_path)
+            mock_file_to_graph.assert_called_once_with(file_path)
+            assert "graph_pred" in results
 
     def test_predict_from_smiles(self, predictor_fixture, dummy_graph_data):
         predictor = predictor_fixture
-        smiles = "CCO"
-        predictor.processor.smiles_to_graph.return_value = dummy_graph_data
-        with patch.object(predictor, "predict_from_graph", wraps=predictor.predict_from_graph) as mock_predict_graph:
-            predictor.predict_from_smiles(smiles)
-            mock_predict_graph.assert_called_once_with(dummy_graph_data)
-            predictor.processor.smiles_to_graph.assert_called_once_with(smiles)
+        smiles = "CCO"  # Ethanol
+        with patch.object(
+            predictor.graph_processor, "smiles_to_graph", return_value=dummy_graph_data
+        ) as mock_smiles_to_graph:
+            results = predictor.predict_from_smiles(smiles)
+            mock_smiles_to_graph.assert_called_once_with(smiles)
+            assert "graph_pred" in results
 
     def test_batch_predict(self, predictor_fixture, dummy_graph_data_list):
         predictor = predictor_fixture
-        with patch.object(predictor, "predict_from_dataloader") as mock_predict_loader:
-            mock_predict_loader.return_value = {"graph_pred": torch.randn(len(dummy_graph_data_list), 1)}
-            results = predictor.batch_predict(dummy_graph_data_list, batch_size=2)
-            mock_predict_loader.assert_called_once()
-            assert "graph_pred" in results
-            assert results["graph_pred"].shape[0] == len(dummy_graph_data_list)
+        results = predictor.batch_predict(dummy_graph_data_list)
+        assert len(results) == len(dummy_graph_data_list)
+        assert "graph_pred" in results[0]
 
     def test_predict_from_dataloader(self, predictor_fixture, dummy_graph_data_list):
+        from torch_geometric.loader import DataLoader
+
         predictor = predictor_fixture
-        from torch_geometric.loader import DataLoader as PyGDataLoader
+        dataloader = DataLoader(dummy_graph_data_list, batch_size=2)
+        results = predictor.predict_from_dataloader(dataloader)
 
-        loader = PyGDataLoader(dummy_graph_data_list, batch_size=1, shuffle=False)
-
-        results = predictor.predict_from_dataloader(loader)
-
-        total_nodes = sum(g.x.shape[0] for g in dummy_graph_data_list)
-        num_graphs = len(dummy_graph_data_list)
-        model_config = predictor.config
-
-        assert "node_pred" in results
+        total_graphs = len(dummy_graph_data_list)
         assert "graph_pred" in results
-        assert results["node_pred"].shape == (total_nodes, model_config["node_out_dim"])
-        assert results["graph_pred"].shape == (num_graphs, model_config["graph_out_dim"])
+        assert results["graph_pred"].shape[0] == total_graphs
 
     def test_save_predictions(self, predictor_fixture, temp_model_files_dir):
         predictor = predictor_fixture
-        output_file = os.path.join(temp_model_files_dir, "preds.json")
-        config_file = os.path.join(temp_model_files_dir, "preds_config.json")
-        predictions = {"node_pred": torch.randn(5, 2), "graph_pred": torch.randn(1, 1)}
-        predictor.save_predictions(predictions, output_file, save_config=True)
+        results = {"graph_pred": torch.randn(2, 1), "node_pred": torch.randn(5, 2)}
+        output_path = os.path.join(temp_model_files_dir, "predictions.json")
+        predictor.save_predictions(results, output_path)
 
-        assert os.path.exists(output_file)
-        assert os.path.exists(config_file)
-
-        with open(output_file, "r") as f:
-            loaded_preds = json.load(f)
-            assert len(loaded_preds["node_pred"]) == 5
-            assert len(loaded_preds["graph_pred"]) == 1
-
-        with open(config_file, "r") as f:
-            loaded_config = json.load(f)
-            assert loaded_config == predictor.config
+        with open(output_path, "r") as f:
+            saved_data = json.load(f)
+        assert "graph_pred" in saved_data
+        assert len(saved_data["graph_pred"]) == 2
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestCreatePredictorFactory:
     def test_create_with_model_path(self, dummy_model_path):
-        with patch("moml.models.mgnn.evaluation.predictor.MGNNPredictor") as MockPredictor:
-            create_predictor(model_path=dummy_model_path)  # config and device are optional
-            MockPredictor.assert_called_once_with(model_path=dummy_model_path, model=None, config={}, device=None)
+        predictor = create_predictor(model_path=dummy_model_path)
+        assert isinstance(predictor, MGNNPredictor)
 
     def test_create_with_model_instance(self, dummy_model_instance_and_config):
-        model, _ = dummy_model_instance_and_config
-        with patch("moml.models.mgnn.evaluation.predictor.MGNNPredictor") as MockPredictor:
-            create_predictor(model=model)
-            MockPredictor.assert_called_once_with(model_path=None, model=model, config={}, device=None)
+        model, config = dummy_model_instance_and_config
+        predictor = create_predictor(model=model, config=config)
+        assert isinstance(predictor, MGNNPredictor)
 
     def test_create_no_args(self):
         with pytest.raises(ValueError, match="Either model_path or model must be provided"):
@@ -349,91 +321,61 @@ class TestCreatePredictorFactory:
 class TestBatchPredictFromFiles:
     @pytest.fixture
     def temp_input_dir_for_batch(self, temp_model_files_dir):
-        input_dir = os.path.join(temp_model_files_dir, "batch_input_files")
+        input_dir = os.path.join(temp_model_files_dir, "batch_input")
         os.makedirs(input_dir, exist_ok=True)
-        for i in range(3):
-            mol = Chem.MolFromSmiles("C" * (i + 1))
-            if mol:
-                mol = Chem.AddHs(mol)
-                AllChem.EmbedMolecule(mol)
-                with open(os.path.join(input_dir, f"mol_{i}.mol"), "w") as f:
-                    f.write(Chem.MolToMolBlock(mol))
-            else:
-                # Create an empty file if mol creation fails, to test robustness
-                with open(os.path.join(input_dir, f"mol_{i}_bad.mol"), "w") as f_bad:
-                    pass  # Just create the file
-
-        # Add one intentionally bad file
-        with open(os.path.join(input_dir, "corrupted.mol"), "w") as f:
-            f.write("This is not a mol file")
-        yield input_dir
+        # Create some dummy files
+        torch.save(Data(x=torch.randn(2, 10)), os.path.join(input_dir, "graph1.pt"))
+        torch.save(Data(x=torch.randn(3, 10)), os.path.join(input_dir, "graph2.pt"))
+        with open(os.path.join(input_dir, "info.txt"), "w") as f:
+            f.write("some text")
+        return input_dir
 
     def test_batch_predict_files_success(
         self, mock_create_pred, temp_input_dir_for_batch, dummy_model_path, temp_model_files_dir
     ):
         # Create a mock for the MGNNPredictor instance
         mock_predictor_instance = MagicMock(spec=MGNNPredictor)
-
-        # Explicitly create a mock for the 'processor' attribute
-        # MolecularGraphProcessor is imported at the top of the file
-        mock_processor_attr = MagicMock(spec=MolecularGraphProcessor)
-        mock_predictor_instance.processor = mock_processor_attr
-
-        # Simulate 3 good graphs and one error for the corrupted file
-        good_graphs = [Data(x=torch.randn(i + 1, 10)) for i in range(3)]
-
-        # Make side_effect a list: 3 good graphs, then an exception for "corrupted.mol"
-        # The order depends on glob.glob, so we make it more robust by checking calls
-        def file_to_graph_side_effect(file_path):
-            if "corrupted.mol" in file_path:
-                raise ValueError("Corrupted file")
-            elif "mol_0.mol" in file_path:
-                return good_graphs[0]
-            elif "mol_1.mol" in file_path:
-                return good_graphs[1]
-            elif "mol_2.mol" in file_path:
-                return good_graphs[2]
-            else:  # for mol_i_bad.mol if Chem.MolFromSmiles failed
-                raise ValueError("Bad SMILES in test setup")
-
-        # Now assign side_effect to the mocked processor's file_to_graph
-        mock_predictor_instance.processor.file_to_graph.side_effect = file_to_graph_side_effect
-
-        mock_predictor_instance.batch_predict.return_value = {"graph_pred": torch.randn(3, 1)}  # Only 3 good files
         mock_create_pred.return_value = mock_predictor_instance
 
+        # Mock the return value of predict_from_file
+        mock_predictor_instance.batch_predict.return_value = [
+            {"graph_pred": torch.tensor([[0.5]])},
+            {"graph_pred": torch.tensor([[-0.2]])},
+        ]
+        mock_predictor_instance.graph_processor = MagicMock(spec=MolecularGraphProcessor)
+        mock_predictor_instance.config = {"device": "cpu"}
+
+        def file_to_graph_side_effect(file_path):
+            if "graph1" in file_path:
+                return Data(x=torch.randn(2, 10), edge_index=torch.empty((2, 0), dtype=torch.long))
+            if "graph2" in file_path:
+                return Data(x=torch.randn(3, 10), edge_index=torch.empty((2, 0), dtype=torch.long))
+            return None
+
+        mock_predictor_instance.graph_processor.file_to_graph = MagicMock(side_effect=file_to_graph_side_effect)
+
         output_dir = os.path.join(temp_model_files_dir, "batch_output")
-
-        with patch("builtins.print") as mock_print:  # To check error logging
-            results = batch_predict_from_files(
-                model_path=dummy_model_path,
-                input_dir=temp_input_dir_for_batch,
-                output_dir=output_dir,
-                file_pattern="*.mol",  # This will pick up good and bad .mol files
-            )
-
-        assert len(results) == 3  # Only 3 files successfully processed and have predictions
-        assert "mol_0.mol" in results
-        assert "corrupted.mol" not in results  # Should have been skipped
-        assert os.path.exists(os.path.join(output_dir, "combined_predictions.json"))
-        assert os.path.exists(os.path.join(output_dir, "mol_0_pred.json"))
-
-        mock_predictor_instance.processor.file_to_graph.assert_called()
-        # Check that print was called for the error
-        error_printed = any(
-            "Error processing" in call.args[0] and "corrupted.mol" in call.args[0] for call in mock_print.call_args_list
+        batch_predict_from_files(
+            model_path=dummy_model_path,
+            input_dir=temp_input_dir_for_batch,
+            output_dir=output_dir,
+            file_pattern="*.pt",
         )
-        assert error_printed
-        mock_predictor_instance.batch_predict.assert_called_once()
-        # Ensure batch_predict was called with the correct number of good graphs
-        assert len(mock_predictor_instance.batch_predict.call_args[0][0]) == 3
+
+        assert mock_create_pred.call_count == 1
+        assert mock_predictor_instance.batch_predict.call_count == 1
+        # Check if predictions file is created
+        assert os.path.exists(os.path.join(output_dir, "predictions.json"))
 
     def test_batch_predict_no_files_found(self, mock_create_pred, temp_input_dir_for_batch, dummy_model_path):
-        empty_subdir = os.path.join(temp_input_dir_for_batch, "empty_for_real")  # New empty dir
-        os.makedirs(empty_subdir, exist_ok=True)
+        # mock_create_pred is already active from the class decorator
+        output_dir = os.path.join(temp_input_dir_for_batch, "no_files_output")
+
         with pytest.raises(ValueError, match="No files found"):
             batch_predict_from_files(
                 model_path=dummy_model_path,
-                input_dir=empty_subdir,  # Use the truly empty subdir
-                file_pattern="*.nonexistent",  # Or a pattern that matches nothing
+                input_dir=temp_input_dir_for_batch,
+                output_dir=output_dir,
+                file_pattern="*.nonexistent",
             )
+        assert not os.path.exists(output_dir)

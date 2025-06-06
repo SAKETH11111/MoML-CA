@@ -10,8 +10,6 @@ DenseGNNBlock and JKAggregator are reused from `djmgnn.py`.
 from __future__ import annotations
 import math
 import logging
-
-logger = logging.getLogger(__name__)
 from typing import List, Optional, Dict, Any, Tuple
 
 import torch
@@ -22,6 +20,7 @@ from torch_scatter import scatter_add
 
 from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator  # adjust the path if needed
 
+logger = logging.getLogger(__name__)
 
 #  GPU scatter / gather helpers
 def aggregate_fine_to_coarse(feat: torch.Tensor, fine2coarse: torch.Tensor, coarse_count: torch.Tensor) -> torch.Tensor:

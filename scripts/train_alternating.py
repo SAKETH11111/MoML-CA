@@ -10,6 +10,7 @@ import yaml
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import ConcatDataset
 from torch_geometric.loader import DataLoader as GraphDataLoader
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -48,65 +49,57 @@ def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type
     )
     
     node_pred = out.get("node_pred")
-    if task_type == "node":
-        graph_pred = out.get("graph_pred_spice_energy")
-    else:
-        graph_pred = out.get("graph_pred_main")
+    graph_pred = out.get("graph_pred")
+    energy_pred = out.get("energy_pred")
     
     node_loss = torch.tensor(0.0, device=device)
-    if node_pred is not None and hasattr(batch, 'node_y') and batch.node_y is not None:
+    graph_loss = torch.tensor(0.0, device=device)
+    energy_loss = torch.tensor(0.0, device=device)
+
+    # Node-level loss
+    if task_type == "node" and node_pred is not None and hasattr(batch, 'node_y') and batch.node_y is not None:
         if batch.node_y.numel() > 0 and node_pred.numel() > 0:
             if node_pred.shape == batch.node_y.shape:
                 node_loss = nn.MSELoss()(node_pred, batch.node_y)
             else:
                 logger.warning(f"Node prediction shape {node_pred.shape} mismatch with target shape {batch.node_y.shape}. Skipping node loss.")
-        elif node_pred.numel() == 0 and batch.node_y.numel() == 0:
-            pass
-        else:
-            logger.warning(f"Node prediction or target is empty while the other is not. Pred empty: {node_pred.numel()==0}, Target empty: {batch.node_y.numel()==0}. Skipping node loss.")
 
-    graph_loss = torch.tensor(0.0, device=device)
-    if graph_pred is not None and hasattr(batch, 'y') and batch.y is not None:
-        if batch.y.numel() > 0 and graph_pred.numel() > 0:
-            targets = batch.y
+    # Graph-level loss (main)
+    if task_type == "graph" and graph_pred is not None and hasattr(batch, 'y_graph') and batch.y_graph is not None:
+        if batch.y_graph.numel() > 0 and graph_pred.numel() > 0:
+            targets = batch.y_graph
             if targets.dim() == 1:
                 targets = targets.view(-1, 1)
             
-            if graph_pred.size(-1) != targets.size(-1):
-                logger.warning(
-                    f"Graph prediction dim {graph_pred.size(-1)} mismatch with target dim {targets.size(-1)}. "
-                    f"Attempting to adjust. Graph pred shape: {graph_pred.shape}, Target shape: {targets.shape}"
-                )
-                if targets.size(-1) == 1 and graph_pred.size(-1) > 1:
-                    graph_pred_adjusted = graph_pred[:, :1]
-                    graph_loss = nn.MSELoss()(graph_pred_adjusted, targets)
-                elif graph_pred.size(-1) == 1 and targets.size(-1) > 1:
-                    logger.warning("Graph prediction is single-dim but target is multi-dim. Skipping graph loss or apply specific logic.")
-                else:
-                    min_dim = min(graph_pred.size(-1), targets.size(-1))
-                    if min_dim > 0:
-                        graph_pred_adjusted = graph_pred[:, :min_dim]
-                        targets_adjusted = targets[:, :min_dim]
-                        graph_loss = nn.MSELoss()(graph_pred_adjusted, targets_adjusted)
-                    else:
-                        logger.warning("Min dimension for graph loss is 0. Skipping graph loss.")
-            else:
+            if graph_pred.size(-1) == targets.size(-1):
                 graph_loss = nn.MSELoss()(graph_pred, targets)
-        elif graph_pred.numel() == 0 and batch.y.numel() == 0:
-            pass
-        else:
-             logger.warning(f"Graph prediction or target is empty while the other is not. Pred empty: {graph_pred.numel()==0}, Target empty: {batch.y.numel()==0}. Skipping graph loss.")
+        elif graph_pred is not None:
+            logger.warning(f"Graph prediction or target data is missing or empty. Skipping graph loss.")
+    
+    # Energy loss (SPICE)
+    if task_type == "node" and energy_pred is not None and hasattr(batch, 'y_graph') and batch.y_graph is not None:
+        if batch.y_graph.numel() > 0 and energy_pred.numel() > 0:
+            targets = batch.y_graph
+            if targets.dim() == 1:
+                targets = targets.view(-1, 1)
 
-    return node_loss, graph_loss
+            if energy_pred.size(-1) == targets.size(-1):
+                energy_loss = nn.MSELoss()(energy_pred, targets)
+            else:
+                logger.warning(f"SPICE energy prediction dim {energy_pred.size(-1)} mismatch with target dim {targets.size(-1)}. Skipping energy loss.")
+
+    return node_loss, graph_loss, energy_loss
 
 
-def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_weight, logger, lambda_weight=1000.0, task_type: str = "graph"):
+def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_weight, logger, lambda_weight=1000.0, lambda_energy_weight=1.0, task_type: str = "graph"):
     model.train()
     optimizer.zero_grad()
     
-    node_loss, graph_loss = compute_losses(model, batch, device, logger, lambda_weight, task_type=task_type)
+    node_loss, graph_loss, energy_loss = compute_losses(model, batch, device, logger, lambda_weight, task_type=task_type)
     
-    total_loss = loss_node_weight * lambda_weight * node_loss + loss_graph_weight * graph_loss
+    total_loss = (loss_node_weight * lambda_weight * node_loss) + \
+                 (loss_graph_weight * graph_loss) + \
+                 (loss_node_weight * lambda_energy_weight * energy_loss) # energy loss is also on node step
     
     if total_loss > 0:
         total_loss.backward()
@@ -117,6 +110,7 @@ def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_wei
         'total_loss': total_loss.item() if total_loss > 0 else 0.0,
         'node_loss': node_loss.item() if isinstance(node_loss, torch.Tensor) else node_loss,
         'graph_loss': graph_loss.item() if isinstance(graph_loss, torch.Tensor) else graph_loss,
+        'energy_loss': energy_loss.item() if isinstance(energy_loss, torch.Tensor) else energy_loss,
         'loss_node_weight': loss_node_weight,
         'loss_graph_weight': loss_graph_weight
     }
@@ -137,10 +131,12 @@ def save_checkpoint(model, optimizer, step, loss, checkpoint_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='Alternating training for DJMGNN')
+    parser.add_argument('--dataset', type=str, default='qm9', choices=['qm9', 'pfas', 'spice', 'qm9+pfas'], help='Dataset to use for training')
     parser.add_argument('--max_steps', type=int, default=10000, help='Maximum training steps')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
-    parser.add_argument('--lambda_weight', type=float, default=1000.0, help='Lambda weighting factor')
+    parser.add_argument('--lambda_weight', type=float, default=1000.0, help='Lambda weighting factor for node loss')
+    parser.add_argument('--lambda_energy_weight', type=float, default=1000.0, help='Lambda weighting factor for SPICE energy loss')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
     parser.add_argument('--save_every', type=int, default=1000, help='Save checkpoint every N steps')
     parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
@@ -165,44 +161,56 @@ def main():
         device = torch.device(args.device)
     logger.info(f"Using device: {device}")
     
+    # Set in_node_dim based on dataset
+    if args.dataset == 'qm9' or args.dataset == 'qm9+pfas':
+        in_node_dim_cfg = 11  # QM9 has 11 node features
+    elif args.dataset == 'pfas':
+        in_node_dim_cfg = 23 # Example value, adjust if necessary
+    elif args.dataset == 'spice':
+        in_node_dim_cfg = 23 # Example value, adjust if necessary
+    else:
+        in_node_dim_cfg = config.get('mgnn', {}).get('in_node_dim', 1)
+    
     try:
         print("Loading datasets...")
     
-        try:
+        # Graph-level dataset
+        if args.dataset == 'qm9+pfas':
             qm9_dataset = get_dataset("qm9", split="train")
             pfas_dataset = get_dataset("pfas", split="train")
-            ds_graph = torch.utils.data.ConcatDataset([qm9_dataset, pfas_dataset])
-            print(f"Loaded QM9 ({len(qm9_dataset)}) + PFAS ({len(pfas_dataset)}) datasets")
-        except Exception as e:
-            print(f"Could not load QM9 dataset: {e}")
-            print("Using only PFAS dataset for graph-level tasks")
-            ds_graph = get_dataset("pfas", split="train")
+            ds_graph = ConcatDataset([qm9_dataset, pfas_dataset])
+        else:
+            ds_graph = get_dataset(args.dataset, split="train")
         
         graph_loader = GraphDataLoader(
-            ds_graph, 
-            batch_size=args.batch_size, 
+            ds_graph,  # type: ignore
+            batch_size=args.batch_size,
             shuffle=True,
             num_workers=2
         )
 
-        ds_node = get_dataset("spice", split="train")
-        node_loader = GraphDataLoader(
-            ds_node, 
-            batch_size=args.batch_size, 
-            shuffle=True,
-            num_workers=2
-        )
+        # Node-level dataset (always SPICE for alternating training)
+        node_loader = None
+        try:
+            ds_node = get_dataset("spice", split="train")
+            node_loader = GraphDataLoader(
+                ds_node,  # type: ignore
+                batch_size=args.batch_size,
+                shuffle=True,
+                num_workers=2
+            )
+        except Exception as e:
+            logger.warning(f"Could not load SPICE dataset: {e}. Node-level tasks will be skipped.")
         
         graph_cycle = create_cycle_iterator(graph_loader)
-        node_cycle = create_cycle_iterator(node_loader)
+        node_cycle = create_cycle_iterator(node_loader) if node_loader else None
         
         logger.info("Initializing DJMGNN model...")
 
         mgnn_config = config.get('mgnn', {})
-        in_node_dim_cfg = mgnn_config.get('in_node_dim', 1)
         graph_output_dims_cfg = mgnn_config.get('graph_output_dims', 19) 
         node_output_dims_cfg = mgnn_config.get('node_output_dims', 3)   
-        spice_graph_output_dims_cfg = mgnn_config.get('spice_graph_output_dims', 1)
+        energy_output_dims_cfg = mgnn_config.get('energy_output_dims', 1)
         hidden_dim_cfg = mgnn_config.get('hidden_channels', 128) 
         n_blocks_cfg = mgnn_config.get('num_layers', 4) 
 
@@ -211,7 +219,7 @@ def main():
             in_edge_dim=0,
             node_output_dims=node_output_dims_cfg,     
             graph_output_dims=graph_output_dims_cfg,   
-            spice_graph_output_dims=spice_graph_output_dims_cfg,
+            energy_output_dims=energy_output_dims_cfg,
             hidden_dim=hidden_dim_cfg,        
             n_blocks=n_blocks_cfg             
         )
@@ -229,12 +237,13 @@ def main():
             'total_loss': 0.0,
             'node_loss': 0.0,
             'graph_loss': 0.0,
+            'energy_loss': 0.0,
             'loss_node_weight': 0,
             'loss_graph_weight': 0
         }
         
         for step in range(args.max_steps):
-            if step % 2 == 0:
+            if step % 2 == 0 or node_cycle is None:
                 batch = next(graph_cycle)
                 loss_node_weight = 0
                 loss_graph_weight = 1
@@ -242,7 +251,7 @@ def main():
             else:
                 batch = next(node_cycle)
                 loss_node_weight = 1
-                loss_graph_weight = 1
+                loss_graph_weight = 0 # No graph loss on node step
                 task_type = "node"
             
             metrics = train_step(
@@ -254,6 +263,7 @@ def main():
                 loss_graph_weight=loss_graph_weight,
                 logger=logger,
                 lambda_weight=args.lambda_weight,
+                lambda_energy_weight=args.lambda_energy_weight,
                 task_type=task_type
             )
             
@@ -264,6 +274,7 @@ def main():
                     f"Total Loss: {metrics['total_loss']:.6f} | "
                     f"Node Loss: {metrics['node_loss']:.6f} | "
                     f"Graph Loss: {metrics['graph_loss']:.6f} | "
+                    f"Energy Loss: {metrics['energy_loss']:.6f} | "
                     f"Time: {elapsed_time:.1f}s"
                 )
             
@@ -281,6 +292,13 @@ def main():
         total_time = time.time() - start_time
         logger.info(f"Total training time: {total_time:.2f} seconds")
         
+    except KeyboardInterrupt:
+        logger.warning("Training interrupted by user.")
+        if 'model' in locals() and 'optimizer' in locals() and 'step' in locals() and 'metrics' in locals():
+            final_checkpoint = save_checkpoint(
+                model, optimizer, step, metrics.get('total_loss', 0.0), args.checkpoint_dir
+            )
+            logger.info(f"Saved partial checkpoint: {final_checkpoint}")
     except Exception as e:
         logger.error(f"Training failed: {str(e)}", exc_info=True)
         raise

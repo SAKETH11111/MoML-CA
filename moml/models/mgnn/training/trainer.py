@@ -1,12 +1,4 @@
 from typing import Union, Dict, List, Optional, Callable, Any
-
-"""
-Trainer module for molecular graph neural networks.
-
-This module provides a trainer class to handle the training and evaluation of
-molecular graph neural network models.
-"""
-
 import os
 import torch
 import torch.nn as nn
@@ -19,6 +11,12 @@ from moml.core import create_graph_processor
 from moml.models.mgnn import DJMGNN
 from moml.models.mgnn.evaluation import MGNNPredictor
 
+"""
+Trainer module for molecular graph neural networks.
+
+This module provides a trainer class to handle the training and evaluation of
+molecular graph neural network models.
+"""
 
 class MGNNTrainer:
     """
@@ -591,7 +589,7 @@ def create_trainer(
         Configured trainer with initialized model
     """
     # Create graph processor to get dimensions
-    processor = create_graph_processor(config)
+    create_graph_processor(config)
 
     # Prepare arguments for DJMGNN constructor
     model_kwargs = {

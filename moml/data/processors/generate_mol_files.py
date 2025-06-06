@@ -10,8 +10,6 @@ them as individual MOL or SDF files in a specified output directory.
 
 import argparse
 import logging
-import os
-import pandas as pd
 from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import AllChem

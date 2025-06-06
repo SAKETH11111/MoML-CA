@@ -165,7 +165,7 @@ class TestCrossScaleAttention:
     def test_set_cluster_mappings(self, dummy_cluster_mappings):
         attn_scale_dims = [HIDDEN_DIM_HMGNN] * NUM_SCALES
         num_scales_val = len(attn_scale_dims)
-        attention = CrossScaleAttentionMH(n_scales=num_scales_val, hidden_dim=CROSS_ATTN_HIDDEN_DIM)
+        CrossScaleAttentionMH(n_scales=num_scales_val, hidden_dim=CROSS_ATTN_HIDDEN_DIM)
         # The set_cluster_mappings method does not exist on CrossScaleAttentionMH.
         # Cluster mappings are typically passed to the forward method or handled internally.
         # Commenting out for now; will need to investigate how mappings are used.

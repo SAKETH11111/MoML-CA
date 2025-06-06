@@ -232,12 +232,12 @@ def main():
     )
 
     # Hierarchical graph command
-    hierarchical_parser = subparsers.add_parser(
+    subparsers.add_parser(
         "hierarchical", parents=[graph_parser], help="Generate hierarchical graphs"
     )
 
     # Analyze command
-    analyze_parser = subparsers.add_parser("analyze", parents=[common_parser], help="Analyze functional groups")
+    subparsers.add_parser("analyze", parents=[common_parser], help="Analyze functional groups")
 
     args = parser.parse_args()
 
