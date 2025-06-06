@@ -1,6 +1,3 @@
-# Training Configuration for MoML-CA_PFAS Project
-
-# General training settings
 training:
   epochs: 100
   batch_size: 32
@@ -10,15 +7,17 @@ training:
   patience: 10
   validation_split: 0.2
 
-# MGNN specific settings
 mgnn:
   hidden_channels: 128
   num_layers: 3
   dropout: 0.2
   readout: "mean"
-  jk_mode: "cat"  # For JK-Nets
+  jk_mode: "cat"
+  graph_output_dims: 19
+  node_output_dims: 3
+  in_node_dim: 23
+  spice_graph_output_dims: 1
 
-# LSTM specific settings
 lstm:
   hidden_size: 64
   num_layers: 2
@@ -26,7 +25,6 @@ lstm:
   dropout: 0.1
   sequence_length: 50
 
-# Logging and checkpoints
 logging:
   log_interval: 10
-  checkpoint_interval: 5 
+  checkpoint_interval: 5
