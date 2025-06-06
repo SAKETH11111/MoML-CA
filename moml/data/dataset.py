@@ -1,5 +1,4 @@
-from typing import Dict, Any, Optional, Union
-import torch
+from typing import Optional, Union
 from torch_geometric.data import Dataset
 from torch_geometric.datasets import QM9
 from torch.utils.data import ConcatDataset

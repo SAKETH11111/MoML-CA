@@ -2,8 +2,11 @@ import torch
 import numpy as np
 import h5py
 import os
-from typing import List, Optional
+import logging
+from typing import List
 from torch_geometric.data import InMemoryDataset, Data
+
+logger = logging.getLogger(__name__)
 
 
 class SpiceDataset(InMemoryDataset):
@@ -35,7 +38,7 @@ class SpiceDataset(InMemoryDataset):
                 else:
                     self.data, self.slices = None, None # Handle case where (None, None) was saved
             except Exception as e:
-                print(f"WARNING: Could not load processed data from {self.processed_paths[0]}: {e}")
+                logger.warning(f"Could not load processed data from {self.processed_paths[0]}: {e}")
                 self.data, self.slices = None, None # Fallback to empty
         else:
             self.data, self.slices = None, None # No processed file, so data is empty initially
@@ -116,13 +119,13 @@ class SpiceDataset(InMemoryDataset):
         X: List[Data] = []
 
         mol_keys = list(h5.keys())
-        print(f"DEBUG: Found mol_keys: {mol_keys}") # DEBUG
+        logger.debug(f"Found mol_keys: {mol_keys}")
         for mol_key in mol_keys:
             mol_data = h5[mol_key]
             atomic_numbers = mol_data['atomic_numbers'][:]
             
             conformation_keys = sorted(mol_data['conformations'].keys(), key=int)
-            print(f"DEBUG: For {mol_key}, found conformation_keys: {conformation_keys}") # DEBUG
+            logger.debug(f"For {mol_key}, found conformation_keys: {conformation_keys}")
             for conf_idx_str in conformation_keys:
                 coords  = np.array(mol_data['conformations'][conf_idx_str])  # [N,3]
                 # Use the integer index for gradient and energy as they are datasets
@@ -145,14 +148,14 @@ class SpiceDataset(InMemoryDataset):
         
         h5.close() 
         
-        print(f"DEBUG: Total samples collected (len(X)): {len(X)}") # DEBUG
+        logger.debug(f"Total samples collected (len(X)): {len(X)}")
 
         if not X: # Handle empty dataset case
-            print("DEBUG: No data collected, saving empty dataset (None, None).") # DEBUG
+            logger.debug("No data collected, saving empty dataset (None, None).")
             torch.save((None, None), self.processed_paths[0]) # Save (None, None) for empty dataset
             return
 
         data, slices = self.collate(X)
-        print(f"DEBUG: Collated data: {data}") # DEBUG
-        print(f"DEBUG: Collated slices: {slices}") # DEBUG
+        logger.debug(f"Collated data: {data}")
+        logger.debug(f"Collated slices: {slices}")
         torch.save((data, slices), self.processed_paths[0])
