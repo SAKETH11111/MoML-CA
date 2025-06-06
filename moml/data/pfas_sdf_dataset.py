@@ -1,7 +1,7 @@
 import os
 import glob
-from typing import List, Optional, Union, Callable
-from itertools import repeat # Add this import
+from itertools import repeat
+from typing import Callable, List, Optional
 import torch
 import numpy as np
 from torch_geometric.data import Dataset, Data
@@ -15,6 +15,7 @@ RDLogger.DisableLog('rdApp.*')
 
 
 class PFASSDFDataset(Dataset):
+    """
     Dataset for PFAS molecules from SDF files.
     Computes 19-dimensional molecular descriptors as graph-level targets.
     """
