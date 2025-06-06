@@ -1,6 +1,7 @@
 import os
 import glob
 from typing import List, Optional, Union, Callable
+from itertools import repeat # Add this import
 import torch
 import numpy as np
 from torch_geometric.data import Dataset, Data
@@ -14,7 +15,6 @@ RDLogger.DisableLog('rdApp.*')
 
 
 class PFASSDFDataset(Dataset):
-    """
     Dataset for PFAS molecules from SDF files.
     Computes 19-dimensional molecular descriptors as graph-level targets.
     """
@@ -83,7 +83,7 @@ class PFASSDFDataset(Dataset):
         # Save processed data
         split_suffix = f"_{self.split}" if self.split else ""
         processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        torch.save(data_list, processed_path, weights_only=False)
+        torch.save(self.collate(data_list), processed_path)
     
     def _mol_to_data(self, mol: Chem.Mol) -> Optional[Data]:
         """Convert RDKit molecule to PyTorch Geometric Data object."""
@@ -140,26 +140,27 @@ class PFASSDFDataset(Dataset):
     def _compute_molecular_descriptors(self, mol: Chem.Mol) -> torch.Tensor:
         """Compute 19 molecular descriptors to match QM9 target dimensions."""
         try:
+            # Basic molecular properties (similar to QM9)
             descriptors = [
                 Descriptors.MolWt(mol),                    # Molecular weight
-                Descriptors.MolLogP(mol),                  # LogP
-                Descriptors.NumHDonors(mol),               # H-bond donors
-                Descriptors.NumHAcceptors(mol),            # H-bond acceptors
-                Descriptors.NumRotatableBonds(mol),        # Rotatable bonds
+                Descriptors.ExactMolWt(mol),               # Exact molecular weight  
+                Chem.Crippen.MolLogP(mol),                      # LogP
                 Descriptors.TPSA(mol),                     # Topological polar surface area
+                Descriptors.NumHAcceptors(mol),            # H-bond acceptors
+                Descriptors.NumHDonors(mol),               # H-bond donors
+                Descriptors.NumRotatableBonds(mol),        # Rotatable bonds
                 Descriptors.NumAromaticRings(mol),         # Aromatic rings
                 Descriptors.NumSaturatedRings(mol),        # Saturated rings
-                Descriptors.NumHeterocycles(mol),          # Heterocycles
-                Descriptors.RingCount(mol),                # Total ring count
-                mol.GetNumHeavyAtoms(),                    # Heavy atom count (replaced FractionCsp3)
-                Descriptors.NumValenceElectrons(mol),      # Valence electrons
-                rdMolDescriptors.BertzCT(mol),            # Bertz complexity
-                Descriptors.Ipc(mol),                      # Information content
-                Descriptors.HallKierAlpha(mol),           # Hall-Kier alpha
-                Descriptors.Kappa1(mol),                   # Kappa1 shape index
-                Descriptors.Kappa2(mol),                   # Kappa2 shape index
-                Descriptors.Kappa3(mol),                   # Kappa3 shape index
-                Descriptors.LabuteASA(mol),               # Labute surface area
+                mol.GetNumHeavyAtoms(),                    # Number of heavy atoms (instead of FractionCsp3)
+                Descriptors.BalabanJ(mol),                 # Balaban J index
+                rdMolDescriptors.BertzCT(mol),                  # Bertz complexity
+                Descriptors.HallKierAlpha(mol),            # Hall-Kier alpha
+                Descriptors.Kappa1(mol),                   # Kappa shape index 1
+                Descriptors.Kappa2(mol),                   # Kappa shape index 2
+                Descriptors.Kappa3(mol),                   # Kappa shape index 3
+                Descriptors.LabuteASA(mol),                # Labute ASA
+                Descriptors.NumHeteroatoms(mol),           # Number of heteroatoms
+                len([a for a in mol.GetAtoms() if a.GetSymbol() == 'F'])  # Fluorine count (PFAS-specific)
             ]
             
             # Handle any None or invalid values
@@ -175,14 +176,27 @@ class PFASSDFDataset(Dataset):
     
     def len(self) -> int:
         """Return the number of samples in the dataset."""
+        # Load processed data to get length
         split_suffix = f"_{self.split}" if self.split else ""
         processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        data_list = torch.load(processed_path, weights_only=False)
-        return len(data_list)
-    
+        if not hasattr(self, '_data_list_len'):
+            # Load only if not already loaded or length not cached
+            if not hasattr(self, 'data') or self.data is None:
+                self.data, self.slices = torch.load(processed_path, weights_only=False)
+            self._data_list_len = self.slices[list(self.slices.keys())[0]].size(0) -1 if self.slices else 0
+        return self._data_list_len
+
     def get(self, idx: int) -> Data:
         """Get a single sample from the dataset."""
         split_suffix = f"_{self.split}" if self.split else ""
         processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        data_list = torch.load(processed_path, weights_only=False)
-        return data_list[idx] 
+        if not hasattr(self, 'data') or self.data is None:
+             self.data, self.slices = torch.load(processed_path, weights_only=False)
+        
+        data = Data()
+        for key in self.data.keys:
+            item, slices = self.data[key], self.slices[key]
+            s = list(repeat(slice(None), item.dim()))
+            s[self.data.__cat_dim__(key, item)] = slice(slices[idx], slices[idx+1])
+            data[key] = item[s]
+        return data

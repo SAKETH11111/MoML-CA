@@ -175,29 +175,34 @@ def main():
     logger.info(f"Using device: {device}")
     
     try:
-        # Load datasets
-        logger.info("Loading datasets...")
+        # Create datasets
+        print("Loading datasets...")
+    
+        # Try to load QM9, fall back to just PFAS if not available
+        try:
+            qm9_dataset = get_dataset("qm9", split="train")
+            pfas_dataset = get_dataset("pfas", split="train")
+            ds_graph = torch.utils.data.ConcatDataset([qm9_dataset, pfas_dataset])
+            print(f"Loaded QM9 ({len(qm9_dataset)}) + PFAS ({len(pfas_dataset)}) datasets")
+        except Exception as e:
+            print(f"Could not load QM9 dataset: {e}")
+            print("Using only PFAS dataset for graph-level tasks")
+            ds_graph = get_dataset("pfas", split="train")
         
-        # Graph datasets (QM9 + PFAS)
-        graph_dataset = get_dataset('qm9+pfas', root='data/')
         graph_loader = GraphDataLoader(
-            graph_dataset, 
+            ds_graph, 
             batch_size=args.batch_size, 
             shuffle=True,
             num_workers=2
         )
-        
-        # Node dataset (SPICE)
-        node_dataset = get_dataset('spice', root='data/')
+
+        ds_node = get_dataset("spice", split="train")
         node_loader = GraphDataLoader(
-            node_dataset, 
+            ds_node, 
             batch_size=args.batch_size, 
             shuffle=True,
             num_workers=2
         )
-        
-        logger.info(f"Graph dataset size: {len(graph_dataset)}")
-        logger.info(f"Node dataset size: {len(node_dataset)}")
         
         # Create cycle iterators
         graph_cycle = create_cycle_iterator(graph_loader)
@@ -286,4 +291,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
