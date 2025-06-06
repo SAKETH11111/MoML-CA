@@ -143,6 +143,8 @@ class SpiceDataset(InMemoryDataset):
                 )
                 X.append(d)
         
+        h5.close() 
+        
         print(f"DEBUG: Total samples collected (len(X)): {len(X)}") # DEBUG
 
         if not X: # Handle empty dataset case
