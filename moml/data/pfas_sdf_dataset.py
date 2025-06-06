@@ -7,7 +7,6 @@ import numpy as np
 from torch_geometric.data import Dataset, Data
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
-import warnings
 
 # Suppress RDKit warnings
 from rdkit import RDLogger
@@ -106,7 +105,7 @@ class PFASSDFDataset(Dataset):
                                    conf.GetAtomPosition(i).y, 
                                    conf.GetAtomPosition(i).z] for i in range(N)], 
                                  dtype=torch.float)
-            except:
+            except (AttributeError, ValueError):
                 # If no conformer, generate 2D coordinates
                 from rdkit.Chem import rdDepictor
                 rdDepictor.Compute2DCoords(mol)

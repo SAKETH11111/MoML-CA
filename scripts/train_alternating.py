@@ -4,15 +4,12 @@ import os
 import sys
 import argparse
 import logging
-from typing import Dict, Any, Optional
 import time
-import itertools
 import yaml
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
 from torch_geometric.loader import DataLoader as GraphDataLoader
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,7 +36,7 @@ def create_cycle_iterator(dataloader):
             yield batch
 
 
-def compute_losses(model, batch, device, lambda_weight=1000.0, task_type: str = "graph"):
+def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type: str = "graph"):
     batch = batch.to(device)
     
     out = model(
@@ -103,11 +100,11 @@ def compute_losses(model, batch, device, lambda_weight=1000.0, task_type: str = 
     return node_loss, graph_loss
 
 
-def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_weight, lambda_weight=1000.0, task_type: str = "graph"):
+def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_weight, logger, lambda_weight=1000.0, task_type: str = "graph"):
     model.train()
     optimizer.zero_grad()
     
-    node_loss, graph_loss = compute_losses(model, batch, device, lambda_weight, task_type=task_type)
+    node_loss, graph_loss = compute_losses(model, batch, device, logger, lambda_weight, task_type=task_type)
     
     total_loss = loss_node_weight * lambda_weight * node_loss + loss_graph_weight * graph_loss
     
@@ -246,6 +243,7 @@ def main():
                 device=device,
                 loss_node_weight=loss_node_weight,
                 loss_graph_weight=loss_graph_weight,
+                logger=logger,
                 lambda_weight=args.lambda_weight,
                 task_type=task_type
             )

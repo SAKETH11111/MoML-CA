@@ -403,11 +403,7 @@ class DJMGNN(nn.Module):
         out_node = self.node_head(node_emb_for_head)
 
         graph_emb_input = h_aggregated 
-        if h_aggregated.size(0) == 0:
-            expected_graph_batch_size = current_batch.max().item() + 1 if current_batch.numel() > 0 else 0
-            graph_emb = self.pool(graph_emb_input, current_batch)
-        else:
-            graph_emb = self.pool(graph_emb_input, current_batch)
+        graph_emb = self.pool(graph_emb_input, current_batch)
         
         out_graph_main = self.graph_head(graph_emb)
         out_graph_spice_energy = self.head_graph_spice_energy(graph_emb)
