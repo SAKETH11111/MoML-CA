@@ -117,4 +117,6 @@ memory-bank/progress.md
 memory-bank/systemPatterns.md
 docs/
 
-CLAUDE.md
+CLAUDE.md*.pt
+MoML-CA/data/
+data/spice/processed/
