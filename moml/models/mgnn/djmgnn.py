@@ -309,7 +309,7 @@ class DJMGNN(nn.Module):
         return edge_index[:, mask], (edge_attr[mask] if edge_attr is not None and edge_attr.numel() > 0 else edge_attr)
 
     def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None):
-        if x.numel() == 0:
+        if x is None or x.numel() == 0:
             return {
                 "node_pred": torch.empty(0, self.node_output_dims).to(x.device), 
                 "graph_pred": torch.empty(0, self.graph_output_dims).to(x.device), 

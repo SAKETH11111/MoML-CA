@@ -10,14 +10,14 @@ import yaml
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import ConcatDataset
 from torch_geometric.loader import DataLoader as GraphDataLoader
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from moml.data.dataset import get_dataset
 from moml.models.mgnn.djmgnn import DJMGNN
-
+from moml.data.feature_transforms import CreateEdges, FeaturizeNodes
+from torchvision.transforms import Compose
 
 def setup_logging():
     logging.basicConfig(
@@ -32,6 +32,8 @@ def setup_logging():
 
 
 def create_cycle_iterator(dataloader):
+    if dataloader is None:
+        return None
     while True:
         for batch in dataloader:
             yield batch
@@ -39,7 +41,11 @@ def create_cycle_iterator(dataloader):
 
 def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type: str = "graph"):
     batch = batch.to(device)
-    
+
+    if not hasattr(batch, 'x') or batch.x is None:
+        logger.warning("Batch is missing 'x' attribute. Skipping loss computation.")
+        return torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)
+
     out = model(
         x=batch.x,
         edge_index=batch.edge_index,
@@ -56,7 +62,7 @@ def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type
     graph_loss = torch.tensor(0.0, device=device)
     energy_loss = torch.tensor(0.0, device=device)
 
-    # Node-level loss
+    # Node-level loss (SPICE)
     if task_type == "node" and node_pred is not None and hasattr(batch, 'node_y') and batch.node_y is not None:
         if batch.node_y.numel() > 0 and node_pred.numel() > 0:
             if node_pred.shape == batch.node_y.shape:
@@ -64,15 +70,14 @@ def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type
             else:
                 logger.warning(f"Node prediction shape {node_pred.shape} mismatch with target shape {batch.node_y.shape}. Skipping node loss.")
 
-    # Graph-level loss (main)
-    if task_type == "graph" and graph_pred is not None and hasattr(batch, 'y_graph') and batch.y_graph is not None:
-        if batch.y_graph.numel() > 0 and graph_pred.numel() > 0:
-            targets = batch.y_graph
-            if targets.dim() == 1:
-                targets = targets.view(-1, 1)
-            
-            if graph_pred.size(-1) == targets.size(-1):
+    # Graph-level loss (QM9)
+    if task_type == "graph" and graph_pred is not None and hasattr(batch, 'y') and batch.y is not None:
+        if batch.y.numel() > 0 and graph_pred.numel() > 0:
+            targets = batch.y
+            if graph_pred.shape == targets.shape:
                 graph_loss = nn.MSELoss()(graph_pred, targets)
+            else:
+                logger.warning(f"Graph prediction shape {graph_pred.shape} mismatch with target shape {targets.shape}. Skipping graph loss.")
         elif graph_pred is not None:
             logger.warning(f"Graph prediction or target data is missing or empty. Skipping graph loss.")
     
@@ -101,10 +106,12 @@ def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_wei
                  (loss_graph_weight * graph_loss) + \
                  (loss_node_weight * lambda_energy_weight * energy_loss) # energy loss is also on node step
     
-    if total_loss > 0:
+    if torch.isfinite(total_loss) and total_loss > 0:
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+    elif not torch.isfinite(total_loss):
+        logger.warning(f"Non-finite loss detected ({total_loss}). Skipping step.")
     
     return {
         'total_loss': total_loss.item() if total_loss > 0 else 0.0,
@@ -131,16 +138,17 @@ def save_checkpoint(model, optimizer, step, loss, checkpoint_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='Alternating training for DJMGNN')
-    parser.add_argument('--dataset', type=str, default='qm9', choices=['qm9', 'pfas', 'spice', 'qm9+pfas'], help='Dataset to use for training')
     parser.add_argument('--max_steps', type=int, default=10000, help='Maximum training steps')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+    parser.add_argument('--batch_graph', type=int, default=64, help='Batch size for graph-level tasks')
+    parser.add_argument('--batch_node', type=int, default=4, help='Batch size for node-level tasks')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--lambda_weight', type=float, default=1000.0, help='Lambda weighting factor for node loss')
-    parser.add_argument('--lambda_energy_weight', type=float, default=1000.0, help='Lambda weighting factor for SPICE energy loss')
+    parser.add_argument('--lambda_energy_weight', type=float, default=1.0, help='Lambda weighting factor for SPICE energy loss')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
     parser.add_argument('--save_every', type=int, default=1000, help='Save checkpoint every N steps')
+    parser.add_argument('--log_every', type=int, default=20, help='Log every N steps')
     parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
-    parser.add_argument('--config_path', type=str, default='config/training_config.template.yaml', help='Path to training config YAML file')
+    parser.add_argument('--config_path', type=str, default='MoML-CA/config/training_config.template.yaml', help='Path to training config YAML file')
     args = parser.parse_args()
     
     logger = setup_logging()
@@ -162,48 +170,36 @@ def main():
     logger.info(f"Using device: {device}")
     
     # Set in_node_dim based on dataset
-    if args.dataset == 'qm9' or args.dataset == 'qm9+pfas':
-        in_node_dim_cfg = 11  # QM9 has 11 node features
-    elif args.dataset == 'pfas':
-        in_node_dim_cfg = 23 # Example value, adjust if necessary
-    elif args.dataset == 'spice':
-        in_node_dim_cfg = 23 # Example value, adjust if necessary
-    else:
-        in_node_dim_cfg = config.get('mgnn', {}).get('in_node_dim', 1)
+    in_node_dim_cfg = 29
     
     try:
-        print("Loading datasets...")
-    
-        # Graph-level dataset
-        if args.dataset == 'qm9+pfas':
-            qm9_dataset = get_dataset("qm9", split="train")
-            pfas_dataset = get_dataset("pfas", split="train")
-            ds_graph = ConcatDataset([qm9_dataset, pfas_dataset])
-        else:
-            ds_graph = get_dataset(args.dataset, split="train")
-        
-        graph_loader = GraphDataLoader(
-            ds_graph,  # type: ignore
-            batch_size=args.batch_size,
-            shuffle=True,
-            num_workers=2
-        )
+        transform = Compose([CreateEdges(), FeaturizeNodes()])
 
-        # Node-level dataset (always SPICE for alternating training)
-        node_loader = None
+        # Graph-level dataset (QM9)
+        ds_graph = get_dataset("qm9", root="MoML-CA/data", pre_transform=transform, force_reload=True)
+        graph_loader = GraphDataLoader(
+            ds_graph,
+            batch_size=args.batch_graph,
+            shuffle=True,
+            num_workers=4
+        )
+        graph_cycle = create_cycle_iterator(graph_loader)
+        logger.info(f"Loaded QM9 dataset for graph-level tasks with {len(ds_graph)} samples.")
+
+        # Node-level dataset (SPICE)
         try:
-            ds_node = get_dataset("spice", split="train")
+            ds_node = get_dataset("spice", root="MoML-CA/data", split="train", pre_transform=transform, force_reload=True)
             node_loader = GraphDataLoader(
-                ds_node,  # type: ignore
-                batch_size=args.batch_size,
+                ds_node,
+                batch_size=args.batch_node,
                 shuffle=True,
-                num_workers=2
+                num_workers=4
             )
+            node_cycle = create_cycle_iterator(node_loader)
+            logger.info(f"Loaded SPICE dataset for node-level tasks with {len(ds_node)} samples.")
         except Exception as e:
             logger.warning(f"Could not load SPICE dataset: {e}. Node-level tasks will be skipped.")
-        
-        graph_cycle = create_cycle_iterator(graph_loader)
-        node_cycle = create_cycle_iterator(node_loader) if node_loader else None
+            node_cycle = None
         
         logger.info("Initializing DJMGNN model...")
 
@@ -230,6 +226,12 @@ def main():
         logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
         
         logger.info("Starting alternating training...")
+
+        if node_cycle is None:
+            logger.error("Node-level dataset (SPICE) failed to load. Aborting.")
+            sys.exit(1)
+        assert node_cycle is not None, "Node cycle iterator should not be None"
+
         start_time = time.time()
         
         # Initialize metrics with default values to handle case where max_steps is 0
@@ -243,13 +245,18 @@ def main():
         }
         
         for step in range(args.max_steps):
-            if step % 2 == 0 or node_cycle is None:
+            if step % 2 == 0:
                 batch = next(graph_cycle)
                 loss_node_weight = 0
                 loss_graph_weight = 1
                 task_type = "graph"
             else:
+                if node_cycle is None:
+                    logger.warning("Node-level dataset not available, skipping node step.")
+                    continue
                 batch = next(node_cycle)
+                assert hasattr(batch, "node_y") and batch.node_y is not None and batch.node_y.numel() > 0, \
+                    "SPICE batch is missing 'node_y' or it's empty."
                 loss_node_weight = 1
                 loss_graph_weight = 0 # No graph loss on node step
                 task_type = "node"
@@ -267,7 +274,9 @@ def main():
                 task_type=task_type
             )
             
-            if step % 100 == 0:
+            # Log the graph step and the subsequent node step when the graph step is a logging step
+            if step % args.log_every == 0 or \
+               (node_cycle and task_type == "node" and (step - 1) % args.log_every == 0):
                 elapsed_time = time.time() - start_time
                 logger.info(
                     f"Step {step:5d} | Task: {task_type:5s} | "

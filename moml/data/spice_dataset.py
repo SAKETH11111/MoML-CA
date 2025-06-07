@@ -25,9 +25,9 @@ class SpiceDataset(InMemoryDataset):
             version. The data object will be transformed before every access.
             (default: :obj:`None`)
     """
-    def __init__(self, root: str, split: str = "train", transform: Optional[Callable[..., Any]] = None) -> None:
+    def __init__(self, root: str, split: str = "train", transform: Optional[Callable[..., Any]] = None, pre_transform: Optional[Callable[..., Any]] = None) -> None:
         self.split = split
-        super().__init__(root, transform, None) # pre_transform is None. This will trigger download/process if needed.
+        super().__init__(root, transform, pre_transform)
         
         # Explicitly load data if processed file exists and is not empty
         if os.path.exists(self.processed_paths[0]):
@@ -112,6 +112,7 @@ class SpiceDataset(InMemoryDataset):
         a distance cutoff.
         """
         raw_file_path = self.raw_paths[0]
+        
         if not os.path.exists(raw_file_path):
             raise FileNotFoundError(f"Raw SPICE dataset not found at {raw_file_path}")
 
@@ -123,7 +124,8 @@ class SpiceDataset(InMemoryDataset):
         else:
             mol_keys = list(h5.keys())
         logger.debug(f"Found mol_keys: {mol_keys}")
-        for mol_key in mol_keys:
+        # Limit to a small subset for faster processing during testing
+        for mol_key in mol_keys[:100]:
             if 'molecules' in h5:
                 mol_data = h5['molecules'][mol_key]
             else:
@@ -153,9 +155,12 @@ class SpiceDataset(InMemoryDataset):
                 )
                 X.append(d)
         
-        h5.close() 
+        h5.close()
         
         logger.debug(f"Total samples collected (len(X)): {len(X)}")
+
+        if self.pre_transform is not None:
+            X = [self.pre_transform(data) for data in X]
 
         if not X: # Handle empty dataset case
             logger.debug("No data collected, saving empty dataset (None, None).")

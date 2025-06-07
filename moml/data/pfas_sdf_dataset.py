@@ -30,6 +30,20 @@ class PFASSDFDataset(InMemoryDataset):
         self.split = split
         super().__init__(root, transform, pre_transform, pre_filter)
         
+        # Explicitly load data if processed file exists
+        if os.path.exists(self.processed_paths[0]):
+            try:
+                loaded_data = torch.load(self.processed_paths[0])
+                if loaded_data[0] is not None:
+                    self.data, self.slices = loaded_data
+                else:
+                    self.data, self.slices = None, None
+            except Exception as e:
+                print(f"Could not load processed PFAS data from {self.processed_paths[0]}: {e}")
+                self.data, self.slices = None, None
+        else:
+            self.data, self.slices = None, None
+        
     @property
     def raw_file_names(self) -> List[str]:
         """Return list of SDF files in the raw directory."""
@@ -81,10 +95,13 @@ class PFASSDFDataset(InMemoryDataset):
             data_list = [self.pre_transform(data) for data in data_list]
         
         # Save processed data
+        if not data_list:
+            # Handle empty dataset
+            torch.save((None, None), self.processed_paths[0])
+            return
+
         data, slices = self.collate(data_list)
-        split_suffix = f"_{self.split}" if self.split else ""
-        processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        torch.save((data, slices), processed_path)
+        torch.save((data, slices), self.processed_paths[0])
     
     def _mol_to_data(self, mol: Chem.Mol) -> Optional[Data]:
         """Convert RDKit molecule to PyTorch Geometric Data object."""
@@ -97,7 +114,7 @@ class PFASSDFDataset(InMemoryDataset):
                 return None
             
             # Node features: atomic numbers
-            x = torch.tensor([atom.GetAtomicNum() for atom in atoms], dtype=torch.long)
+            z = torch.tensor([atom.GetAtomicNum() for atom in atoms], dtype=torch.long)
             
             # Node positions (3D coordinates)
             try:
@@ -132,7 +149,7 @@ class PFASSDFDataset(InMemoryDataset):
             # Compute 19-dimensional molecular descriptors as targets
             y = self._compute_molecular_descriptors(mol)
             
-            return Data(x=x, pos=pos, edge_index=edge_index, y=y)
+            return Data(z=z, pos=pos, edge_index=edge_index, y=y)
             
         except Exception as e:
             print(f"Error converting molecule to data: {e}")
