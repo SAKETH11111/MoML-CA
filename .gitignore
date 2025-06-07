@@ -120,3 +120,5 @@ docs/
 CLAUDE.md*.pt
 MoML-CA/data/
 data/spice/processed/
+*.pt
+data/*/processed/*.pt
