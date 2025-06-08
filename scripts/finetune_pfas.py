@@ -55,19 +55,21 @@ def main():
     transform = Compose([
         CreateEdges(),
         FeaturizeNodes(),
-        # We don't standardize PFAS targets as they are computed descriptors
+        StandardizeTargets(dataset_name="pfas"),
     ])
     dataset = get_dataset("pfas", root="data", transform=transform)
     loader = GraphDataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     # --- Fine-tuning Setup ---
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    loss_fn = torch.nn.MSELoss()
+    loss_fn = torch.nn.L1Loss()  # Use MAE loss
 
     # --- Fine-tuning Loop ---
     print(f"Starting fine-tuning for {args.max_steps} steps...")
     model.train()
     step = 0
+    ema_loss = None
+    beta = 0.95
     done = False
     while not done:
         for batch in loader:
@@ -90,9 +92,15 @@ def main():
             loss = loss_fn(preds, targets)
             loss.backward()
             optimizer.step()
+
+            # Update EMA loss
+            if ema_loss is None:
+                ema_loss = loss.item()
+            else:
+                ema_loss = beta * ema_loss + (1 - beta) * loss.item()
             
             if step % 20 == 0:
-                print(f"Step {step:5d} | Loss: {loss.item():.6f}")
+                print(f"Step {step:5d} | Loss: {loss.item():.6f} | EMA Loss: {ema_loss:.6f}")
 
             if step > 0 and step % args.save_every == 0:
                 intermediate_save_path = args.save_path.replace('.pt', f'_step_{step}.pt')

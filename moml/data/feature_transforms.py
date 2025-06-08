@@ -95,12 +95,6 @@ import yaml
 class StandardizeTargets:
     """A transform to standardize targets using pre-computed statistics."""
     def __init__(self, stats_path="data/target_stats.yaml", dataset_name="qm9"):
-        self.dataset_name = dataset_name
-        if self.dataset_name.lower() in ['pfas', 'none']:
-            self.mean = 0
-            self.std = 1
-            return
-
         with open(stats_path, 'r') as f:
             stats = yaml.safe_load(f)
         
@@ -109,12 +103,10 @@ class StandardizeTargets:
 
         self.mean = torch.tensor(stats[dataset_name]['mean'])
         self.std = torch.tensor(stats[dataset_name]['std'])
+        self.dataset_name = dataset_name
 
     def __call__(self, data: Data) -> Data:
-        if self.dataset_name.lower() in ['pfas', 'none']:
-            return data
-
-        target_attr = 'y' if self.dataset_name == 'qm9' else 'y_graph'
+        target_attr = 'y' if self.dataset_name in ['qm9', 'pfas'] else 'y_graph'
         if hasattr(data, target_attr) and getattr(data, target_attr) is not None:
             setattr(data, target_attr, (getattr(data, target_attr) - self.mean) / self.std)
         return data
