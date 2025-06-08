@@ -19,15 +19,35 @@ from moml.data.feature_transforms import CreateEdges, FeaturizeNodes, Standardiz
 from torchvision.transforms import Compose
 
 def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('alternating_training.log'),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
+    # Get the logger for the current module (__main__ when run as a script)
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    # Prevent adding handlers multiple times if this function were ever called more than once
+    if not logger.handlers:
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+        # StreamHandler for terminal output
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+        # FileHandler for output to alternating_training.log
+        try:
+            log_file_path = 'alternating_training.log'
+            file_handler = logging.FileHandler(log_file_path, mode='a') # 'a' for append
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            # This message goes to both handlers if file_handler was added successfully.
+            # Check for this message in both terminal and the log file.
+            logger.info(f"File logger initialized. Logging to: {os.path.abspath(log_file_path)}")
+        except Exception as e:
+            # Log error to stream handler if file handler setup fails
+            logger.error(f"CRITICAL: Failed to initialize file logger for '{log_file_path}': {e}", exc_info=True)
+    
+    # Stop messages from propagating to the root logger if it has other handlers
+    logger.propagate = False 
+    return logger
 
 
 def create_cycle_iterator(dataloader):
@@ -152,8 +172,9 @@ def main():
     parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Specific checkpoint file to resume from.')
     args = parser.parse_args()
     
-    logger = setup_logging()
-    logger.info("Starting alternating training for DJMGNN")
+    logger = setup_logging() # Logging is set up here
+    # The first log messages will now include the one from setup_logging itself
+    logger.info("Starting alternating training for DJMGNN") 
     logger.info(f"Arguments: {vars(args)}")
 
     try:
