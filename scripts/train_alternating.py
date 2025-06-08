@@ -149,6 +149,7 @@ def main():
     parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
     parser.add_argument('--config_path', type=str, default='config/training_config.template.yaml', help='Path to training config YAML file')
     parser.add_argument('--fresh_start', action='store_true', help='Start training from scratch, ignoring existing checkpoints.')
+    parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Specific checkpoint file to resume from.')
     args = parser.parse_args()
     
     logger = setup_logging()
@@ -177,7 +178,7 @@ def main():
         transform_spice = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name="spice")])
 
         # Graph-level dataset (QM9)
-        ds_graph = get_dataset("qm9", root="MoML-CA/data", transform=transform_qm9)
+        ds_graph = get_dataset("qm9", root="data", transform=transform_qm9)
         graph_loader = GraphDataLoader(
             ds_graph,
             batch_size=args.batch_graph,
@@ -189,7 +190,7 @@ def main():
 
         # Node-level dataset (SPICE)
         try:
-            ds_node = get_dataset("spice", root="MoML-CA/data", split="train", transform=transform_spice)
+            ds_node = get_dataset("spice", root="data", split="train", transform=transform_spice)
             node_loader = GraphDataLoader(
                 ds_node,
                 batch_size=args.batch_node,
@@ -227,13 +228,28 @@ def main():
 
         start_step = 0
         if not args.fresh_start:
-            latest_checkpoint_path = max(glob.glob(os.path.join(args.checkpoint_dir, '*.pt')), key=os.path.getctime, default=None)
-            if latest_checkpoint_path:
-                print(f"Resuming from checkpoint: {latest_checkpoint_path}")
-                checkpoint = torch.load(latest_checkpoint_path, map_location=device)
+            checkpoint_to_load = None
+            if args.resume_from_checkpoint:
+                if os.path.exists(args.resume_from_checkpoint):
+                    checkpoint_to_load = args.resume_from_checkpoint
+                else:
+                    logger.warning(f"Specified checkpoint {args.resume_from_checkpoint} not found. Attempting to load latest.")
+            
+            if checkpoint_to_load is None: # Fallback to latest if specific one not provided or not found
+                checkpoint_to_load = max(glob.glob(os.path.join(args.checkpoint_dir, '*.pt')), key=os.path.getctime, default=None)
+
+            if checkpoint_to_load:
+                logger.info(f"Resuming from checkpoint: {checkpoint_to_load}")
+                checkpoint = torch.load(checkpoint_to_load, map_location=device)
                 model.load_state_dict(checkpoint['model_state_dict'])
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 start_step = checkpoint.get('step', 0)
+                logger.info(f"Resumed from step {start_step} with loss {checkpoint.get('loss', 'N/A')}")
+            else:
+                logger.info("No checkpoint found. Starting from scratch.")
+        else:
+            logger.info("Starting fresh training as per --fresh_start flag.")
+
         
         logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
         
@@ -301,12 +317,14 @@ def main():
                 logger.info(f"Saved checkpoint: {checkpoint_path}")
         
         # This final_checkpoint save is important if max_steps is reached or if start_step >= max_steps
-        if args.max_steps > 0 : # Avoid saving if no steps were meant to be run
+        if args.max_steps > 0 and start_step < args.max_steps : # Avoid saving if no steps were run or if already past max_steps
             final_checkpoint = save_checkpoint(
                 model, optimizer, args.max_steps, metrics.get('total_loss', 0.0), args.checkpoint_dir
             )
             logger.info(f"Training completed. Final checkpoint: {final_checkpoint}")
-        else:
+        elif start_step >= args.max_steps:
+             logger.info(f"Training already completed or surpassed max_steps (start_step: {start_step}, max_steps: {args.max_steps}). No new checkpoint saved.")
+        else: # max_steps is 0 or negative
             logger.info(f"Training completed (max_steps was {args.max_steps}, start_step was {start_step}). No new checkpoint saved beyond initial load if applicable.")
 
         total_time = time.time() - start_time
