@@ -84,7 +84,7 @@ def main():
             )
             
             preds = out['graph_pred']
-            targets = batch.y
+            targets = batch.y.view(preds.shape)
             
             loss = loss_fn(preds, targets)
             loss.backward()
