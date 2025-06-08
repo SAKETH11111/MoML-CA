@@ -239,11 +239,6 @@ def main():
         
         logger.info("Starting alternating training...")
 
-        if node_cycle is None:
-            logger.error("Node-level dataset (SPICE) failed to load. Aborting.")
-            sys.exit(1)
-        assert node_cycle is not None, "Node cycle iterator should not be None"
-
         start_time = time.time()
         
         # Initialize metrics with default values to handle case where max_steps is 0
@@ -305,78 +300,15 @@ def main():
                 )
                 logger.info(f"Saved checkpoint: {checkpoint_path}")
         
-        final_checkpoint = save_checkpoint(
-            model, optimizer, args.max_steps, metrics['total_loss'], args.checkpoint_dir
-        )
-        logger.info(f"Training completed. Final checkpoint: {final_checkpoint}")
-        
-        total_time = time.time() - start_time
-        logger.info(f"Total training time: {total_time:.2f} seconds")
-        
-        # Initialize metrics with default values to handle case where max_steps is 0
-        metrics = {
-            'total_loss': 0.0,
-            'node_loss': 0.0,
-            'graph_loss': 0.0,
-            'energy_loss': 0.0,
-            'loss_node_weight': 0,
-            'loss_graph_weight': 0
-        }
-        
-        for step in range(args.max_steps):
-            if step % 2 == 0:
-                batch = next(graph_cycle)
-                loss_node_weight = 0
-                loss_graph_weight = 1
-                task_type = "graph"
-            else:
-                if node_cycle is None:
-                    logger.warning("Node-level dataset not available, skipping node step.")
-                    continue
-                batch = next(node_cycle)
-                assert hasattr(batch, "node_y") and batch.node_y is not None and batch.node_y.numel() > 0, \
-                    "SPICE batch is missing 'node_y' or it's empty."
-                loss_node_weight = 1
-                loss_graph_weight = 0 # No graph loss on node step
-                task_type = "node"
-            
-            metrics = train_step(
-                model=model,
-                batch=batch,
-                optimizer=optimizer,
-                device=device,
-                loss_node_weight=loss_node_weight,
-                loss_graph_weight=loss_graph_weight,
-                logger=logger,
-                lambda_weight=args.lambda_weight,
-                lambda_energy_weight=args.lambda_energy_weight,
-                task_type=task_type
+        # This final_checkpoint save is important if max_steps is reached or if start_step >= max_steps
+        if args.max_steps > 0 : # Avoid saving if no steps were meant to be run
+            final_checkpoint = save_checkpoint(
+                model, optimizer, args.max_steps, metrics.get('total_loss', 0.0), args.checkpoint_dir
             )
-            
-            # Log the graph step and the subsequent node step when the graph step is a logging step
-            if step % args.log_every == 0 or \
-               (node_cycle and task_type == "node" and (step - 1) % args.log_every == 0):
-                elapsed_time = time.time() - start_time
-                logger.info(
-                    f"Step {step:5d} | Task: {task_type:5s} | "
-                    f"Total Loss: {metrics['total_loss']:.6f} | "
-                    f"Node Loss: {metrics['node_loss']:.6f} | "
-                    f"Graph Loss: {metrics['graph_loss']:.6f} | "
-                    f"Energy Loss: {metrics['energy_loss']:.6f} | "
-                    f"Time: {elapsed_time:.1f}s"
-                )
-            
-            if step % args.save_every == 0 and step > 0:
-                checkpoint_path = save_checkpoint(
-                    model, optimizer, step, metrics['total_loss'], args.checkpoint_dir
-                )
-                logger.info(f"Saved checkpoint: {checkpoint_path}")
-        
-        final_checkpoint = save_checkpoint(
-            model, optimizer, args.max_steps, metrics['total_loss'], args.checkpoint_dir
-        )
-        logger.info(f"Training completed. Final checkpoint: {final_checkpoint}")
-        
+            logger.info(f"Training completed. Final checkpoint: {final_checkpoint}")
+        else:
+            logger.info(f"Training completed (max_steps was {args.max_steps}, start_step was {start_step}). No new checkpoint saved beyond initial load if applicable.")
+
         total_time = time.time() - start_time
         logger.info(f"Total training time: {total_time:.2f} seconds")
         
