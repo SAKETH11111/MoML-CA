@@ -24,6 +24,7 @@ def main():
     parser.add_argument('--device', type=str, default='cuda', help='Device to use for fine-tuning (cuda/cpu).')
     parser.add_argument('--config_path', type=str, default='config/training_config.template.yaml', help='Path to training config YAML file')
     parser.add_argument('--save_path', type=str, default='checkpoints/finetuned_pfas.pt', help='Path to save the fine-tuned model.')
+    parser.add_argument('--save_every', type=int, default=1000, help='Save a checkpoint every N steps.')
     args = parser.parse_args()
 
     print(f"Loading configuration from {args.config_path}...")
@@ -92,6 +93,17 @@ def main():
             
             if step % 20 == 0:
                 print(f"Step {step:5d} | Loss: {loss.item():.6f}")
+
+            if step > 0 and step % args.save_every == 0:
+                intermediate_save_path = args.save_path.replace('.pt', f'_step_{step}.pt')
+                os.makedirs(os.path.dirname(intermediate_save_path), exist_ok=True)
+                torch.save({
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'step': step,
+                    'loss': loss.item(),
+                }, intermediate_save_path)
+                print(f"Saved intermediate checkpoint to {intermediate_save_path}")
             
             step += 1
 
