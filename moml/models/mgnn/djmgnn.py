@@ -22,9 +22,9 @@ class GraphConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, edge_attr_dim):
         super().__init__()
         self.actual_edge_attr_dim = edge_attr_dim
-        _mlp_input_dim = 1 if edge_attr_dim == 0 else edge_attr_dim
-
-        self.edge_mlp = nn.Sequential(nn.Linear(_mlp_input_dim, in_channels * out_channels), nn.ReLU())
+        self._mlp_input_dim = 1 if edge_attr_dim == 0 else edge_attr_dim
+ 
+        self.edge_mlp = nn.Sequential(nn.Linear(self._mlp_input_dim, in_channels * out_channels), nn.ReLU())
         self.conv = NNConv(in_channels, out_channels, nn=self.edge_mlp, aggr="add")
         self.norm = GraphNorm(out_channels)
         self.res_connection = in_channels == out_channels
@@ -38,12 +38,12 @@ class GraphConvLayer(nn.Module):
             edge_attr_for_nnconv_input = None
 
         if edge_attr_for_nnconv_input is None and edge_index.numel() > 0:
-            dummy_dim = self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], 'in_features') else self.actual_edge_attr_dim
+            dummy_dim = self._mlp_input_dim
             edge_attr_for_nnconv_input = x.new_ones(edge_index.size(1), dummy_dim)
         elif edge_index.numel() == 0:
             edge_attr_for_nnconv_input = torch.empty(
-                0, self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], "in_features") else 1
-            ).to(x.device)
+                0, self._mlp_input_dim, device=x.device
+            )
 
         h = self.conv(x, edge_index, edge_attr_for_nnconv_input)
         h = self.norm(h)
@@ -215,11 +215,13 @@ class DJMGNN(nn.Module):
         self.graph_output_dims = graph_output_dims
         self.energy_output_dims = energy_output_dims
 
-        self.input_edge_attr_dim = in_edge_dim  
+        self.input_edge_attr_dim = in_edge_dim
+        self.in_node_dim = in_node_dim
+        self.initial_proj = nn.Linear(self.in_node_dim, hidden_dim)
         self.processed_edge_attr_dim = self.input_edge_attr_dim + (self.rbf_K if self.use_rbf else 0)
 
         self.blocks = nn.ModuleList()
-        current_block_in_dim = in_node_dim
+        current_block_in_dim = hidden_dim
         for _ in range(n_blocks):
             self.blocks.append(
                 DenseGNNBlock(
@@ -373,10 +375,13 @@ class DJMGNN(nn.Module):
         current_edge_index, current_edge_attr = self.drop_edges(current_edge_index, current_edge_attr)
 
         h_intermediate, outs = current_x, []
+        if h_intermediate.size(-1) != self.hidden_dim:
+            h_intermediate = self.initial_proj(h_intermediate)
+
         for block in self.blocks:
             if h_intermediate.numel() == 0:
-                block_output_dim = block.final_transition.out_features if hasattr(block, "final_transition") else self.hidden_dim
-                h_intermediate = torch.empty(0, block_output_dim).to(x.device)
+                block_output_dim = self.hidden_dim
+                h_intermediate = torch.empty(0, block_output_dim, device=x.device)
             else:
                 h_intermediate = block(h_intermediate, current_edge_index, current_edge_attr)
             outs.append(h_intermediate)
@@ -385,10 +390,10 @@ class DJMGNN(nn.Module):
 
         if h_aggregated is None or h_aggregated.numel() == 0:
             num_output_nodes = 0
-            batch_size_for_graph_pred = current_batch.max().item() + 1 if current_batch.numel() > 0 else 0
-            out_node = torch.empty(num_output_nodes, self.node_output_dims).to(x.device) 
-            out_graph = torch.empty(batch_size_for_graph_pred, self.graph_output_dims).to(x.device) 
-            out_energy = torch.empty(batch_size_for_graph_pred, self.energy_output_dims).to(x.device)
+            batch_size_for_graph_pred = int(current_batch.max().item() + 1) if current_batch.numel() > 0 else 0
+            out_node = torch.empty(num_output_nodes, self.node_output_dims, device=x.device)
+            out_graph = torch.empty(batch_size_for_graph_pred, self.graph_output_dims, device=x.device)
+            out_energy = torch.empty(batch_size_for_graph_pred, self.energy_output_dims, device=x.device)
             return {"node_pred": out_node, "graph_pred": out_graph, "energy_pred": out_energy}
 
         num_original_nodes = x.size(0) 
@@ -409,3 +414,4 @@ class DJMGNN(nn.Module):
         out_energy = self.head_energy(graph_emb)
         
         return {"node_pred": out_node, "graph_pred": out_graph, "energy_pred": out_energy}
+        

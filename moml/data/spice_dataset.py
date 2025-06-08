@@ -25,14 +25,14 @@ class SpiceDataset(InMemoryDataset):
             version. The data object will be transformed before every access.
             (default: :obj:`None`)
     """
-    def __init__(self, root: str, split: str = "train", transform: Optional[Callable[..., Any]] = None, pre_transform: Optional[Callable[..., Any]] = None) -> None:
+    def __init__(self, root: str, split: Optional[str] = "train", transform: Optional[Callable[..., Any]] = None, pre_transform: Optional[Callable[..., Any]] = None) -> None:
         self.split = split
         super().__init__(root, transform, pre_transform)
         
         # Explicitly load data if processed file exists and is not empty
         if os.path.exists(self.processed_paths[0]):
             try:
-                loaded_data = torch.load(self.processed_paths[0])
+                loaded_data = torch.load(self.processed_paths[0], weights_only=False)
                 if loaded_data[0] is not None: # Check if the saved data is not None (for empty datasets)
                     self.data, self.slices = loaded_data
                 else:
@@ -171,3 +171,4 @@ class SpiceDataset(InMemoryDataset):
         logger.debug(f"Collated data: {data}")
         logger.debug(f"Collated slices: {slices}")
         torch.save((data, slices), self.processed_paths[0])
+        

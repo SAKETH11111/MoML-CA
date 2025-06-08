@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Data Processing Utilities
 

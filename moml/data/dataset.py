@@ -1,10 +1,11 @@
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 from torch_geometric.data import Dataset
 from torch_geometric.datasets import QM9
 from torch.utils.data import ConcatDataset
 
 from .spice_dataset import SpiceDataset
 from .pfas_sdf_dataset import PFASSDFDataset
+from .spice_dataset import SpiceDataset
 from .feature_transforms import CreateEdges, FeaturizeNodes
 
 
@@ -12,7 +13,7 @@ def get_dataset(
     dataset_name: str,
     root: str = "data/",
     split: Optional[str] = None,
-    pre_transform: Optional[callable] = None,
+    pre_transform: Optional[Callable] = None,
     force_reload: bool = False,
     **kwargs
 ) -> Dataset:
@@ -40,6 +41,11 @@ def get_dataset(
         dataset = SpiceDataset(root=f"{root}/spice", split=split, pre_transform=pre_transform, **kwargs)
         print(f"Loaded SPICE dataset with {len(dataset)} samples")
         return dataset
+
+    elif dataset_name.lower() == 'pfas':
+        dataset = PFASSDFDataset(root=f"{root}/pfas", split=split, pre_transform=pre_transform, **kwargs)
+        print(f"Loaded PFAS dataset with {len(dataset)} samples")
+        return dataset
         
     else:
-        raise ValueError(f"Unknown dataset: {dataset_name}. Supported: 'qm9', 'spice'")
+        raise ValueError(f"Unknown dataset: {dataset_name}. Supported: 'qm9', 'spice', 'pfas'")

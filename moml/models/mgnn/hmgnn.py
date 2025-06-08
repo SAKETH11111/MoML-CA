@@ -1,3 +1,4 @@
+
 """
 hmgnn.py  – Hierarchical Molecular Graph Neural Network (HMGNN)
 

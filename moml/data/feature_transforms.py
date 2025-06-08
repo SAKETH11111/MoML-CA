@@ -65,5 +65,45 @@ class FeaturizeNodes:
             ))
             atom_features.append(features)
 
-        data.x = torch.tensor(atom_features, dtype=torch.float)
+        x = torch.tensor(atom_features, dtype=torch.float)
+        
+        # If the feature vector is 11-dimensional (original QM9), pad it to 29
+        if x.size(-1) == 11:
+            pad = torch.zeros(x.size(0), 18, device=x.device)
+            x = torch.cat([x, pad], dim=-1)
+            
+        data.x = x
+        return data
+class PadQM9Features:
+    """A transform to pad QM9 features to a target dimension."""
+    def __init__(self, target_dim=29):
+        self.target_dim = target_dim
+
+    def __call__(self, data: Data) -> Data:
+        if not hasattr(data, 'x') or data.x is None:
+            return data
+        
+        num_nodes, current_dim = data.x.shape
+        if current_dim < self.target_dim:
+            padding_dim = self.target_dim - current_dim
+            padding = torch.zeros((num_nodes, padding_dim), dtype=data.x.dtype, device=data.x.device)
+            data.x = torch.cat([data.x, padding], dim=1)
+        
+        return data
+import yaml
+
+class StandardizeTargets:
+    """A transform to standardize targets using pre-computed statistics."""
+    def __init__(self, stats_path="data/target_stats.yaml", dataset_name="qm9"):
+        with open(stats_path, 'r') as f:
+            stats = yaml.safe_load(f)
+        
+        self.mean = torch.tensor(stats[dataset_name]['mean'])
+        self.std = torch.tensor(stats[dataset_name]['std'])
+        self.dataset_name = dataset_name
+
+    def __call__(self, data: Data) -> Data:
+        target_attr = 'y' if self.dataset_name == 'qm9' else 'y_graph'
+        if hasattr(data, target_attr) and getattr(data, target_attr) is not None:
+            setattr(data, target_attr, (getattr(data, target_attr) - self.mean) / self.std)
         return data
