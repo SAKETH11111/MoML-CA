@@ -21,13 +21,6 @@ import logging
 import pandas as pd
 from pathlib import Path
 from rdkit import Chem
-
-# Configure logger
-logger = logging.getLogger(__name__)
-
-# Import consolidated MoML functions
-
-# Import utility functions
 from moml.utils import (
     load_data,
     inspect_data,
@@ -42,9 +35,16 @@ from moml.utils import (
     categorize_molecular_features,
 )
 
+# Configure logger
+logger = logging.getLogger(__name__)
+
+# Import consolidated MoML functions
+
+# Import utility functions
+
 # Define paths
 ROOT_DIR = Path(__file__).resolve().parents[3]
-RAW_DATA_PATH = ROOT_DIR / "data" / "raw" / "PFAS_Chemical_List.csv"
+RAW_DATA_PATH = ROOT_DIR / "moml" / "data" / "datasets" / "raw" / "PFAS_Chemical_List.csv"
 CLEANED_DATA_PATH = ROOT_DIR / "data" / "processed" / "chemical_list" / "PFAS_Chemical_List_cleaned.csv"
 ENGINEERED_DATA_PATH = ROOT_DIR / "data" / "processed" / "chemical_list" / "PFAS_Chemical_List_engineered.csv"
 RESULTS_DIR = ROOT_DIR / "experiments" / "results" / "chemical_list"
@@ -80,7 +80,14 @@ def create_basic_derived_features(df):
 
 
 def clean_data():
-    """Main function to execute the data cleaning pipeline."""
+    """
+    Cleans and preprocesses the raw PFAS Chemical List dataset.
+    
+    Loads the raw data, standardizes column names and text fields, cleans DTXSID values, converts numeric columns, handles missing values, and creates basic derived features. Saves the cleaned dataset to disk and returns the cleaned DataFrame.
+    
+    Returns:
+        pandas.DataFrame: The cleaned and preprocessed PFAS Chemical List data.
+    """
     print("Starting PFAS Chemical List data cleaning process...")
 
     # Load and inspect data
@@ -124,7 +131,7 @@ def clean_data():
 
     # Standardize text data
     text_columns = ["Preferred_Name", "IUPAC_Name", "SMILES", "InChI_String", "Molecular_Formula"]
-    df = standardize_text_data(df, text_columns)
+    df = standardize_text_data(df, text_columns, special_char_cols=[])
 
     # Create basic derived features
     df = create_basic_derived_features(df)

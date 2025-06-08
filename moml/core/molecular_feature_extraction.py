@@ -9,9 +9,9 @@ calculations used across the MGNN package.
 from rdkit import Chem
 from typing import Dict, List, Tuple, Set, Any
 import numpy as np
-import logging  # Added for logger
+import logging
 
-logger = logging.getLogger(__name__)  # Added for logger
+logger = logging.getLogger(__name__)
 
 
 class FunctionalGroupDetector:
@@ -59,7 +59,9 @@ class FunctionalGroupDetector:
                 elif bond.GetBondType() == Chem.rdchem.BondType.SINGLE:
                     # Check if this O is bonded to H
                     for o_bond in other_atom.GetBonds():
-                        if o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1:  # Hydrogen
+                        if (
+                            o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1
+                        ):  # Hydrogen
                             o_single_bond = True
                             break
 
@@ -140,7 +142,9 @@ class FunctionalGroupDetector:
 
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
 
                 if f_neighbors == 1:
                     group_assignments[atom.GetIdx()] = "CF"
@@ -165,7 +169,9 @@ class FunctionalGroupDetector:
         cf3_groups = []
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
                 if f_neighbors == 3:
                     cf3_groups.append(atom.GetIdx())
         return cf3_groups
@@ -184,7 +190,9 @@ class FunctionalGroupDetector:
         cf2_groups = []
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
                 if f_neighbors == 2:
                     cf2_groups.append(atom.GetIdx())
         return cf2_groups
@@ -203,7 +211,9 @@ class FunctionalGroupDetector:
         cf1_groups = []
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 6:  # Carbon
-                f_neighbors = sum(1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9)
+                f_neighbors = sum(
+                    1 for n in atom.GetNeighbors() if n.GetAtomicNum() == 9
+                )
                 if f_neighbors == 1:
                     cf1_groups.append(atom.GetIdx())
         return cf1_groups
@@ -323,12 +333,18 @@ class FunctionalGroupDetector:
         """
         functional_groups = []
         for atom in mol.GetAtoms():
-            if cls.is_in_carboxylic_group(atom) or cls.is_in_sulfonic_group(atom) or cls.is_in_phosphonic_group(atom):
+            if (
+                cls.is_in_carboxylic_group(atom)
+                or cls.is_in_sulfonic_group(atom)
+                or cls.is_in_phosphonic_group(atom)
+            ):
                 functional_groups.append(atom.GetIdx())
         return functional_groups
 
     @classmethod
-    def identify_all_functional_groups(cls, mol: Chem.Mol) -> Tuple[Dict[int, str], List[Set[int]]]:
+    def identify_all_functional_groups(
+        cls, mol: Chem.Mol
+    ) -> Tuple[Dict[int, str], List[Set[int]]]:
         """
         Identify all functional groups in the molecule.
 
@@ -357,17 +373,27 @@ class FunctionalGroupDetector:
     def find_hydroxyl_groups(mol: Chem.Mol) -> List[int]:
         """
         Find all hydroxyl groups in the molecule.
-        Placeholder: Not fully implemented.
 
         Args:
             mol: RDKit molecule
 
         Returns:
-            List of atom indices (currently empty)
+            List of atom indices corresponding to oxygen atoms in hydroxyl groups
         """
-        # TODO: Implement actual hydroxyl group detection logic
-        # Example SMARTS for hydroxyl: '[OX2H]'
-        return []
+        if mol is None:
+            return []
+
+        try:
+            hydroxyl_pattern = Chem.MolFromSmarts("[OH]")
+            if hydroxyl_pattern is None:
+                logger.warning("Failed to create SMARTS pattern for hydroxyl groups")
+                return []
+
+            matches = mol.GetSubstructMatches(hydroxyl_pattern)
+            return [match[0] for match in matches]  # Return oxygen atom indices
+        except Exception as e:
+            logger.error(f"Error finding hydroxyl groups: {e}")
+            return []
 
     @classmethod
     def get_all_functional_groups(cls, mol: Chem.Mol) -> dict:
@@ -499,82 +525,16 @@ class MolecularFeatureExtractor:
                         if dist < min_dist_func:
                             min_dist_func = dist
                 if min_dist_func == float("inf"):  # If still inf, means no path found
-                    min_dist_func = 0.0  # CORRECTED: Test expects 0.0 if no path / no group
+                    min_dist_func = 0.0
 
             # Determine if atom is in head group or fluorinated tail
-            is_head_group = False  # Default to False
-            # Original logic for is_head_group based on -1 sentinel:
-            # if min_dist_func != -1 and min_dist_cf3 != -1:
-            #    is_head_group = min_dist_func < min_dist_cf3
-            # Adapting to 0.0 as "not found" or "is the group itself":
-            # An atom is considered part of the head if it's closer to a functional group
-            # than to a CF3 group, assuming both types of groups exist and are distinct from the atom.
-            # If only one type of group is present, or the atom is part of such a group,
-            # this comparison might simplify.
-            # If min_dist_func is small (atom is in/near func group) and min_dist_cf3 is large, is_head_group = True.
-            # If min_dist_cf3 is small (atom is in/near CF3) and min_dist_func is large, is_head_group = False.
-            # If both are 0 because no groups exist, is_head_group remains False.
-            # If atom_idx is in a functional_group, min_dist_func is 0.
-            # If atom_idx is in a cf3_group, min_dist_cf3 is 0.
-
-            # Simplified logic: if it's closer to a functional group than a CF3 group, it's head.
-            # This implies that if a functional group is present (min_dist_func is not "not found" i.e. >0 or is 0 because atom is in it)
-            # AND a CF3 group is present (min_dist_cf3 is not "not found" i.e. >0 or is 0 because atom is in it)
-            # then compare.
-            # If only functional groups are "found" (min_dist_func >= 0 and min_dist_cf3 is effectively infinite or the "not found" 0.0)
-            # it's likely a head.
-            # If only CF3 groups are "found", it's likely tail.
-
-            # More robust head_group determination:
-            # An atom is part of the head if it belongs to a non-CF functional group.
-            # An atom is part of the tail if it's a CFx or connected to one and not in a head group.
-            # This distance-based one is a proxy.
-            # The test `test_calculate_distance_features_no_groups` expects 'is_head_group': 0.0
-            # when both cf3_groups and functional_groups are empty.
-            # With min_dist_cf3 = 0.0 and min_dist_func = 0.0:
-            # Original logic: if 0.0 != -1 and 0.0 != -1: is_head_group = 0.0 < 0.0 (False) -> Correct for test
-
-            # Let's use the original logic structure but with 0.0 as the "not found" sentinel for distances
-            # This means if a group is not found, its "distance" is 0.0.
-            # If an atom *is* the group, its distance is 0.
-            # This makes "not found" and "is the group" indistinguishable by distance alone if set to 0.0.
-            # The previous -1 sentinel was better for distinguishing "not found".
-            # However, the test expects 0.0 for "not found".
-
-            # Reverting to the structure that was in the file when I last read it for lines 504-505,
-            # as the test seems to pass with that structure given the 0.0 changes for distances.
-            if min_dist_func != -1 and min_dist_cf3 != -1:  # This line was from the original file content
+            is_head_group = False
+            if min_dist_func != -1 and min_dist_cf3 != -1:
                 is_head_group = min_dist_func < min_dist_cf3
-            # If the test expects 0.0 for not found, then the above condition should be:
-            # if min_dist_func != 0.0 and min_dist_cf3 != 0.0: # This means both groups were found AND are not the atom itself
-            #    is_head_group = min_dist_func < min_dist_cf3
-            # elif min_dist_func != 0.0: # Only functional group found (or atom is part of it)
-            #    is_head_group = True
-            # This part is complex due to the change of -1 to 0.0.
-            # For now, sticking to minimal change to pass the specific test assertion on dist_to_cf3.
-            # The test for 'is_head_group' when no groups are present expects 0.0.
-            # If min_dist_func = 0.0 (no func groups) and min_dist_cf3 = 0.0 (no cf3 groups),
-            # the original line `if min_dist_func != -1 and min_dist_cf3 != -1:` would evaluate as true.
-            # Then `is_head_group = (0.0 < 0.0)` which is false. So `float(is_head_group)` is `0.0`. This matches the test.
-            # So, the original logic for `is_head_group` with the -1 sentinel, when -1 is replaced by 0.0 for distances,
-            # coincidentally works for the "no_groups" case's expectation for is_head_group.
-            # If the test expects 0.0 for not found, then the above condition should be:
-            # if min_dist_func != 0.0 and min_dist_cf3 != 0.0: # This means both groups were found AND are not the atom itself
-            #    is_head_group = min_dist_func < min_dist_cf3
-            # elif min_dist_func != 0.0: # Only functional group found (or atom is part of it)
-            #    is_head_group = True
-            # This part is complex due to the change of -1 to 0.0.
-            # For now, sticking to minimal change to pass the specific test assertion on dist_to_cf3.
-            # The test for 'is_head_group' when no groups are present expects 0.0.
-            # If min_dist_func = 0.0 (no func groups) and min_dist_cf3 = 0.0 (no cf3 groups),
-            # the original line `if min_dist_func != -1 and min_dist_cf3 != -1:` would evaluate as true.
-            # Then `is_head_group = (0.0 < 0.0)` which is false. So `float(is_head_group)` is `0.0`. This matches the test.
-            # So, the original logic for `is_head_group` with the -1 sentinel, when -1 is replaced by 0.0 for distances,
-            # coincidentally works for the "no_groups" case's expectation for is_head_group.
 
             distances[atom_idx] = {
                 "dist_to_cf3": min_dist_cf3,
-                "dist_to_functional": min_dist_func, 
+                "dist_to_functional": min_dist_func,
                 "is_head_group": float(is_head_group),
             }
 
@@ -604,7 +564,9 @@ class MolecularFeatureExtractor:
             pos2 = conf.GetAtomPosition(idx2)
 
             # Calculate Euclidean distance
-            length = np.sqrt((pos1.x - pos2.x) ** 2 + (pos1.y - pos2.y) ** 2 + (pos1.z - pos2.z) ** 2)
+            length = np.sqrt(
+                (pos1.x - pos2.x) ** 2 + (pos1.y - pos2.y) ** 2 + (pos1.z - pos2.z) ** 2
+            )
 
             # Store bond length (both directions)
             bond_lengths[(idx1, idx2)] = length
@@ -626,7 +588,7 @@ def calculate_molecular_descriptors(mol) -> dict:
     Returns:
         Dictionary of molecular descriptors
     """
-    from rdkit.Chem import Descriptors, Lipinski, QED  # Added QED
+    from rdkit.Chem import Descriptors, Lipinski, QED
 
     if mol is None:
         return {  # Return a dictionary with NaN or default values
@@ -680,8 +642,6 @@ def extract_fingerprints(mol, fingerprint_type="morgan", radius=2, nBits=2048):
     """
     from rdkit.Chem import AllChem
     from rdkit.Chem import MACCSkeys
-
-    # import numpy as np # Already imported at top
 
     if mol is None:
         return None

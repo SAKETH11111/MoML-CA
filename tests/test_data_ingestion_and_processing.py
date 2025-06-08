@@ -211,14 +211,11 @@ class TestDataProcessing(unittest.TestCase):
 
             # Try creating an instance with default parameters
             orchestrator_class = getattr(module, "PFASPipelineOrchestrator")
-            orchestrator = orchestrator_class()
+            orchestrator_class()
             logger.info("Pipeline orchestrator import and instantiation successful.")
         except ImportError as e:
             logger.error(f"Pipeline orchestrator import failed: {e}")
             self.skipTest("Could not import pfas_pipeline_orchestrator module")
-        except Exception as e:
-            logger.error(f"Pipeline orchestrator instantiation failed: {e}")
-            self.skipTest(f"Could not instantiate PFASPipelineOrchestrator: {e}")
 
 
 def run_data_processing_pipeline_tests(): # Renamed from test_data_processing_pipeline

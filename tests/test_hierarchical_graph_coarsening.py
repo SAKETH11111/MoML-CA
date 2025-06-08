@@ -7,8 +7,6 @@ This file serves as the primary test suite for graph coarsening, covering:
 3. Hierarchical graph creation
 """
 
-import os
-import sys
 import pytest
 import torch
 from rdkit import Chem
@@ -16,14 +14,6 @@ from rdkit.Chem import AllChem
 from torch_geometric.data import Data
 from unittest.mock import patch
 
-# Add parent directory to path for imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-mgnn_dir = os.path.dirname(current_dir)
-code_dir = os.path.dirname(mgnn_dir)
-project_dir = os.path.dirname(code_dir)
-sys.path.insert(0, project_dir)
-
-# Import with relative imports
 from moml.core import GraphCoarsener
 from moml.core.molecular_feature_extraction import FunctionalGroupDetector
 

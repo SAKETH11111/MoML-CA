@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 # Top-level helper function for pickling in multiprocessing
-def _process_single_mol_file_for_batch(args: Tuple[str, Optional[Dict], str]) -> Optional[str]:
+def _process_single_mol_file_for_batch(args: Tuple[str, Optional[Dict[str, Any]], str]) -> Optional[str]:
     mol_file_path, config_dict, output_dir_for_pt = args
     try:
         graph_data = mol_file_to_graph(mol_file_path, config=config_dict)
@@ -197,7 +197,7 @@ class MolecularGraphProcessor:
         partial_charge_val: Optional[float] = None,
         distance_features_map: Optional[Dict[int, Dict[str, float]]] = None,
         homo_lumo_contrib_val: Optional[List[float]] = None,
-    ) -> List[float]:
+    ) -> List[Union[int, float]]:
         features = []
         atom_idx = atom.GetIdx()
         is_f_atom = atom.GetAtomicNum() == 9
@@ -271,7 +271,7 @@ class MolecularGraphProcessor:
 
     def _get_bond_features(
         self, bond: Chem.Bond, bond_lengths_map: Optional[Dict[Tuple[int, int], float]] = None
-    ) -> List[float]:
+    ) -> List[Union[int, float]]:
         features = []
         begin_atom, end_atom = bond.GetBeginAtom(), bond.GetEndAtom()
         is_cf_bond_val = (begin_atom.GetAtomicNum() == 6 and end_atom.GetAtomicNum() == 9) or (
@@ -340,7 +340,7 @@ class MolecularGraphProcessor:
             # or if AddHs failed to change atom count when it should have.
             if (
                 mol_with_hs_attempt.GetNumAtoms() > initial_atom_count
-                or (initial_atom_count > 0 and Descriptors.HeavyAtomCount(mol_processed) < initial_atom_count)
+                or (initial_atom_count > 0 and Descriptors.HeavyAtomCount(mol_processed) < initial_atom_count) # type: ignore
                 or (initial_atom_count == 0 and mol_with_hs_attempt.GetNumAtoms() > 0)
             ):  # handles H2, or if it was already all H
                 mol_processed = mol_with_hs_attempt
@@ -359,8 +359,8 @@ class MolecularGraphProcessor:
         if self.use_3d_coords and mol_processed.GetNumConformers() == 0:
             try:
                 logger.info(f"Attempting to generate 3D coordinates for molecule: {Chem.MolToSmiles(mol_processed)}")
-                AllChem.EmbedMolecule(mol_processed, AllChem.ETKDGv3())
-                AllChem.UFFOptimizeMolecule(mol_processed)
+                AllChem.EmbedMolecule(mol_processed, AllChem.ETKDGv3()) # type: ignore
+                AllChem.UFFOptimizeMolecule(mol_processed) # type: ignore
                 if mol_processed.GetNumConformers() == 0:
                     logger.warning(
                         f"Failed to generate 3D coordinates for {Chem.MolToSmiles(mol_processed)}. Creating dummy 2D-like conformer."
@@ -544,13 +544,13 @@ class MolecularGraphProcessor:
 
     def _get_molecule_descriptors(self, mol: Chem.Mol) -> Dict[str, float]:
         return {
-            "mol_weight": Descriptors.MolWt(mol),
-            "logp": Descriptors.MolLogP(mol),
-            "num_h_acceptors": Lipinski.NumHAcceptors(mol),
-            "num_h_donors": Lipinski.NumHDonors(mol),
-            "num_rotatable_bonds": Lipinski.NumRotatableBonds(mol),
-            "tpsa": Descriptors.TPSA(mol),
-            "qed": QED.qed(mol),
+            "mol_weight": Descriptors.MolWt(mol), # type: ignore
+            "logp": Descriptors.MolLogP(mol), # type: ignore
+            "num_h_acceptors": Lipinski.NumHAcceptors(mol), # type: ignore
+            "num_h_donors": Lipinski.NumHDonors(mol), # type: ignore
+            "num_rotatable_bonds": Lipinski.NumRotatableBonds(mol), # type: ignore
+            "tpsa": Descriptors.TPSA(mol), # type: ignore
+            "qed": QED.qed(mol), # type: ignore
         }
 
     def file_to_json_graph(
@@ -592,7 +592,7 @@ class MolecularGraphProcessor:
             return None
 
 
-def create_graph_processor(config: Dict[str, Any] = None) -> MolecularGraphProcessor:
+def create_graph_processor(config: Optional[Dict[str, Any]] = None) -> MolecularGraphProcessor:
     return MolecularGraphProcessor(config=config)
 
 
@@ -627,14 +627,14 @@ def collate_graphs(graphs: List[Data]) -> Data:
     if not graphs:
         return Batch()
 
-    class DummyDataset(torch.utils.data.Dataset):
-        def __init__(self, data_list):
+    class DummyDataset(torch.utils.data.Dataset[Data]):
+        def __init__(self, data_list: List[Data]):
             self.data_list = data_list
 
-        def __len__(self):
+        def __len__(self) -> int:
             return len(self.data_list)
 
-        def __getitem__(self, idx):
+        def __getitem__(self, idx: int) -> Data:
             return self.data_list[idx]
 
     # Ensure collate_fn is compatible if PyG version changes behavior

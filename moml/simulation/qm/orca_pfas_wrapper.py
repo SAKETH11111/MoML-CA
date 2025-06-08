@@ -161,7 +161,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--solvent_model",
         type=str,
-        default="CPCM(Water)",  # Added to align with MoML-CA QM protocol
+        default="CPCM(Water)",
         help="Implicit solvent model to use (e.g., 'CPCM(Water)', 'SMD(Water)'). Set to None or empty string for gas phase.",
     )
 
@@ -308,7 +308,7 @@ def generate_orca_input(
         input_block += "%scf\n  MaxIter 300\n  Convergence Tight\nend\n\n"
 
         if optimize_geom and not sp_only:
-            input_block += "%geom\n  MaxIter 300\n  Convergence Tight\n  Trust -0.1\nend\n\n"  # Added trust radius
+            input_block += "%geom\n  MaxIter 300\n  Convergence Tight\n  Trust -0.1\nend\n\n"
 
         # Add CPCM/SMD block if solvent model requires it
         if solvent_model and solvent_model.strip():
@@ -354,11 +354,17 @@ def generate_orca_input(
         return False, ""
 
 
+def run_orca_calculation_mock(input_file_path: str) -> Tuple[bool, str]:
+    """Mock function for ORCA calculation."""
+    logger.info(f"Mocking ORCA calculation for {input_file_path}")
+    return True, ""
+
+
 def run_orca_calculation(
     input_file_path: str, orca_executable: Optional[str], openmpi_bin_path: Optional[str], mock_run: bool
 ) -> Tuple[bool, str]:
     """
-    Runs an ORCA calculation using the specified input file.
+    Runs a single ORCA calculation, either for real or in mock mode.
 
     Handles locating the ORCA executable and setting up the environment
     for parallel execution if OpenMPI path is provided.
@@ -409,7 +415,7 @@ def run_orca_calculation(
             logger.warning("ORCA executable not found; switching to mock mode.")
             mock_run = True
             # Early return using the mock_run path to avoid using None as orca_executable
-            return run_orca_calculation(input_file_path, mock_run=True)
+            return run_orca_calculation_mock(input_file_path)
 
     env = os.environ.copy()
     if openmpi_bin_path:

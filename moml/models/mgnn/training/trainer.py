@@ -1,12 +1,4 @@
 from typing import Union, Dict, List, Optional, Callable, Any
-
-"""
-Trainer module for molecular graph neural networks.
-
-This module provides a trainer class to handle the training and evaluation of
-molecular graph neural network models.
-"""
-
 import os
 import itertools
 import torch
@@ -20,51 +12,12 @@ from moml.core import create_graph_processor
 from moml.models.mgnn import DJMGNN
 from moml.models.mgnn.evaluation import MGNNPredictor
 
+"""
+Trainer module for molecular graph neural networks.
 
-# -----------------------------------------------------------------------------
-# Helper utilities
-# -----------------------------------------------------------------------------
-
-def _infer_in_dim_from_loader(loader: Optional[DataLoader]) -> Optional[int]:
-    """Best‑effort inference of the node‐feature dimension (``in_dim``).
-
-    The function first tries the *cheap* path – looking directly at ``loader.dataset`` –
-    and only if that fails does it fall back to peeking a single element from the
-    iterator.  No batch is permanently consumed in either case.
-    """
-    if loader is None:
-        return None
-
-    # ----- Fast‑path: inspect dataset ---------------------------------------
-    dataset = getattr(loader, "dataset", None)
-    if dataset is not None:
-        try:
-            # `len` might not be implemented for some streaming datasets – guard it.
-            if len(dataset) > 0:  # type: ignore[arg-type]
-                sample = dataset[0]
-                x = getattr(sample, "x", None)
-                if x is not None:
-                    return x.shape[1]
-        except Exception:  # pragma: no cover – any dataset oddities
-            pass
-
-    # ----- Slow‑path: peek at an iterator -----------------------------------
-    try:
-        peek = next(itertools.islice(iter(loader), 1, None))
-        x = getattr(peek, "x", None)
-        if x is not None:
-            return x.shape[1]
-    except Exception:  # StopIteration, TypeError, etc.
-        pass
-
-    # Could not infer
-    return None
-
-
-# -----------------------------------------------------------------------------
-# Main trainer class
-# -----------------------------------------------------------------------------
-
+This module provides a trainer class to handle the training and evaluation of
+molecular graph neural network models.
+"""
 
 class MGNNTrainer:
     """
@@ -612,27 +565,31 @@ def create_trainer(
     train_loader: Optional[DataLoader] = None,
     model: Optional[nn.Module] = None,
 ) -> MGNNTrainer:
-    """Factory that builds a :class:`MGNNTrainer` with sensible defaults.
-
-    If *model* is *None*, a fresh :class:`~moml.models.mgnn.DJMGNN` is created.
-    If ``in_dim`` is absent from *config*, we will try to infer it from
-    *train_loader* via :pyfunc:`_infer_in_dim_from_loader`.
     """
+    Create a trainer with a new model.
 
-    # ------------------------------------------------------------------
-    # 1) Build / validate model
-    # ------------------------------------------------------------------
-    if model is None:
-        model_kwargs: Dict[str, Any] = {
-            "hidden_dim": config["hidden_dim"],
-            "n_blocks": config.get("n_blocks", 3),
-            "layers_per_block": config.get("layers_per_block", 2),
-            "edge_attr_dim": config.get("edge_attr_dim", 0),
-            "jk_mode": config.get("jk_mode", "cat"),
-            "node_out_dim": config["node_out_dim"],
-            "graph_out_dim": config["graph_out_dim"],
-            "dropout": config.get("dropout", 0.2),
-        }
+    Args:
+        config: Configuration for training and model
+        train_loader: DataLoader with training data
+        val_loader: DataLoader with validation data
+        callbacks: List of callbacks to use during training
+
+    Returns:
+        Configured trainer with initialized model
+    """
+    # Create graph processor to get dimensions
+    create_graph_processor(config)
+
+    # Prepare arguments for DJMGNN constructor
+    model_kwargs = {
+        "hidden_dim": config.get("hidden_dim", 64),
+        "n_blocks": config.get("n_blocks", 3),
+        "layers_per_block": config.get("layers_per_block", 2),
+        "jk_mode": config.get("jk_mode", "cat"),
+        "node_out_dim": config.get("node_out_dim", 1),
+        "graph_out_dim": config.get("graph_out_dim", 1),
+        "dropout": config.get("dropout", 0.2),
+    }
 
         # Decide the input feature dimension --------------------------------
         if "in_dim" in config:

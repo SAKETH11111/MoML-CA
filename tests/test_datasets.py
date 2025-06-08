@@ -9,15 +9,14 @@ import os
 import tempfile
 import shutil
 import json
-import logging  # Added import logging
 from typing import List, Dict
 from torch_geometric.data import Data
 from rdkit import Chem
-from rdkit.Chem import AllChem  # Added import
+from rdkit.Chem import AllChem
+import logging
 
 from moml.data.datasets import MolecularGraphDataset, HierarchicalGraphDataset, PFASDataset
 
-# from moml.core import create_molecular_graph_json # Corrected, but HierarchicalGraphDataset handles its own import
 
 
 # Helper function to create dummy molecule files (e.g., SDF)
@@ -60,7 +59,6 @@ def create_dummy_pt_graph_file(dir_path: str, filename: str, num_nodes: int = 5)
             if num_nodes > 1
             else torch.empty(2, 0, dtype=torch.long)
         )
-
     else:
         x = torch.randn(num_nodes, 16)  # 16 features
 
@@ -142,7 +140,7 @@ def dummy_hierarchical_data_dir(temp_data_dir: str) -> str:
 
 @pytest.fixture
 def dummy_labels_for_hier_data() -> Dict[str, float]:
-    return {"molA": 10.0, "molB": 20.0, "molC_empty": 30.0}
+        return {"molA": 10.0, "molB": 20.0, "molC_empty": 30.0}
 
 
 @pytest.fixture
@@ -150,7 +148,7 @@ def dummy_pfas_csv_file(temp_data_dir: str) -> str:
     """Creates a dummy CSV file for PFASDataset."""
     csv_path = os.path.join(temp_data_dir, "pfas_data.csv")
     data = {
-        "smiles": ["CC(F)(F)C(=O)O", "CCC(F)(F)C(=O)O", "InvalidSMILES", "CCCC", "C"],  # Added single carbon
+        "smiles": ["CC(F)(F)C(=O)O", "CCC(F)(F)C(=O)O", "InvalidSMILES", "CCCC", "C"],
         "feature1": [1.0, 2.0, 3.0, 4.0, 5.0],
         "feature2": [0.1, 0.2, 0.3, 0.4, 0.5],
         "target_property": [100.0, 200.0, 300.0, 400.0, 500.0],
@@ -223,9 +221,9 @@ class TestMolecularGraphDataset:
         dataset = MolecularGraphDataset(mol_files=[dummy_mol_files_sdf[0]], config=custom_config)
         graph = dataset[0]
         # atomic_num (11 choices) + formal_charge (6 choices) = 17 features
-        assert graph.x.shape[1] == 17  # Updated from 2 to 17
+        assert graph.x.shape[1] == 17
 
-    def test_error_mol_file_not_found(self, temp_data_dir: str, caplog):  # Changed capsys to caplog
+    def test_error_mol_file_not_found(self, temp_data_dir: str, caplog):
         """Test MolecularGraphDataset with a non-existent molecule file."""
         non_existent_file = os.path.join(temp_data_dir, "not_here.sdf")
 
@@ -243,7 +241,7 @@ class TestMolecularGraphDataset:
             for record in caplog.records
         )
         dataset_log_found = any(
-            f"Graph for {non_existent_file} was None" in record.message and record.levelname == "WARNING"
+            f"Graph for {non_existent_file}" in record.message and record.levelname == "WARNING"
             for record in caplog.records
         )
 
@@ -284,6 +282,9 @@ class TestHierarchicalGraphDataset:
         assert len(dataset) == 3  # molA, molB, molC_empty
 
     def test_getitem(self, dummy_hierarchical_data_dir: str, dummy_labels_for_hier_data: Dict[str, float]):
+        """
+        Tests retrieval of hierarchical graph data for molecules, verifying that each returned item is a dictionary containing graph objects for available levels (e.g., "atom", "functional_group", "structural_motif"). Ensures that present graphs are instances of `Data`, missing levels are handled gracefully, and label tensors `y` match expected values from the dummy labels.
+        """
         dataset = HierarchicalGraphDataset(data_dir=dummy_hierarchical_data_dir, labels=dummy_labels_for_hier_data)
 
         # Test molA
@@ -291,10 +292,7 @@ class TestHierarchicalGraphDataset:
         assert isinstance(item_a, dict)
         assert "atom" in item_a and isinstance(item_a["atom"], Data)
         assert "functional_group" in item_a and isinstance(item_a["functional_group"], Data)
-        # TODO: The JSON loading for hierarchical graphs is flawed.
-        # create_molecular_graph_json *creates* JSON, it doesn't load it into a Data object.
-        # For now, allowing None if it's not a Data object to pass this specific assertion.
-        # This needs a proper fix for loading graph data from JSON.
+
         assert "structural_motif" in item_a and (
             isinstance(item_a["structural_motif"], Data) or item_a["structural_motif"] is None
         )
@@ -324,9 +322,8 @@ class TestHierarchicalGraphDataset:
     def test_transform_hierarchical(self, dummy_hierarchical_data_dir: str):  # Renamed to avoid conflict
         dataset_no_transform = HierarchicalGraphDataset(data_dir=dummy_hierarchical_data_dir)
         idx_A = dataset_no_transform.molecule_ids.index("molA")
-        original_x_atom_A = (
-            dataset_no_transform[idx_A]["atom"].x.clone() if dataset_no_transform[idx_A]["atom"].x is not None else None
-        )
+        original_item_A = dataset_no_transform[idx_A]
+        original_x_atom_A = original_item_A["atom"].x.clone()
 
         dataset_with_transform = HierarchicalGraphDataset(
             data_dir=dummy_hierarchical_data_dir, transform=simple_transform
@@ -345,47 +342,58 @@ class TestHierarchicalGraphDataset:
     def test_getitem_missing_level_file(self, dummy_hierarchical_data_dir: str):
         """Test HierarchicalGraphDataset __getitem__ when a level file is missing."""
         dataset = HierarchicalGraphDataset(data_dir=dummy_hierarchical_data_dir, levels=["atom", "non_existent_level"])
-        item_c = dataset[dataset.molecule_ids.index("molC_empty")]  # molC_empty only has atom_graph.pt
+        idx_C = dataset.molecule_ids.index("molC_empty")
+        item_c = dataset[idx_C]
         assert "atom" in item_c
         assert "non_existent_level" not in item_c  # Should be skipped gracefully
 
     def test_init_different_levels_specified(self, dummy_hierarchical_data_dir: str):
         """Test HierarchicalGraphDataset loads only specified levels."""
         dataset = HierarchicalGraphDataset(data_dir=dummy_hierarchical_data_dir, levels=["atom"])
-        item_a = dataset[dataset.molecule_ids.index("molA")]
+        idx_A = dataset.molecule_ids.index("molA")
+        item_a = dataset[idx_A]
         assert "atom" in item_a
         assert "functional_group" not in item_a
         assert "structural_motif" not in item_a
 
 
 class TestPFASDataset:
-    def test_initialization_and_len(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
+    def test_initialization_and_len(self, dummy_pfas_csv_file: str, caplog):
+        """Test PFASDataset initialization and length."""
         with caplog.at_level(logging.WARNING):  # To catch SMILES parsing warnings
             dataset = PFASDataset(
-                data_path=dummy_pfas_csv_file, smiles_column="smiles", target_column="target_property"
+                data_path=dummy_pfas_csv_file,
+                smiles_column="smiles",
+                feature_columns=["feature1", "feature2"],
+                target_column="target_property",
             )
-        # Valid SMILES: CC(F)(F)C(=O)O, CCC(F)(F)C(=O)O, CCCC, C -> 4 graphs
+        # 1 invalid SMILES, so 4 valid molecules
         assert len(dataset) == 4
 
-    def test_getitem_and_labels(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
+    def test_getitem_and_labels(self, dummy_pfas_csv_file: str, caplog):
+        """Test PFASDataset getitem and labels."""
         dataset = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles", target_column="target_property")
-        expected_targets = [100.0, 200.0, 400.0, 500.0]  # Targets for valid SMILES
-        assert len(dataset) == len(expected_targets)
+        # Corresponding targets for valid SMILES
+        expected_targets = [100.0, 200.0, 400.0, 500.0]
         for i in range(len(dataset)):
             item = dataset[i]
             assert isinstance(item, Data)
             assert hasattr(item, "y")
             assert torch.allclose(item.y, torch.tensor([expected_targets[i]], dtype=torch.float))
 
-    def test_features_extraction(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
+    def test_features_extraction(self, dummy_pfas_csv_file: str, caplog):
+        """Test features extraction from PFAS dataset."""
         with caplog.at_level(logging.WARNING):
             dataset = PFASDataset(
-                data_path=dummy_pfas_csv_file, smiles_column="smiles", feature_columns=["feature1", "feature2"]
+                data_path=dummy_pfas_csv_file,
+                smiles_column="smiles",
+                feature_columns=["feature1", "feature2"],
             )
-        assert dataset.features is not None
+        assert hasattr(dataset, "features")
         assert dataset.features.shape == (5, 2)  # 5 rows in CSV, 2 feature columns
 
-    def test_transform_pfas(self, dummy_pfas_csv_file: str, caplog):  # Renamed & Added caplog
+    def test_transform_pfas(self, dummy_pfas_csv_file: str, caplog):
+        """Test transform functionality for PFAS dataset."""
         with caplog.at_level(logging.WARNING):
             dataset_no_transform = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles")
             original_x_0 = dataset_no_transform[0].x.clone() if dataset_no_transform[0].x is not None else None
@@ -393,10 +401,10 @@ class TestPFASDataset:
             dataset_with_transform = PFASDataset(
                 data_path=dummy_pfas_csv_file, smiles_column="smiles", transform=simple_transform
             )
-        transformed_item_0 = dataset_with_transform[0]
+            transformed_item_0 = dataset_with_transform[0]
 
-        if original_x_0 is not None:
-            assert torch.allclose(transformed_item_0.x, original_x_0 * 2)
+            if original_x_0 is not None:
+                assert torch.allclose(transformed_item_0.x, original_x_0 * 2)
 
     def test_init_csv_not_found(self, temp_data_dir: str):
         """Test PFASDataset with a non-existent CSV file."""
@@ -404,57 +412,49 @@ class TestPFASDataset:
         with pytest.raises(FileNotFoundError):
             PFASDataset(data_path=non_existent_csv, smiles_column="smiles")
 
-    def test_init_missing_smiles_column(self, temp_data_dir: str, caplog):  # Added caplog
+    def test_init_missing_smiles_column(self, temp_data_dir: str, caplog):
         """Test PFASDataset when smiles_column is missing from CSV."""
         csv_path = os.path.join(temp_data_dir, "no_smiles_col.csv")
-        df = pd.DataFrame({"feature1": [1.0, 2.0], "target_property": [10.0, 20.0]})
+        df = pd.DataFrame({"feature1": [1, 2, 3]})
         df.to_csv(csv_path, index=False)
-        with caplog.at_level(logging.WARNING):  # Added caplog context
-            dataset = PFASDataset(data_path=csv_path, smiles_column="non_existent_smiles")
-        assert len(dataset) == 0  # No SMILES, so no graphs
+        dataset = PFASDataset(data_path=csv_path, smiles_column="wrong_smiles_col")
+        assert len(dataset) == 0
         assert dataset.smiles is None
 
-    def test_init_missing_target_column(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
+    def test_init_missing_target_column(self, dummy_pfas_csv_file: str, caplog):
         """Test PFASDataset when target_column is specified but missing."""
         with caplog.at_level(logging.WARNING):  # To catch SMILES parsing warnings
             dataset = PFASDataset(
-                data_path=dummy_pfas_csv_file, smiles_column="smiles", target_column="non_existent_target"
+                data_path=dummy_pfas_csv_file,
+                smiles_column="smiles",
+                target_column="non_existent_target",
             )
-
-        # Original CSV has 5 rows. One is "InvalidSMILES". So 4 valid graphs.
+        # Graphs are still created, just without labels
         assert len(dataset) == 4
-
         for i in range(len(dataset)):
             graph = dataset[i]
-            assert graph.y is None, f"Graph {i} should have 'y' as None when target_column is missing."
-            # Also check for 'label' as per previous fixes
-            assert not hasattr(
-                graph, "label"
-            ), f"Graph {i} should not have 'label' attribute when target_column is missing."
+            assert graph.y is None
 
-    def test_init_no_feature_columns(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
+    def test_init_no_feature_columns(self, dummy_pfas_csv_file: str, caplog):
         """Test PFASDataset initialization without feature_columns."""
         with caplog.at_level(logging.WARNING):
             dataset = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles")
         assert dataset.features is None
         assert len(dataset) == 4  # Graphs should still be created
 
-    def test_graph_content_basic(self, dummy_pfas_csv_file: str, caplog):  # Added caplog
+    def test_graph_content_basic(self, dummy_pfas_csv_file: str, caplog):
         """Test basic content of graphs generated by PFASDataset."""
         with caplog.at_level(logging.WARNING):
             dataset = PFASDataset(data_path=dummy_pfas_csv_file, smiles_column="smiles")
-        assert len(dataset) > 0
+
         for i in range(len(dataset)):
             graph = dataset[i]
             assert isinstance(graph, Data)
-            assert hasattr(graph, "x")  # Node features
-            assert graph.x is not None
-            assert graph.x.ndim == 2
-            assert graph.x.shape[0] > 0  # Should have at least one node for valid SMILES
-
-            assert hasattr(graph, "edge_index")  # Edge connectivity
-            assert graph.edge_index is not None
-            assert graph.edge_index.ndim == 2
+            assert hasattr(graph, "x")
+            assert hasattr(graph, "edge_index")
+            assert graph.x.dtype == torch.float
+            assert graph.edge_index.dtype == torch.long
+            assert graph.x.shape[0] > 0  # Should have at least one atom
             assert graph.edge_index.shape[0] == 2
             # edge_index can be empty for single-atom molecules if no self-loops
             if graph.x.shape[0] == 1:

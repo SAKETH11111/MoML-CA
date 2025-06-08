@@ -1,3 +1,4 @@
+
 """
 hmgnn.py  – Hierarchical Molecular Graph Neural Network (HMGNN)
 
@@ -10,8 +11,6 @@ DenseGNNBlock and JKAggregator are reused from `djmgnn.py`.
 from __future__ import annotations
 import math
 import logging
-
-logger = logging.getLogger(__name__)
 from typing import List, Optional, Dict, Any, Tuple
 
 import torch
@@ -22,6 +21,7 @@ from torch_scatter import scatter_add
 
 from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator  # adjust the path if needed
 
+logger = logging.getLogger(__name__)
 
 #  GPU scatter / gather helpers
 def aggregate_fine_to_coarse(feat: torch.Tensor, fine2coarse: torch.Tensor, coarse_count: torch.Tensor) -> torch.Tensor:
@@ -217,6 +217,7 @@ class HMGNN(nn.Module):
         self.hidden_dim = hidden_dim  # Store hidden_dim
         self.node_out_dim = node_out_dim  # Store node_out_dim
         self.graph_out_dim = graph_out_dim  # Store graph_out_dim
+        self.env_dim = env_dim  # Store env_dim
         edge_attr_dims = edge_attr_dims or [0] * self.S
 
         # backbone per scale
@@ -431,19 +432,19 @@ def create_hierarchical_mgnn(config: Dict) -> HMGNN:
         edge_attr_dims = [0] * len(config["scale_dims"])
     
     return HMGNN(
-        scale_dims=config["scale_dims"],
-        hidden_dim=config["hidden_dim"],
-        env_dim=0,  # Default to 0
-        env_mlp=False,  # Default to False
-        n_blocks=config.get("n_blocks", 2),
-        layers_per_block=config.get("layers_per_block", 3),
+        scale_dims=scale_dims,
+        hidden_dim=hidden_dim,
+        env_dim=0,
+        env_mlp=False,
+        n_blocks=n_blocks,
+        layers_per_block=layers_per_block,
         edge_attr_dims=edge_attr_dims,
-        jk_mode=config.get("jk_mode", "attention"),
-        node_out_dim=config["node_out_dim"],
-        graph_out_dim=config["graph_out_dim"],
-        cross_scale_exchange=config.get("cross_scale_exchange", True),
-        dropout=config.get("dropout", 0.2),
-        n_heads_cs=config.get("n_heads_cs", 4),
-        edge_dim_cs=config.get("edge_dim_cs", 0),
-        pool_type=config.get("pool_type", "mean"),
+        jk_mode=jk_mode,
+        node_out_dim=node_out_dim,
+        graph_out_dim=graph_out_dim,
+        cross_scale_exchange=cross_scale_exchange,
+        dropout=dropout,
+        n_heads_cs=n_heads_cs,
+        edge_dim_cs=edge_dim_cs,
+        pool_type=pool_type,
     )

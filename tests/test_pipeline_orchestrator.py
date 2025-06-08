@@ -1,4 +1,12 @@
-from typing import Dict
+import os
+import sys
+import time
+import tempfile
+import unittest
+import shutil
+import pandas as pd
+import logging
+from typing import Dict, Tuple
 
 #!python
 """
@@ -14,15 +22,6 @@ This script tests the optimized pipeline stages, verifying that:
 Run with: python -m code.integration.orchestration.test_pipeline
 """
 
-import os
-import sys
-import time
-import tempfile
-import unittest
-import shutil
-import pandas as pd
-import logging
-from typing import Tuple
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -288,7 +287,7 @@ class TestPFASPipelineOrchestrator(unittest.TestCase):
         self.orchestrator.run_preprocessing_stage(input_file=self.test_dataset, force_rerun=True)
         self.assertTrue(os.path.exists(processed_csv_path), f"Expected processed file {processed_csv_path} not found after initial run.")
         timestamp_run1 = os.path.getmtime(processed_csv_path)
-        state_run1 = self.orchestrator.state.copy()
+        self.orchestrator.state.copy()
 
         # Allow a brief moment for timestamp granularity
         time.sleep(0.1)

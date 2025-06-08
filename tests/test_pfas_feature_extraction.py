@@ -27,14 +27,12 @@ sys.path.append(project_root)
 # Check for RDKit
 try:
     from rdkit import Chem
-    from rdkit.Chem import AllChem
     print("RDKit import successful!")
 except ImportError:
     pytest.skip("RDKit not installed, skipping PFAS feature extraction tests", allow_module_level=True)
 
 # Try to import torch and matplotlib (for visualization)
 try:
-    import torch
     TORCH_AVAILABLE = True
     print("PyTorch import successful!")
 except ImportError:
@@ -54,22 +52,16 @@ except ImportError:
 
 # Import from consolidated moml modules
 try:
-    from moml.core import calculate_molecular_descriptors
-    from moml.utils import validate_smiles
+    from moml.core import FunctionalGroupDetector
     from moml.utils import (
         create_rdkit_mols,
-        categorize_molecular_features as categorize_pfas_types,  # Alias to match test usage
-        # The following might need to be sourced from moml.utils as well, or are part of categorize_molecular_features
-        # calculate_pfas_statistics,
-        # identify_fluorinated_groups
+        categorize_molecular_features as categorize_pfas_types,
     )
 
-    # Attempting to import these directly to see if they exist in moml.utils or if tests need update
     from moml.utils import (
         calculate_molecular_complexity as calculate_pfas_statistics,
-    )  # Assuming calculate_molecular_complexity is the new name
-    from moml.utils import extract_fluorine_count
-    from moml.utils import add_fluorinated_group_counts  # Added import
+    )
+    from moml.utils import add_fluorinated_group_counts
     from moml.core import MolecularGraphProcessor
     from moml.utils import visualize_molecular_graph
 
@@ -127,15 +119,15 @@ class TestPFASFeatures(unittest.TestCase):
         # Apply PFAS statistics (which includes Chain_Length) first
         test_df = calculate_pfas_statistics(
             self.test_df.copy(), mol_col="rdkit_mol"
-        )  # Use a copy to avoid modifying self.test_df for other tests
+        )
         # Then apply PFAS categorization
         test_df = categorize_pfas_types(test_df, mol_col="rdkit_mol")
         # Also ensure fluorinated group counts are added if pfas_type depends on them
-        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")  # Ensures num_cfX_groups columns
+        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")
 
         # The first three should be flagged as PFAS (using Has_Fluorine as proxy)
-        pfas_compounds = test_df[test_df["Has_Fluorine"] == True]
-        non_pfas_compounds = test_df[test_df["Has_Fluorine"] == False]
+        pfas_compounds = test_df[test_df["Has_Fluorine"]]
+        non_pfas_compounds = test_df[~test_df["Has_Fluorine"]]
 
         self.assertEqual(len(pfas_compounds), 3, "Expected 3 PFAS compounds based on Has_Fluorine")
         self.assertEqual(len(non_pfas_compounds), 1, "Expected 1 non-PFAS compound based on Has_Fluorine")
@@ -168,8 +160,7 @@ class TestPFASFeatures(unittest.TestCase):
     def test_pfas_statistics(self):
         """Test calculation of PFAS statistics."""
         # Apply PFAS statistics (which includes Chain_Length) first
-        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")  # Use a copy
-        # Then apply PFAS categorization (if its outputs are also checked, otherwise this might not be needed here)
+        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")        # Then apply PFAS categorization (if its outputs are also checked, otherwise this might not be needed here)
         test_df = categorize_pfas_types(test_df, mol_col="rdkit_mol")
 
         # Check PFAS statistics columns (updated column names)
@@ -198,17 +189,11 @@ class TestPFASFeatures(unittest.TestCase):
     def test_fluorinated_groups(self):
         """Test identification of fluorinated groups."""
         # Apply PFAS statistics (which includes Chain_Length) first
-        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")  # Use a copy
-        # Then apply PFAS categorization
+        test_df = calculate_pfas_statistics(self.test_df.copy(), mol_col="rdkit_mol")        # Then apply PFAS categorization
         test_df = categorize_pfas_types(test_df, mol_col="rdkit_mol")
-        # The identify_fluorinated_groups function call is still suspicious, may need removal or replacement
-        # For now, let's assume it's meant to operate on the output of the above.
-        # If identify_fluorinated_groups is the actual source of num_cfX_groups, it needs to be fixed/found.
-        # This test will likely still fail if identify_fluorinated_groups is not correctly defined/imported.
-        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")  # Replaced call
+        test_df = add_fluorinated_group_counts(test_df, mol_col="rdkit_mol")
 
         # Check group identification columns
-        # Removed 'fluorinated_groups' as its generation is unclear and not done by add_fluorinated_group_counts
         required_cols = ["num_cf3_groups", "num_cf2_groups", "num_cf_groups"]
         for col in required_cols:
             self.assertIn(col, test_df.columns, f"Missing required column: {col}")
@@ -300,6 +285,153 @@ class TestPFASFeatures(unittest.TestCase):
         print(f"Successfully created visualizations for {len(self.test_df)} molecules")
 
 
+class TestHydroxylGroupDetection(unittest.TestCase):
+    """Test hydroxyl group detection functionality."""
+
+    def setUp(self):
+        """Set up test molecules with various hydroxyl groups."""
+        if not IMPORTS_SUCCESSFUL:
+            self.skipTest("Required MOML modules not available")
+
+        # Test SMILES with hydroxyl groups
+        self.test_molecules = {
+            # Simple alcohols
+            "methanol": "CO",  # Has 1 OH group
+            "ethanol": "CCO",  # Has 1 OH group
+            "propanol": "CCCO",  # Has 1 OH group
+            "glycol": "OCCO",  # Has 2 OH groups
+            "glycerol": "OCC(O)CO",  # Has 3 OH groups
+            
+            # Carboxylic acids (have OH but in COOH context)
+            "formic_acid": "C(=O)O",  # Has 1 OH group in COOH
+            "acetic_acid": "CC(=O)O",  # Has 1 OH group in COOH
+            
+            # Phenols
+            "phenol": "c1ccc(O)cc1",  # Has 1 OH group (aromatic)
+            
+            # Molecules without OH groups
+            "methane": "C",  # No OH groups
+            "ethene": "C=C",  # No OH groups
+            "benzene": "c1ccccc1",  # No OH groups
+            
+            # PFAS with OH groups
+            "pfoa": "C(=O)(C(C(C(C(C(C(C(F)(F)F)(F)F)(F)F)(F)F)(F)F)(F)F)(F)F)O",  # Has 1 OH in COOH
+        }
+
+        # Convert to RDKit molecules
+        self.rdkit_mols = {}
+        for name, smiles in self.test_molecules.items():
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is not None:
+                mol = Chem.AddHs(mol)  # Add explicit hydrogens for accurate OH detection
+                self.rdkit_mols[name] = mol
+            else:
+                self.rdkit_mols[name] = None
+
+    def test_find_hydroxyl_groups_basic(self):
+        """Test basic hydroxyl group detection."""
+        # Test molecules with known OH group counts
+        expected_counts = {
+            "methanol": 1,
+            "ethanol": 1,
+            "propanol": 1,
+            "glycol": 2,
+            "glycerol": 3,
+            "formic_acid": 1,
+            "acetic_acid": 1,
+            "phenol": 1,
+            "methane": 0,
+            "ethene": 0,
+            "benzene": 0,
+            "pfoa": 1,
+        }
+
+        for mol_name, expected_count in expected_counts.items():
+            mol = self.rdkit_mols.get(mol_name)
+            if mol is not None:
+                hydroxyl_groups = FunctionalGroupDetector.find_hydroxyl_groups(mol)
+                self.assertEqual(
+                    len(hydroxyl_groups), 
+                    expected_count,
+                    f"{mol_name} should have {expected_count} hydroxyl group(s), but found {len(hydroxyl_groups)}"
+                )
+
+    def test_find_hydroxyl_groups_edge_cases(self):
+        """Test edge cases for hydroxyl group detection."""
+        # Test with None molecule
+        result = FunctionalGroupDetector.find_hydroxyl_groups(None)
+        self.assertEqual(result, [])
+
+        # Test with empty molecule (if possible to create)
+        try:
+            empty_mol = Chem.MolFromSmiles("")
+            if empty_mol is not None:
+                result = FunctionalGroupDetector.find_hydroxyl_groups(empty_mol)
+                self.assertEqual(result, [])
+        except Exception:
+            pass  # Skip if cannot create empty molecule
+
+    def test_hydroxyl_oxygen_indices(self):
+        """Test that returned indices correspond to oxygen atoms."""
+        test_mol = self.rdkit_mols.get("glycerol")  # Should have 3 OH groups
+        if test_mol is not None:
+            hydroxyl_groups = FunctionalGroupDetector.find_hydroxyl_groups(test_mol)
+            
+            # Check that all returned indices are oxygen atoms
+            for oxygen_idx in hydroxyl_groups:
+                atom = test_mol.GetAtomWithIdx(oxygen_idx)
+                self.assertEqual(
+                    atom.GetAtomicNum(), 
+                    8, 
+                    f"Index {oxygen_idx} should correspond to oxygen atom, but got atomic number {atom.GetAtomicNum()}"
+                )
+
+    def test_hydroxyl_groups_in_functional_groups_dict(self):
+        """Test that get_all_functional_groups includes hydroxyl groups."""
+        test_mol = self.rdkit_mols.get("glycerol")  # Should have 3 OH groups
+        if test_mol is not None:
+            all_groups = FunctionalGroupDetector.get_all_functional_groups(test_mol)
+            
+            # Check that hydroxyl_groups key exists
+            self.assertIn("hydroxyl_groups", all_groups)
+            
+            # Check that we get the expected number of hydroxyl groups
+            self.assertEqual(len(all_groups["hydroxyl_groups"]), 3)
+
+    def test_hydroxyl_groups_with_different_molecules(self):
+        """Test hydroxyl group detection with various molecular structures."""
+        test_cases = [
+            ("methanol", 1),
+            ("glycol", 2), 
+            ("glycerol", 3),
+            ("methane", 0),
+        ]
+
+        for mol_name, expected_count in test_cases:
+            mol = self.rdkit_mols.get(mol_name)
+            if mol is not None:
+                with self.subTest(molecule=mol_name):
+                    hydroxyl_groups = FunctionalGroupDetector.find_hydroxyl_groups(mol)
+                    self.assertEqual(
+                        len(hydroxyl_groups),
+                        expected_count,
+                        f"Failed for {mol_name}: expected {expected_count}, got {len(hydroxyl_groups)}"
+                    )
+
+    def test_hydroxyl_groups_error_handling(self):
+        """Test error handling in hydroxyl group detection."""
+        # Test with malformed molecule (if we can create one)
+        try:
+            # Create a molecule and then corrupt it somehow
+            mol = Chem.MolFromSmiles("CO")
+            if mol is not None:
+                # The function should handle errors gracefully
+                result = FunctionalGroupDetector.find_hydroxyl_groups(mol)
+                self.assertIsInstance(result, list)
+        except Exception:
+            pass  # Expected if molecule creation fails
+
+
 def run_pfas_feature_tests():
     """Run the PFAS feature tests."""
     print("\nTesting PFAS-specific features...")
@@ -307,9 +439,10 @@ def run_pfas_feature_tests():
     # Create a test suite
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(TestPFASFeatures))
+    suite.addTest(unittest.makeSuite(TestHydroxylGroupDetection))
 
     # Run the tests
-    runner = unittest.TextTestRunner(verbosity=1)
+    runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
 
     # Return True if all tests passed

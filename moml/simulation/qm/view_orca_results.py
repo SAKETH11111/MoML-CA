@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("view_orca_results")
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Utility for viewing ORCA computation results")
 
@@ -63,7 +63,7 @@ def load_ml_data(results_dir: str) -> List[Dict[str, Any]]:
             data = json.load(f)
 
         logger.info(f"Loaded data for {len(data)} molecules")
-        return data
+        return data if isinstance(data, list) else []
 
     except Exception as e:
         logger.error(f"Error loading ML data: {str(e)}")
@@ -99,7 +99,7 @@ def create_summary_dataframe(data: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(summary)
 
 
-def plot_homo_lumo_gap(df: pd.DataFrame, output_dir: str):
+def plot_homo_lumo_gap(df: pd.DataFrame, output_dir: str) -> None:
     """
     Create HOMO-LUMO gap plot.
 
@@ -140,7 +140,7 @@ def plot_homo_lumo_gap(df: pd.DataFrame, output_dir: str):
     plt.close()
 
 
-def plot_total_energies(df: pd.DataFrame, output_dir: str):
+def plot_total_energies(df: pd.DataFrame, output_dir: str) -> None:
     """
     Create total energies plot.
 
@@ -168,7 +168,7 @@ def plot_total_energies(df: pd.DataFrame, output_dir: str):
     plt.close()
 
 
-def create_molecule_images(data: List[Dict[str, Any]], output_dir: str):
+def create_molecule_images(data: List[Dict[str, Any]], output_dir: str) -> None:
     """
     Create molecule structure images with atom labels.
 
@@ -191,7 +191,7 @@ def create_molecule_images(data: List[Dict[str, Any]], output_dir: str):
 
             # Generate 2D coordinates for visualization
             mol = Chem.AddHs(mol)
-            AllChem.Compute2DCoords(mol)
+            Draw.MolToImage(mol)
 
             # Draw molecule
             img = Draw.MolToImage(mol, size=(400, 400), kekulize=True)
@@ -205,7 +205,7 @@ def create_molecule_images(data: List[Dict[str, Any]], output_dir: str):
             logger.error(f"Error creating molecule image for {molecule_id}: {str(e)}")
 
 
-def generate_report(df: pd.DataFrame, output_dir: str):
+def generate_report(df: pd.DataFrame, output_dir: str) -> None:
     """
     Generate an HTML report with results summary.
 
@@ -279,7 +279,7 @@ def generate_report(df: pd.DataFrame, output_dir: str):
     logger.info(f"Generated HTML report: {report_file}")
 
 
-def main():
+def main() -> None:
     """Main function to visualize ORCA results."""
     # Parse command line arguments
     args = parse_arguments()

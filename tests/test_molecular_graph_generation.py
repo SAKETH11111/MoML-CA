@@ -34,8 +34,6 @@ except ImportError:
 
 # Try to import torch and torch_geometric
 try:
-    import torch
-    import numpy as np
     import pandas as pd
     from torch_geometric.data import Data as PyGData
 

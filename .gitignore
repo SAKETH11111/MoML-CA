@@ -76,6 +76,10 @@ data/qm9/processed/*.pt
 # Add exceptions for any small .pt files that should be included
 # !data/qm9/processed/small_file.pt
 
+# SPICE dataset files (large HDF5 files)
+data/spice/*.hdf5
+data/spice/SPICE-*.hdf5
+
 # Logs and temp files
 *.log
 *.tmp
@@ -91,13 +95,14 @@ logs/
 *.densitiesinfo
 *.engrad
 *.property.txt
-*.out
+*.pc_chelpg
 *.trj.xyz
 *_trj.xyz
-*.inp
+*.vpot
 *_results.json
 *_optimized.mol
 *.bibtex
+*.hdf5
 
 config/pipeline_config.json
 .roo
@@ -111,3 +116,11 @@ memory-bank/productContext.md
 memory-bank/progress.md
 memory-bank/systemPatterns.md
 docs/
+
+CLAUDE.md*.pt
+MoML-CA/data/
+data/spice/processed/
+*.pt
+data/*/processed/*.pt
+*.pt
+data/*/processed/*.pt

@@ -21,19 +21,8 @@
 import subprocess
 import argparse
 import logging
-import json # Added for writing JSON output
-import pytest
-import numpy as np
-from pathlib import Path
-import tempfile
-import os
-import sys
-
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-from moml.simulation.qm.parser.orca_parser import parse_orca_output
+import json
+from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output # Corrected import
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -78,7 +67,7 @@ def main():
         npz_file,
     ]
     try:
-        result_process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
         logger.info(f"Successfully converted JSON to NPZ: {npz_file}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error converting JSON to NPZ: {e}")

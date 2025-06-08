@@ -355,12 +355,12 @@ class ForceFieldMapper:
             # If both atoms have other neighbors, we have dihedrals
             if neighbors_j and neighbors_k:
                 for i in neighbors_j:
-                    for l in neighbors_k:
+                    for l_neighbor in neighbors_k:
                         # Get atom types
                         type_i = atom_types[i]
                         type_j = atom_types[j]
                         type_k = atom_types[k]
-                        type_l = atom_types[l]
+                        type_l = atom_types[l_neighbor]
 
                         # Determine if this is a special dihedral
                         bond_type = bond.GetBondType()
@@ -408,7 +408,7 @@ class ForceFieldMapper:
                             pos_i = conf.GetAtomPosition(i)
                             pos_j = conf.GetAtomPosition(j)
                             pos_k = conf.GetAtomPosition(k)
-                            pos_l = conf.GetAtomPosition(l)
+                            pos_l = conf.GetAtomPosition(l_neighbor)
 
                             # Calculate dihedral angle
                             p0 = np.array([pos_i.x, pos_i.y, pos_i.z])
@@ -448,10 +448,10 @@ class ForceFieldMapper:
                             p["type_l"] = type_l
 
                         # Store dihedral parameters
-                        dihedral_params[(i, j, k, l)] = params
+                        dihedral_params[(i, j, k, l_neighbor)] = params
 
                         # Also store for reverse direction (i,j,k,l) -> (l,k,j,i)
-                        dihedral_params[(l, k, j, i)] = params
+                        dihedral_params[(l_neighbor, k, j, i)] = params
 
         return dihedral_params
 
@@ -756,12 +756,12 @@ class ForceFieldMapper:
                 # Track written dihedrals to avoid duplicates
                 written_dihedrals = set()
                 
-                for dihedral_idxs, dihedral_params in parameters["dihedrals"].items():
-                    i, j, k, l = dihedral_idxs
+                for dihedral_idxs, dihedral_param_list in parameters["dihedrals"].items():
+                    i, j, k, l_neighbor = dihedral_idxs
                     type_i = parameters["atom_types"][i]
                     type_j = parameters["atom_types"][j]
                     type_k = parameters["atom_types"][k]
-                    type_l = parameters["atom_types"][l]
+                    type_l = parameters["atom_types"][l_neighbor]
                     
                     # Skip if already written
                     dihedral_key = tuple(sorted([type_i, type_j, type_k, type_l]))
@@ -770,11 +770,11 @@ class ForceFieldMapper:
                     
                     # Write each term in the dihedral
                     terms = []
-                    for term in dihedral_params:
-                        if term["type"] == "proper":
-                            k = term["k"] * 4.184  # Convert to kJ/mol
-                            phase = term["phase"] * np.pi / 180.0  # Convert to radians
-                            n = term["n"]
+                    for params in dihedral_param_list:
+                        if params["type"] == "proper":
+                            k = params["k"] * 4.184  # Convert to kJ/mol
+                            phase = params["phase"] * np.pi / 180.0  # Convert to radians
+                            n = params["n"]
                             terms.append(f'periodicity{n}="{n}" phase{n}="{phase:.6f}" k{n}="{k:.6f}"')
                     
                     if terms:
@@ -836,7 +836,11 @@ class ForceFieldMapper:
         """
         # Extract partial charges from node predictions
         if isinstance(node_predictions, dict) and "node_pred" in node_predictions:
-            partial_charges = node_predictions["node_pred"].tolist()
+            tensor_data = node_predictions["node_pred"]
+            if hasattr(tensor_data, 'tolist'):
+                partial_charges = tensor_data.squeeze().tolist()
+            else:
+                partial_charges = tensor_data
         elif isinstance(node_predictions, list):
             partial_charges = node_predictions
         else:

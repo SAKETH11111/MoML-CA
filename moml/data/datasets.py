@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any, Callable
 import glob
 from tqdm import tqdm
 from rdkit import Chem
-from rdkit.Chem import AllChem  # Added
+from rdkit.Chem import AllChem
 import logging
 from moml.core import create_graph_processor
 from moml.core.molecular_graph_processor import MolecularGraphProcessor

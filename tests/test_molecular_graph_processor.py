@@ -13,7 +13,7 @@ import tempfile
 import os
 import json
 import pandas as pd
-import time  # Added for sleep
+import time
 
 from moml.core.molecular_graph_processor import (
     MolecularGraphProcessor,
@@ -24,9 +24,9 @@ from moml.core.molecular_graph_processor import (
     find_charges_file,
     read_charges_from_file,
     create_molecular_graph_json,
-    batch_create_graphs_from_molecules,  # Added for testing
+    batch_create_graphs_from_molecules,
 )
-from moml.core.molecular_feature_extraction import MolecularFeatureExtractor  # For ATOM_FEATURES, BOND_FEATURES
+from moml.core.molecular_feature_extraction import MolecularFeatureExtractor
 
 
 # Helper function to create a simple RDKit molecule
@@ -121,17 +121,6 @@ class TestMolecularGraphProcessor:
     ):
         """Test the atom_feature_dim property."""
         # Expected base dimension calculation components from MolecularFeatureExtractor
-        base_one_hots_dim = (
-            len(MolecularFeatureExtractor.ATOM_FEATURES["atomic_num"])
-            + len(MolecularFeatureExtractor.ATOM_FEATURES["degree"])
-            + len(MolecularFeatureExtractor.ATOM_FEATURES["formal_charge"])
-            + len(MolecularFeatureExtractor.ATOM_FEATURES["hybridization"])
-            + len(MolecularFeatureExtractor.ATOM_FEATURES["is_aromatic"])
-            + len(MolecularFeatureExtractor.ATOM_FEATURES["is_in_ring"])
-        )
-        num_hs_dim = 1
-        # is_f, is_cf are always added by _get_atom_features, and now accounted for in atom_feature_dim
-        always_present_pfas_like_dim = 2
 
         # Processor with use_pfas_specific_features = False, use_partial_charges = False, use_3d_coords = True
         processor_no_pfas = MolecularGraphProcessor(config=processor_no_pfas_features_config)
@@ -149,16 +138,6 @@ class TestMolecularGraphProcessor:
     def test_bond_feature_dim(self, graph_processor: MolecularGraphProcessor, processor_no_3d_config: Dict[str, Any]):
         """Test the bond_feature_dim property."""
         # Expected base dimension calculation components
-        base_one_hots_bond_dim = (
-            len(MolecularFeatureExtractor.BOND_FEATURES["bond_type"])
-            + len(MolecularFeatureExtractor.BOND_FEATURES["is_conjugated"])
-            + len(MolecularFeatureExtractor.BOND_FEATURES["is_in_ring"])
-        )
-        # is_cf_bond is always added by _get_bond_features, and now accounted for in bond_feature_dim
-        always_present_cf_bond_dim = 1
-
-        pfas_specific_bond_add_on_dim = 3  # is_cf_cf_bond, is_fluorinated_tail_bond, is_func_group_bond
-        bond_length_dim = 1
 
         # Processor with use_3d_coords = False, use_pfas_specific_features = True, use_partial_charges = False
         processor_no_3d = MolecularGraphProcessor(config=processor_no_3d_config)
@@ -201,7 +180,7 @@ class TestMolecularGraphProcessor:
         """Test _get_atom_features for a PFOA fragment, checking PFAS specific features."""
         cf3_carbon = pfoa_fragment_mol_3d.GetAtomWithIdx(0)  # C(F)(F)(F)
         fluorine_atom = pfoa_fragment_mol_3d.GetAtomWithIdx(1)  # One of the F atoms
-        cooh_carbon = pfoa_fragment_mol_3d.GetAtomWithIdx(4)  # C(=O)O
+        pfoa_fragment_mol_3d.GetAtomWithIdx(4)  # C(=O)O
 
         # Correctly get distance features from the feature_extractor attribute
         dist_features_map = None
@@ -491,7 +470,7 @@ class TestMolecularGraphProcessor:
                     assert os.path.exists(pt_path)
                     assert pt_path.startswith(tmp_out_dir)
                     try:
-                        loaded_data = torch.load(pt_path, weights_only=False)  # Added weights_only=False
+                        loaded_data = torch.load(pt_path, weights_only=False)
                         assert isinstance(loaded_data, Data)
 
                         original_mol = None
