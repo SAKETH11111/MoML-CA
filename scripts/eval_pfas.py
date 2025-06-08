@@ -1,0 +1,103 @@
+import os
+import sys
+import argparse
+import yaml
+import torch
+from torch_geometric.loader import DataLoader as GraphDataLoader
+from torchvision.transforms import Compose
+from tqdm import tqdm
+import numpy as np
+
+# Add project root to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from moml.data.dataset import get_dataset
+from moml.models.mgnn.djmgnn import DJMGNN
+from moml.data.feature_transforms import CreateEdges, FeaturizeNodes, StandardizeTargets
+
+def main():
+    parser = argparse.ArgumentParser(description='Evaluate a fine-tuned DJMGNN on the PFAS dataset.')
+    parser.add_argument('--ckpt', type=str, required=True, help='Path to the fine-tuned model checkpoint.')
+    parser.add_argument('--split', type=str, default='val', help='Dataset split to evaluate on (val/test).')
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for evaluation.')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use for evaluation (cuda/cpu).')
+    parser.add_argument('--config_path', type=str, default='config/training_config.template.yaml', help='Path to training config YAML file')
+    args = parser.parse_args()
+
+    print(f"Loading configuration from {args.config_path}...")
+    with open(args.config_path, 'r') as f:
+        config = yaml.safe_load(f)
+
+    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    # --- Load Model ---
+    print(f"Loading model from checkpoint: {args.ckpt}")
+    mgnn_config = config.get('mgnn', {})
+    model = DJMGNN(
+        in_node_dim=29,
+        in_edge_dim=mgnn_config.get('in_edge_dim', 0),
+        node_output_dims=mgnn_config.get('node_output_dims', 3),
+        graph_output_dims=mgnn_config.get('graph_output_dims', 19),
+        energy_output_dims=mgnn_config.get('energy_output_dims', 1),
+        hidden_dim=mgnn_config.get('hidden_channels', 128),
+        n_blocks=mgnn_config.get('num_layers', 4)
+    )
+    checkpoint = torch.load(args.ckpt, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model = model.to(device)
+    model.eval()
+
+    # --- Load PFAS Validation/Test Dataset ---
+    print(f"Loading PFAS {args.split} dataset...")
+    transform = Compose([
+        CreateEdges(),
+        FeaturizeNodes(),
+        StandardizeTargets(dataset_name="pfas"),
+    ])
+    # Assuming the get_dataset function can handle splits for PFAS
+    dataset = get_dataset("pfas", root="data", split=args.split, transform=transform)
+    loader = GraphDataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+
+    # --- Evaluation Loop ---
+    all_preds = []
+    all_targets = []
+    with torch.no_grad():
+        for batch in tqdm(loader, desc=f"Evaluating on {args.split} split"):
+            batch = batch.to(device)
+            out = model(
+                x=batch.x,
+                edge_index=batch.edge_index,
+                batch=batch.batch
+            )
+            preds = out['graph_pred']
+            targets = batch.y.view(preds.shape)
+            
+            all_preds.append(preds.cpu())
+            all_targets.append(targets.cpu())
+
+    all_preds = torch.cat(all_preds, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+
+    # --- Un-standardize targets for interpretable MAE ---
+    stats_path = "data/target_stats.yaml"
+    with open(stats_path, 'r') as f:
+        stats = yaml.safe_load(f)
+    mean = torch.tensor(stats['pfas']['mean'])
+    std = torch.tensor(stats['pfas']['std'])
+
+    all_preds_unscaled = all_preds * std + mean
+    all_targets_unscaled = all_targets * std + mean
+
+    # --- Calculate and Print Metrics ---
+    mae_scaled = torch.nn.functional.l1_loss(all_preds, all_targets).item()
+    mae_unscaled = torch.nn.functional.l1_loss(all_preds_unscaled, all_targets_unscaled).item()
+    
+    print("\n--- Evaluation Results ---")
+    print(f"Split: {args.split}")
+    print(f"Standardized MAE: {mae_scaled:.6f}")
+    print(f"Unscaled MAE (natural units): {mae_unscaled:.6f}")
+    print("--------------------------")
+
+if __name__ == "__main__":
+    main()
