@@ -52,7 +52,7 @@ def main():
     print(f"Loading SPICE {args.split} split...")
     # For SPICE, we don't need to standardize the node-level force targets
     transform = Compose([CreateEdges(), FeaturizeNodes()])
-    dataset = get_dataset("spice", root="MoML-CA/data", split=args.split, transform=transform)
+    dataset = get_dataset("spice", root="data", split=args.split, transform=transform)
     
     loader = GraphDataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 

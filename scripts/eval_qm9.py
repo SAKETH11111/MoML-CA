@@ -70,7 +70,7 @@ def main():
     ])
     # The QM9 dataset in PyG doesn't have official splits, so we create one.
     # This is a simplified approach for validation.
-    full_dataset = get_dataset("qm9", root="MoML-CA/data", transform=transform)
+    full_dataset = get_dataset("qm9", root="data", transform=transform)
     # Use a fixed random seed for reproducibility of splits
     torch.manual_seed(42)
     shuffled_indices = torch.randperm(len(full_dataset))

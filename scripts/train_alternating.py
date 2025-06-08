@@ -157,10 +157,11 @@ def save_checkpoint(model, optimizer, step, loss, checkpoint_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='Alternating training for DJMGNN')
-    parser.add_argument('--max_steps', type=int, default=10000, help='Maximum training steps')
-    parser.add_argument('--batch_graph', type=int, default=64, help='Batch size for graph-level tasks')
+    parser.add_argument('--max_steps', type=int, default=8000, help='Maximum training steps')
+    parser.add_argument('--batch_graph', type=int, default=8, help='Batch size for graph-level tasks')
     parser.add_argument('--batch_node', type=int, default=4, help='Batch size for node-level tasks')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=3e-5, help='Learning rate')
+    parser.add_argument('--loss_node_weight', type=float, default=1.0, help='Weight for the node-level loss component.')
     parser.add_argument('--lambda_weight', type=float, default=1000.0, help='Lambda weighting factor for node loss')
     parser.add_argument('--lambda_energy_weight', type=float, default=1.0, help='Lambda weighting factor for SPICE energy loss')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
@@ -170,11 +171,17 @@ def main():
     parser.add_argument('--config_path', type=str, default='config/training_config.template.yaml', help='Path to training config YAML file')
     parser.add_argument('--fresh_start', action='store_true', help='Start training from scratch, ignoring existing checkpoints.')
     parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Specific checkpoint file to resume from.')
+    parser.add_argument('--ckpt', type=str, default=None, help='Alias for --resume_from_checkpoint.')
+    parser.add_argument('--graph_dataset', type=str, default='qm9', help='Dataset for graph-level tasks (e.g., "qm9", "pfas").')
+    parser.add_argument('--node_dataset', type=str, default='spice', help='Dataset for node-level tasks (e.g., "spice", "none").')
     args = parser.parse_args()
     
+    if args.ckpt:
+        args.resume_from_checkpoint = args.ckpt
+
     logger = setup_logging() # Logging is set up here
     # The first log messages will now include the one from setup_logging itself
-    logger.info("Starting alternating training for DJMGNN") 
+    logger.info("Starting alternating training for DJMGNN")
     logger.info(f"Arguments: {vars(args)}")
 
     try:
@@ -195,11 +202,11 @@ def main():
     in_node_dim_cfg = 29
     
     try:
-        transform_qm9 = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name="qm9")])
-        transform_spice = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name="spice")])
+        transform_graph = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.graph_dataset)])
+        transform_node = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.node_dataset)])
 
-        # Graph-level dataset (QM9)
-        ds_graph = get_dataset("qm9", root="data", transform=transform_qm9)
+        # Graph-level dataset
+        ds_graph = get_dataset(args.graph_dataset, root="data", transform=transform_graph)
         graph_loader = GraphDataLoader(
             ds_graph,
             batch_size=args.batch_graph,
@@ -207,22 +214,25 @@ def main():
             num_workers=4
         )
         graph_cycle = create_cycle_iterator(graph_loader)
-        logger.info(f"Loaded QM9 dataset for graph-level tasks with {len(ds_graph)} samples.")
+        logger.info(f"Loaded {args.graph_dataset.upper()} dataset for graph-level tasks with {len(ds_graph)} samples.")
 
-        # Node-level dataset (SPICE)
-        try:
-            ds_node = get_dataset("spice", root="data", split="train", transform=transform_spice)
-            node_loader = GraphDataLoader(
-                ds_node,
-                batch_size=args.batch_node,
-                shuffle=True,
-                num_workers=4
-            )
-            node_cycle = create_cycle_iterator(node_loader)
-            logger.info(f"Loaded SPICE dataset for node-level tasks with {len(ds_node)} samples.")
-        except Exception as e:
-            logger.warning(f"Could not load SPICE dataset: {e}. Node-level tasks will be skipped.")
-            node_cycle = None
+        # Node-level dataset
+        node_cycle = None
+        if args.node_dataset.lower() != 'none':
+            try:
+                ds_node = get_dataset(args.node_dataset, root="data", split="train", transform=transform_node)
+                node_loader = GraphDataLoader(
+                    ds_node,
+                    batch_size=args.batch_node,
+                    shuffle=True,
+                    num_workers=4
+                )
+                node_cycle = create_cycle_iterator(node_loader)
+                logger.info(f"Loaded {args.node_dataset.upper()} dataset for node-level tasks with {len(ds_node)} samples.")
+            except Exception as e:
+                logger.warning(f"Could not load {args.node_dataset.upper()} dataset: {e}. Node-level tasks will be skipped.")
+        else:
+            logger.info("No node-level dataset specified. Training will be graph-only.")
         
         logger.info("Initializing DJMGNN model...")
 
@@ -289,21 +299,19 @@ def main():
         }
         
         for step in range(start_step, args.max_steps):
-            if step % 2 == 0:
+            # Determine which task to perform
+            if node_cycle and step % 2 != 0:
+                # Perform a node-level task
+                batch = next(node_cycle)
+                loss_node_weight = args.loss_node_weight
+                loss_graph_weight = 0
+                task_type = "node"
+            else:
+                # Perform a graph-level task
                 batch = next(graph_cycle)
                 loss_node_weight = 0
                 loss_graph_weight = 1
                 task_type = "graph"
-            else:
-                if node_cycle is None:
-                    logger.warning("Node-level dataset not available, skipping node step.")
-                    continue
-                batch = next(node_cycle)
-                assert hasattr(batch, "node_y") and batch.node_y is not None and batch.node_y.numel() > 0, \
-                    "SPICE batch is missing 'node_y' or it's empty."
-                loss_node_weight = 1
-                loss_graph_weight = 0 # No graph loss on node step
-                task_type = "node"
             
             metrics = train_step(
                 model=model,
