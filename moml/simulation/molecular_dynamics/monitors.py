@@ -4,7 +4,7 @@ Monitoring module for tracking system stability during MD.
 
 from typing import List, Optional
 import numpy as np
-from openmm import State, app
+from openmm import State, app, System
 from openmm import unit
 import structlog
 
@@ -140,7 +140,7 @@ class TemperatureMonitor(BaseMonitor):
         """Update with new temperature state."""
         # Get temperature from state
         ke = state.getKineticEnergy().value_in_unit(unit.kilojoules_per_mole)
-        temp = ke / (1.5 * unit.BOLTZMANN_CONSTANT_kB.value_in_unit(unit.kilojoules_per_mole/unit.kelvin))
+        temp = ke / (1.5 * (unit.BOLTZMANN_CONSTANT_kB * unit.AVOGADRO_CONSTANT_NA).value_in_unit(unit.kilojoule_per_mole/unit.kelvin))
         self._update_history(temp)
         
         if abs(temp - self.target_temp) > self.temp_tolerance:
@@ -177,24 +177,25 @@ class Watchdog:
         self.last_energy: Optional[float] = None
         self.last_step: Optional[int] = None
     
-    def as_reporter(self, reportInterval: int = 1000) -> app.StateDataReporter:
+    def as_reporter(self, system: System, reportInterval: int = 1000) -> app.StateDataReporter:
         """Create a StateDataReporter that calls this watchdog."""
         def _callback(state: State, step: int):          # noqa: E306
-            self._check_state(step, state)
+            self._check_state(step, state, system)
 
         rep = app.StateDataReporter(
             None, reportInterval,
-            step=True, temperature=True, potentialEnergy=True
+            step=True, temperature=True, potentialEnergy=True, kineticEnergy=True
         )
         # pytest checks that the attribute exists:
         rep._callback = _callback
         return rep
-    
-    def _check_state(self, step: int, state: State):
+
+    def _check_state(self, step: int, state: State, system: System):
         """Check simulation state for divergence."""
         # Get temperature and energy from state
-        ke = state.getKineticEnergy().value_in_unit(unit.kilojoules_per_mole)
-        temp = ke / (1.5 * unit.BOLTZMANN_CONSTANT_kB.value_in_unit(unit.kilojoules_per_mole/unit.kelvin))
+        ke = state.getKineticEnergy()
+        n_dof = system.getNumParticles() * 3 - system.getNumConstraints()
+        temp = (2 * ke / (n_dof * unit.BOLTZMANN_CONSTANT_kB * unit.AVOGADRO_CONSTANT_NA)).value_in_unit(unit.kelvin)
         energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
         
         # Check temperature
@@ -204,10 +205,16 @@ class Watchdog:
         # Check energy drift
         if self.last_energy is not None and self.last_step is not None:
             steps = step - self.last_step
+            if steps == 0:
+                return # Avoid division by zero if called with the same step
             energy_diff = energy - self.last_energy
-            drift = energy_diff / (steps * 0.002)  # kJ/mol/ns assuming 2fs timestep
-            
+            # Assuming timestep is in ps, drift is in kJ/mol/ns
+            # This calculation is still simplified, assuming a fixed timestep.
+            # A more robust implementation would use state.getTime().
+            drift = energy_diff / (steps * 0.002)
+
             if abs(drift) > self.energy_drift_kj_per_ns:
+                raise SimulationDiverged(f"Energy drift {drift:.2f} kJ/mol/ns exceeds maximum {self.energy_drift_kj_per_ns} kJ/mol/ns")
                 raise SimulationDiverged(
                     f"Energy drift {drift:.1f} kJ/mol/ns exceeds maximum {self.energy_drift_kj_per_ns}")
         

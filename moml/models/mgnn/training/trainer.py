@@ -560,6 +560,21 @@ def train_epoch(
     return epoch_loss
 
 
+def _infer_in_dim_from_loader(loader: Optional[DataLoader]) -> Optional[int]:
+    """Helper to infer input dimension from DataLoader."""
+    if loader is None or not hasattr(loader, "dataset"):
+        return None
+    try:
+        sample_data = loader.dataset[0]
+        if hasattr(sample_data, "x") and sample_data.x is not None:
+            return sample_data.x.shape[1]
+        elif hasattr(sample_data, "node_feat") and sample_data.node_feat is not None: # For PyG Data
+            return sample_data.node_feat.shape[1]
+        elif isinstance(sample_data, tuple) and len(sample_data) > 0 and hasattr(sample_data[0], 'x') and sample_data[0].x is not None: # DGL case
+            return sample_data[0].x.shape[1]
+    except (IndexError, AttributeError, TypeError):
+        return None
+    return None
 def create_trainer(
     config: Dict,
     train_loader: Optional[DataLoader] = None,
@@ -589,23 +604,24 @@ def create_trainer(
         "node_out_dim": config.get("node_out_dim", 1),
         "graph_out_dim": config.get("graph_out_dim", 1),
         "dropout": config.get("dropout", 0.2),
+        "edge_attr_dim": config.get("edge_attr_dim", 0),
     }
 
-        # Decide the input feature dimension --------------------------------
-        if "in_dim" in config:
-            model_kwargs["in_dim"] = config["in_dim"]
+    # Decide the input feature dimension --------------------------------
+    if "in_dim" in config:
+        model_kwargs["in_dim"] = config["in_dim"]
+    else:
+        inferred = _infer_in_dim_from_loader(train_loader)
+        if inferred is not None:
+            model_kwargs["in_dim"] = inferred
         else:
-            inferred = _infer_in_dim_from_loader(train_loader)
-            if inferred is not None:
-                model_kwargs["in_dim"] = inferred
-            else:
-                raise ValueError(
-                    "`in_dim` is missing from `config` and could not be "
-                    "inferred from the provided DataLoader. Please supply it "
-                    "explicitly."
-                )
+            raise ValueError(
+                "`in_dim` is missing from `config` and could not be "
+                "inferred from the provided DataLoader. Please supply it "
+                "explicitly."
+            )
 
-        model = DJMGNN(**model_kwargs)
+    model = DJMGNN(**model_kwargs)
 
     # ------------------------------------------------------------------
     # 2) Optimiser & loss

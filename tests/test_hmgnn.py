@@ -521,9 +521,22 @@ class TestHMGNN:
         """
         Tests that the `create_hierarchical_mgnn` factory function returns an `HMGNN` instance with the correct number of scales.
         """
-        model = create_hierarchical_mgnn(
-            scale_dims=SCALE_NODE_DIMS_HMGNN, hidden_dim=HIDDEN_DIM_HMGNN, edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT
-        )
+        model_config = {
+            "scale_dims": SCALE_NODE_DIMS_HMGNN,
+            "hidden_dim": HIDDEN_DIM_HMGNN,
+            "edge_attr_dims": SCALE_EDGE_ATTR_DIMS_PRESENT,
+            "node_out_dim": 1,  # Add default or test-specific value
+            "graph_out_dim": 1, # Add default or test-specific value
+            "n_blocks": 2,      # Add default or test-specific value
+            "layers_per_block": 2, # Add default or test-specific value
+            "jk_mode": "concat",    # Add default or test-specific value
+            "cross_scale_exchange": False, # Add default or test-specific value
+            "dropout": 0.0,      # Add default or test-specific value
+            "n_heads_cs": 4,     # Add default or test-specific value
+            "edge_dim_cs": 0,    # Add default or test-specific value
+            "pool_type": "add"   # Add default or test-specific value
+        }
+        model = create_hierarchical_mgnn(config=model_config)
         assert isinstance(model, HMGNN)
         assert len(model.scale_gnns) == NUM_SCALES
         # assert model.hidden_dim == HIDDEN_DIM_HMGNN # HMGNN class does not store hidden_dim as self.hidden_dim

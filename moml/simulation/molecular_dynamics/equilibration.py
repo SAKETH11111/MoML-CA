@@ -4,7 +4,7 @@ Implements a deterministic protocol: minimization → NVT → NPT.
 """
 
 from typing import Tuple
-from openmm import app, System, Context, VerletIntegrator, MonteCarloBarostat, State
+from openmm import app, System, Context, VerletIntegrator, MonteCarloBarostat, State, LocalEnergyMinimizer, CustomExternalForce, AndersenThermostat
 from openmm import unit
 import structlog
 
@@ -47,12 +47,12 @@ class EquilibrationProtocol:
         
         # Minimize
         context.setVelocitiesToTemperature(0 * unit.kelvin)
-        app.LocalEnergyMinimizer.minimize(context, 
+        LocalEnergyMinimizer.minimize(context,
                                         maxIterations=self.config.equilibration.minimization_steps)
         
         # Get minimized positions and energy
         state = context.getState(getPositions=True, getEnergy=True)
-        positions = state.getPositions()
+        positions = state.getPositions(asNumpy=True)
         energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
         
         logger.info("minimization_complete", energy=energy)
@@ -67,6 +67,8 @@ class EquilibrationProtocol:
         
         # Setup NVT simulation
         integrator = VerletIntegrator(self.config.integration.timestep * unit.femtoseconds)
+        integrator.setConstraintTolerance(1e-5)
+        nvt_system.addForce(AndersenThermostat(self.config.system.temperature * unit.kelvin, 1.0 / unit.picoseconds))
         context = Context(nvt_system, integrator, self.platform)
         context.setPositions(positions)
         context.setVelocitiesToTemperature(self.config.system.temperature * unit.kelvin)
@@ -81,7 +83,7 @@ class EquilibrationProtocol:
         
         # Get final positions
         state = context.getState(getPositions=True)
-        positions = state.getPositions()
+        positions = state.getPositions(asNumpy=True)
         
         logger.info("nvt_complete")
         return positions
@@ -103,21 +105,21 @@ class EquilibrationProtocol:
         for i in range(self.config.equilibration.npt_steps):
             integrator.step(1)
             if i % 1000 == 0:
-                state = context.getState(getEnergy=True, getVolume=True)
+                state = context.getState(getEnergy=True)
                 energy = state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
                 volume = state.getPeriodicBoxVolume().value_in_unit(unit.nanometers**3)
                 logger.info("npt_progress", step=i, energy=energy, volume=volume)
         
         # Get final positions
         state = context.getState(getPositions=True)
-        positions = state.getPositions()
+        positions = state.getPositions(asNumpy=True)
         
         logger.info("npt_complete")
         return positions
     
     def _add_position_restraints(self, system: System, positions: unit.Quantity) -> System:
         """Add position restraints to the system."""
-        force = app.CustomExternalForce("k*((x-x0)^2+(y-y0)^2+(z-z0)^2)")
+        force = CustomExternalForce("k*((x-x0)^2+(y-y0)^2+(z-z0)^2)")
         force.addPerParticleParameter("k")
         force.addPerParticleParameter("x0")
         force.addPerParticleParameter("y0")

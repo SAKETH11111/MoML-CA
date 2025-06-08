@@ -168,19 +168,22 @@ def test_compute_metric_sasa(sample_trajectory, sample_metrics_config):
     extractor = TimeseriesExtractor()
     sasa = extractor._compute_sasa(sample_trajectory, sample_metrics_config['sasa'])
     assert isinstance(sasa, np.ndarray)
-    assert sasa.shape == (sample_trajectory.n_frames,)
+    # SASA returns (n_frames, n_atoms)
+    assert sasa.shape == (sample_trajectory.n_frames, sample_trajectory.n_atoms)
 
 def test_compute_metric_hbonds(sample_trajectory, sample_metrics_config):
     """Test hydrogen bonds computation."""
     extractor = TimeseriesExtractor()
     hbonds = extractor._compute_hbonds(sample_trajectory, sample_metrics_config['hbonds'])
-    assert isinstance(hbonds, np.ndarray)
+    assert isinstance(hbonds, list) # md.baker_hubbard returns a list of hydrogen bonds
+    # Further assertions could be added to check the content of the list if needed
 
 def test_invalid_metric_type(sample_trajectory):
     """Test handling of invalid metric type."""
     extractor = TimeseriesExtractor()
     with pytest.raises(ValueError, match="Unknown metric type"):
-        extractor._compute_metric(sample_trajectory, {'type': 'invalid_type'})
+        # The method to dispatch metric computation is _dispatch, not _compute_metric
+        extractor._dispatch('invalid_metric', sample_trajectory, {'type': 'invalid_type'})
 
 def test_nonexistent_trajectory(temp_files, sample_metrics_config):
     """Test handling of nonexistent trajectory file."""

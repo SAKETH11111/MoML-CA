@@ -88,7 +88,10 @@ class TimeseriesExtractor:
     def _compute_rmsf(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
         """Compute RMSF."""
         idx = self._atom_indices(traj, config.get("selection"))
-        return md.rmsf(traj, traj, idx)
+        # Corrected call to md.rmsf, ensure idx is passed to atom_indices
+        # Also, ensure the reference trajectory for alignment is appropriate.
+        # Using the first frame of the target trajectory as reference is common.
+        return md.rmsf(target=traj, reference=traj, atom_indices=idx, ref_atom_indices=idx).astype(np.float32)
     
     def _compute_rg(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
         """Compute radius of gyration."""

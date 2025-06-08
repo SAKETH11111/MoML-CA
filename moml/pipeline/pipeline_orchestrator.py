@@ -28,7 +28,7 @@ from moml.core import (
     calculate_molecular_descriptors,
     create_graph_processor,
 )
-from moml.simulation.quantum_mechanics.parser.orca_parser import batch_process_molecules
+from moml.simulation.qm.parser.orca_parser import batch_process_molecules
 from moml.data import process_dataset, process_mol_file_to_graph, graph_batch_process
 
 # Set up logging

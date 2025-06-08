@@ -484,15 +484,15 @@ class TestCreateTrainerFactory:
         create_trainer(config=dummy_config, train_loader=mock_train_loader)
 
         MockDJMGNN.assert_called_once_with(
-            in_dim=dummy_config["in_dim"],
             hidden_dim=dummy_config["hidden_dim"],
             n_blocks=dummy_config.get("n_blocks", 3),
             layers_per_block=dummy_config.get("layers_per_block", 2),
-            edge_attr_dim=dummy_config["edge_attr_dim"],
             jk_mode=dummy_config.get("jk_mode", "cat"),
             node_out_dim=dummy_config["node_out_dim"],
             graph_out_dim=dummy_config["graph_out_dim"],
             dropout=dummy_config.get("dropout", 0.2),
+            in_dim=dummy_config["in_dim"],
+            edge_attr_dim=dummy_config["edge_attr_dim"],
         )
         MockMGNNTrainer.assert_called_once()
         args, kwargs = MockMGNNTrainer.call_args

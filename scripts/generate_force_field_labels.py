@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 
 from rdkit import Chem
 
-from moml.simulation.molecular_dynamics.force_field_mapper import ForceFieldMapper
+from moml.simulation.molecular_dynamics.force_field.mapper import ForceFieldMapper
 
 
 def safe_parse_orca_output(path: str) -> Dict[str, Any]:

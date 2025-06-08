@@ -22,7 +22,7 @@ from moml.core import (
     GraphCoarsener,
     collate_graphs,
 )
-from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output
+from moml.simulation.qm.parser.orca_parser import parse_orca_output
 
 
 class PFASDataLoader:
