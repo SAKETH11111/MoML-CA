@@ -171,7 +171,7 @@ class PFASSDFDataset(InMemoryDataset):
                 Descriptors.NumSaturatedRings(mol),        # Saturated rings
                 mol.GetNumHeavyAtoms(),                    # Number of heavy atoms (instead of FractionCsp3)
                 Descriptors.BalabanJ(mol),                 # Balaban J index
-                rdMolDescriptors.BertzCT(mol),                  # Bertz complexity
+                Descriptors.BertzCT(mol),                  # Bertz complexity
                 Descriptors.HallKierAlpha(mol),            # Hall-Kier alpha
                 Descriptors.Kappa1(mol),                   # Kappa shape index 1
                 Descriptors.Kappa2(mol),                   # Kappa shape index 2
