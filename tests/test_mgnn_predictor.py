@@ -9,7 +9,7 @@ import os
 import tempfile
 import shutil
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 from torch_geometric.data import Data
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -314,7 +314,7 @@ class TestCreatePredictorFactory:
 
     def test_create_no_args(self):
         with pytest.raises(ValueError, match="Either model_path or model must be provided"):
-            create_predictor()
+            create_predictor(config={})
 
 
 @patch("moml.models.mgnn.evaluation.predictor.create_predictor")

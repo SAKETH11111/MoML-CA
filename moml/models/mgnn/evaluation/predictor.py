@@ -333,40 +333,27 @@ class MGNNPredictor:
                 json.dump(self.config, f, indent=2)
 
 
-def create_predictor(
-    model_path: Optional[str] = None,
-    model: Optional[nn.Module] = None,
-    config: Optional[Dict[str, Any]] = None,
-    device: Optional[str] = None,
-) -> MGNNPredictor:
-    """
-    Create a predictor for a trained model.
-
+def create_predictor(config: Dict, model_path: Optional[str] = None, model: Optional[nn.Module] = None) -> MGNNPredictor:
+    """Create a predictor instance with the given configuration.
+    
     Args:
-        model_path: Path to the model checkpoint (optional if model is provided)
-        model: The trained model instance (optional if model_path is provided)
-        config: Configuration for the model and data processing
-        device: Device to use for inference
-
+        config: Configuration dictionary
+        model_path: Optional path to saved model checkpoint
+        model: Optional pre-created model instance. If provided, this model will be used instead of loading from model_path.
+    
     Returns:
-        Configured predictor
+        MGNNPredictor instance
     """
-    if model_path is None and model is None:
+    if model is None and model_path is None:
         raise ValueError("Either model_path or model must be provided")
-
-    # Create default config if not provided
-    if config is None:
-        config = {}
-
-    # Create predictor with model path or direct model
-    if model is not None:
-        # Initialize predictor with model directly
-        predictor = MGNNPredictor(model=model, config=config, device=device)
-    else:
-        # Initialize predictor with model path
-        predictor = MGNNPredictor(model_path=model_path, config=config, device=device)
-
-    return predictor
+    
+    if model is None:
+        # Load model from checkpoint
+        checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+        model = DJMGNN(**checkpoint['model_config'])
+        model.load_state_dict(checkpoint['model_state_dict'])
+    
+    return MGNNPredictor(model=model, config=config)
 
 
 def batch_predict_from_files(

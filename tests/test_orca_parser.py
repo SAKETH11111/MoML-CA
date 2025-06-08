@@ -1,6 +1,6 @@
 """
 Unit tests for the ORCA parser and calculation management functions
-in moml.simulation.quantum_mechanics.parser.orca_parser.
+in moml.simulation.qm.parser.orca_parser.
 """
 
 import pytest
@@ -12,7 +12,7 @@ import pandas as pd
 import json
 from unittest.mock import patch, mock_open, MagicMock, call
 
-from moml.simulation.quantum_mechanics.parser.orca_parser import (
+from moml.simulation.qm.parser.orca_parser import (
     parse_orca_output,
     extract_partial_charges_from_orca,
     smiles_to_3d_structure,
@@ -152,19 +152,19 @@ class TestParseOrcaOutput:
 
 
 class TestExtractPartialCharges:
-    @patch("moml.simulation.quantum_mechanics.parser.orca_parser.parse_orca_output")
+    @patch("moml.simulation.qm.parser.orca_parser.parse_orca_output")
     def test_extract_mulliken(self, mock_parse):
         mock_parse.return_value = {"mulliken_charges": [1.0, -1.0], "loewdin_charges": [0.5, -0.5]}
         charges = extract_partial_charges_from_orca("dummy.out", charge_type="mulliken")
         assert charges == [1.0, -1.0]
 
-    @patch("moml.simulation.quantum_mechanics.parser.orca_parser.parse_orca_output")
+    @patch("moml.simulation.qm.parser.orca_parser.parse_orca_output")
     def test_extract_loewdin(self, mock_parse):
         mock_parse.return_value = {"mulliken_charges": [1.0, -1.0], "loewdin_charges": [0.5, -0.5]}
         charges = extract_partial_charges_from_orca("dummy.out", charge_type="loewdin")
         assert charges == [0.5, -0.5]
 
-    @patch("moml.simulation.quantum_mechanics.parser.orca_parser.parse_orca_output")
+    @patch("moml.simulation.qm.parser.orca_parser.parse_orca_output")
     def test_extract_unknown_type(self, mock_parse, caplog):
         mock_parse.return_value = {"mulliken_charges": [1.0, -1.0], "loewdin_charges": [0.5, -0.5]}
         charges = extract_partial_charges_from_orca("dummy.out", charge_type="unknown")
@@ -354,10 +354,10 @@ class TestRunOrcaCalculation:
         assert out_path == ""
 
 
-@patch("moml.simulation.quantum_mechanics.parser.orca_parser.smiles_to_3d_structure")
-@patch("moml.simulation.quantum_mechanics.parser.orca_parser.create_orca_input")
-@patch("moml.simulation.quantum_mechanics.parser.orca_parser.run_orca_calculation")
-@patch("moml.simulation.quantum_mechanics.parser.orca_parser.parse_orca_output")
+@patch("moml.simulation.qm.parser.orca_parser.smiles_to_3d_structure")
+@patch("moml.simulation.qm.parser.orca_parser.create_orca_input")
+@patch("moml.simulation.qm.parser.orca_parser.run_orca_calculation")
+@patch("moml.simulation.qm.parser.orca_parser.parse_orca_output")
 class TestProcessMolecule:
     def test_process_molecule_success(
         self, mock_parse, mock_run, mock_create_inp, mock_smiles_3d, temp_orca_output_file
@@ -409,7 +409,7 @@ def temp_batch_output_dir():
     shutil.rmtree(dir_path)
 
 
-@patch("moml.simulation.quantum_mechanics.parser.orca_parser.process_molecule")
+@patch("moml.simulation.qm.parser.orca_parser.process_molecule")
 @patch("concurrent.futures.ProcessPoolExecutor")
 class TestBatchProcessMolecules:
     @pytest.mark.skip(reason="Test hangs or is too slow, to be investigated later")

@@ -514,28 +514,36 @@ class TestCreateTrainerFactory:
     def test_create_trainer_missing_model_dims_in_config(self, MockMGNNTrainer, MockDJMGNN, dummy_config):
         config_no_dims = dummy_config.copy()
         del config_no_dims["in_dim"]
-        # edge_attr_dim might be 0, which is fine. node_out_dim and graph_out_dim are also important.
-
-        # DJMGNN has default values for these if not provided.
-        # The create_trainer function will pass whatever is in config (or not pass if missing).
-        # Configure the mock DJMGNN's parameters method for this call too
+        
+        # Configure the mock DJMGNN's parameters method
         MockDJMGNN.return_value.parameters.return_value = [nn.Parameter(torch.randn(1))]
-        create_trainer(config=config_no_dims)
-
-        MockDJMGNN.assert_called_once_with(
-            # Matching the "Actual" call from the error log, which omits in_dim
-            hidden_dim=config_no_dims["hidden_dim"],
-            n_blocks=config_no_dims.get("n_blocks", 3),
-            layers_per_block=config_no_dims.get("layers_per_block", 2),
-            # Order from error log's "Actual" call for remaining kwargs
-            jk_mode=config_no_dims.get("jk_mode", "cat"),
-            node_out_dim=config_no_dims["node_out_dim"],
-            graph_out_dim=config_no_dims["graph_out_dim"],
-            dropout=config_no_dims.get("dropout", 0.2),
-            edge_attr_dim=config_no_dims["edge_attr_dim"],  # Might be 0
-        )
-        # Check that in_dim was NOT in the kwargs for DJMGNN
-        _, djmgnn_kwargs = MockDJMGNN.call_args
-        assert "in_dim" not in djmgnn_kwargs
-
+        
+        # Create a mock train loader with sample data that includes x attribute
+        mock_train_loader = MagicMock()
+        mock_dataset = MagicMock()
+        mock_sample = MagicMock()
+        mock_sample.x = torch.randn(10, 16)  # 10 nodes with 16 features
+        mock_dataset.__getitem__.return_value = mock_sample
+        mock_dataset.__len__.return_value = 1
+        mock_train_loader.dataset = mock_dataset
+        
+        create_trainer(config=config_no_dims, train_loader=mock_train_loader)
+        
+        # DJMGNN should be called with in_dim from the sample data
+        MockDJMGNN.assert_called_once()
+        args, kwargs = MockDJMGNN.call_args
+        assert kwargs["in_dim"] == 16  # From the mock sample data
+        assert kwargs["hidden_dim"] == config_no_dims["hidden_dim"]
+        assert kwargs["n_blocks"] == config_no_dims.get("n_blocks", 3)
+        assert kwargs["layers_per_block"] == config_no_dims.get("layers_per_block", 2)
+        assert kwargs["edge_attr_dim"] == config_no_dims["edge_attr_dim"]
+        assert kwargs["jk_mode"] == config_no_dims.get("jk_mode", "cat")
+        assert kwargs["node_out_dim"] == config_no_dims["node_out_dim"]
+        assert kwargs["graph_out_dim"] == config_no_dims["graph_out_dim"]
+        assert kwargs["dropout"] == config_no_dims.get("dropout", 0.2)
+        
+        # MGNNTrainer should be called with the created model
         MockMGNNTrainer.assert_called_once()
+        args, kwargs = MockMGNNTrainer.call_args
+        assert kwargs["model"] == MockDJMGNN.return_value
+        assert kwargs["config"] == config_no_dims

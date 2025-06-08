@@ -207,8 +207,11 @@ class DJMGNN(nn.Module):
         use_supernode=True,
         use_rbf=True,
         rbf_K=32,
+        env_dim: int = 0,
+        env_mlp: bool = False,
     ):
         super().__init__()
+        self.env_dim = env_dim
         self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = p_dropedge, use_supernode, use_rbf, rbf_K
         self.hidden_dim = hidden_dim
         self.node_output_dims = node_output_dims  
@@ -236,6 +239,17 @@ class DJMGNN(nn.Module):
 
         self.jk = JKAggregator([hidden_dim] * n_blocks, hidden_dim, mode=jk_mode)
 
+        # optional env projection
+        env_in = env_dim if not env_mlp else hidden_dim
+        if env_dim and env_mlp:
+            self.env_proj = nn.Sequential(nn.Linear(env_dim, hidden_dim), nn.SiLU())
+        else:
+            self.env_proj = None
+
+        fused_graph_in = hidden_dim + env_in
+        fused_node_in = hidden_dim + env_in
+
+        # heads
         self.node_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),

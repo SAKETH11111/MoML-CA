@@ -211,7 +211,9 @@ class HMGNN(nn.Module):
         pool_type: str = "mean",
     ):
         super().__init__()
+        self.env_dim = env_dim  # Store env_dim
         self.S = len(scale_dims)
+        self.dropout = dropout  # Store dropout
         self.hidden_dim = hidden_dim  # Store hidden_dim
         self.node_out_dim = node_out_dim  # Store node_out_dim
         self.graph_out_dim = graph_out_dim  # Store graph_out_dim
@@ -402,22 +404,33 @@ class HMGNN(nn.Module):
 
 
 #  Factory convenience
-def create_hierarchical_mgnn(
-    scale_dims: List[int],
-    hidden_dim: int = 64,
-    n_blocks: int = 2,
-    layers_per_block: int = 3,
-    edge_attr_dims: Optional[List[int]] = None,
-    jk_mode: str = "attention",
-    node_out_dim: int = 1,
-    graph_out_dim: int = 1,
-    cross_scale_exchange: bool = True,
-    dropout: float = 0.2,
-    n_heads_cs: int = 4,
-    edge_dim_cs: int = 0,
-    pool_type: str = "mean",
-) -> HMGNN:
-    """Easy constructor mirroring DJMGNN.create_* style."""
+def create_hierarchical_mgnn(config: Dict) -> HMGNN:
+    """Create a hierarchical MGNN model from a configuration dictionary.
+    
+    Args:
+        config: Configuration dictionary containing model parameters:
+            - scale_dims: List of input dimensions for each scale
+            - hidden_dim: Hidden dimension size
+            - edge_attr_dims: Optional list of edge attribute dimensions for each scale
+            - node_out_dim: Output dimension for node predictions
+            - graph_out_dim: Output dimension for graph predictions
+            - n_blocks: Number of GNN blocks per scale
+            - layers_per_block: Number of layers per block
+            - jk_mode: Jumping knowledge mode
+            - cross_scale_exchange: Whether to use cross-scale attention
+            - dropout: Dropout rate
+            - n_heads_cs: Number of attention heads for cross-scale attention
+            - edge_dim_cs: Edge dimension for cross-scale attention
+            - pool_type: Pooling type for graph-level predictions
+    
+    Returns:
+        HMGNN instance
+    """
+    # If edge_attr_dims is None, create a list of zeros with same length as scale_dims
+    edge_attr_dims = config.get("edge_attr_dims")
+    if edge_attr_dims is None:
+        edge_attr_dims = [0] * len(config["scale_dims"])
+    
     return HMGNN(
         scale_dims=scale_dims,
         hidden_dim=hidden_dim,

@@ -11,7 +11,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 import torch
 
-from moml.simulation.molecular_dynamics.force_field_mapper import ForceFieldMapper
+from moml.simulation.molecular_dynamics.force_field.mapper import ForceFieldMapper
 
 
 # Helper function to create RDKit molecules

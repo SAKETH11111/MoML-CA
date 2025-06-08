@@ -368,6 +368,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             n_blocks=self.N_BLOCKS_HMGNN,
             layers_per_block=self.LAYERS_PER_BLOCK_HMGNN,
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,
@@ -398,6 +400,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             n_blocks=self.N_BLOCKS_HMGNN,
             layers_per_block=self.LAYERS_PER_BLOCK_HMGNN,
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,
@@ -425,6 +429,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_ABSENT,
             cross_scale_exchange=False,
         )
@@ -439,6 +445,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=single_scale_dims,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             edge_attr_dims=single_edge_dims,
             cross_scale_exchange=False,
         )
@@ -458,6 +466,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,
             cross_scale_exchange=True,
         )
@@ -478,6 +488,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             n_blocks=self.N_BLOCKS_HMGNN,
             layers_per_block=self.LAYERS_PER_BLOCK_HMGNN,
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,

@@ -1,0 +1,11 @@
+id: "gac_v1"
+family: "rigid_carbon"
+version: "1.0"
+description: "Graphitic slab representing granular-activated carbon pores."
+default_build:
+  slab_dims_nm: [8.0, 8.0, 4.0] # X, Y, Z
+  pore_fraction: 0.0 # 0 = solid slab
+  freeze_atoms: true # set mass to 0
+required_env_vec: [] # no direct pH/T dependence
+references:
+  - doi: 10.1021/acs.est.2c01317

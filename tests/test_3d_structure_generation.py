@@ -11,6 +11,8 @@ import sys
 import pytest
 import logging
 import tempfile
+import numpy as np
+from pathlib import Path
 
 try:
     from rdkit import Chem
