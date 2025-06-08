@@ -274,8 +274,9 @@ def main():
                 checkpoint = torch.load(checkpoint_to_load, map_location=device)
                 model.load_state_dict(checkpoint['model_state_dict'])
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                start_step = checkpoint.get('step', 0)
-                logger.info(f"Resumed from step {start_step} with loss {checkpoint.get('loss', 'N/A')}")
+                # For fine-tuning, we load weights but start the step count from 0
+                # start_step = checkpoint.get('step', 0)
+                logger.info(f"Loaded model state from step {checkpoint.get('step', 0)} with loss {checkpoint.get('loss', 'N/A')}")
             else:
                 logger.info("No checkpoint found. Starting from scratch.")
         else:
