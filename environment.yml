@@ -25,6 +25,7 @@ dependencies:
   # Molecular Modeling
   - conda-forge::rdkit                # Latest stable RDKit from conda-forge
   - conda-forge::openmm>=8.0    # Latest stable OpenMM (e.g., 8.0 or newer)
+  - conda-forge::openmmtools          # For system creation and alchemical free energy
                                 # The conda-forge package should utilize the system CUDA.
 
   # Scientific Computing & Data Handling
