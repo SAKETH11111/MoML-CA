@@ -11,13 +11,43 @@ import json
 import torch
 import logging
 import glob
-from torch_geometric.data import Data, Batch
-from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors
-from rdkit.Chem import Lipinski
-from rdkit.Chem import QED
 from typing import Dict, List, Tuple, Optional, Union, Any
 import numpy as np
+
+# Conditional imports for optional dependencies
+try:
+    from torch_geometric.data import Data, Batch
+    HAS_TORCH_GEOMETRIC = True
+except ImportError:
+    HAS_TORCH_GEOMETRIC = False
+    # Create dummy classes for when torch_geometric is not available
+    class Data:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+    
+    class Batch:
+        @staticmethod
+        def from_data_list(data_list):
+            return data_list
+
+try:
+    from rdkit import Chem
+    from rdkit.Chem import AllChem, Descriptors
+    from rdkit.Chem import Lipinski
+    from rdkit.Chem import QED
+    HAS_RDKIT = True
+except ImportError:
+    HAS_RDKIT = False
+    # Create dummy Chem module for when rdkit is not available
+    class Chem:
+        @staticmethod
+        def MolFromSmiles(smiles):
+            return None
+        
+        @staticmethod
+        def MolToSmiles(mol):
+            return ""
 import concurrent.futures
 
 
@@ -107,6 +137,9 @@ class MolecularGraphProcessor:
     }
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        if not HAS_RDKIT:
+            raise ImportError("RDKit is required for MolecularGraphProcessor. Please install rdkit.")
+        
         self.config = config or {}
         self.use_partial_charges = self.config.get("use_partial_charges", True)
         self.use_3d_coords = self.config.get("use_3d_coords", True)

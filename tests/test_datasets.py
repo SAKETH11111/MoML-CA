@@ -44,9 +44,11 @@ def create_dummy_pt_graph_file(dir_path: str, filename: str, num_nodes: int = 5)
     """Creates a dummy .pt (PyTorch Geometric Data) file."""
     filepath = os.path.join(dir_path, filename)
     edge_index = torch.tensor([[0, 1, 1, 2, 2, 3, 3, 4], [1, 0, 2, 1, 3, 2, 4, 3]], dtype=torch.long)
-    if num_nodes == 0: x = torch.empty(0, 16)
+    if num_nodes == 0: 
+        x = torch.empty(0, 16)
         edge_index = torch.empty(2, 0, dtype=torch.long)
-    elif num_nodes < 5: x = torch.randn(num_nodes, 16)
+    elif num_nodes < 5: 
+        x = torch.randn(num_nodes, 16)
         edge_index = (
             torch.tensor(
                 [[i % num_nodes for i in range(num_nodes - 1)], [(i + 1) % num_nodes for i in range(num_nodes - 1)]],
