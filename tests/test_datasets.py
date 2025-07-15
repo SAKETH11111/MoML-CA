@@ -162,7 +162,8 @@ def simple_transform(graph: Data) -> Data:
     return graph
 
 
-class TestMolecularGraphDataset: def test_initialization_and_len(self, dummy_mol_files_sdf: List[str], dummy_labels_for_mol_files: Dict[str, float]):
+class TestMolecularGraphDataset:
+    def test_initialization_and_len(self, dummy_mol_files_sdf: List[str], dummy_labels_for_mol_files: Dict[str, float]):
         dataset = MolecularGraphDataset(mol_files=dummy_mol_files_sdf, labels=dummy_labels_for_mol_files)
         assert len(dataset) == len(dummy_mol_files_sdf)
         assert len(dataset.graphs) == len(dummy_mol_files_sdf)
@@ -267,7 +268,8 @@ class TestMolecularGraphDataset: def test_initialization_and_len(self, dummy_mol
         assert dataset_log_found, "Expected 'Graph for ... was None' log from dataset not found."
 
 
-class TestHierarchicalGraphDataset: def test_initialization_and_len(self, dummy_hierarchical_data_dir: str):
+class TestHierarchicalGraphDataset:
+    def test_initialization_and_len(self, dummy_hierarchical_data_dir: str):
         dataset = HierarchicalGraphDataset(data_dir=dummy_hierarchical_data_dir)
         assert len(dataset) == 3  # molA, molB, molC_empty
 
@@ -302,7 +304,8 @@ class TestHierarchicalGraphDataset: def test_initialization_and_len(self, dummy_
             isinstance(item_b["structural_motif"], Data) or item_b["structural_motif"] is None
         )
         assert torch.allclose(item_b["atom"].y, torch.tensor([20.0], dtype=torch.float))
-        if item_b["structural_motif"] is not None: assert hasattr(
+        if item_b["structural_motif"] is not None:
+            assert hasattr(
                 item_b["structural_motif"], "y"
             ), "structural_motif graph for item_b should have y attribute if it exists"
             # Assuming label for molB's structural_motif should also be 20.0 if it exists
