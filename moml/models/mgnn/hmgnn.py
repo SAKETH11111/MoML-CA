@@ -217,6 +217,7 @@ class HMGNN(nn.Module):
         self.hidden_dim = hidden_dim  # Store hidden_dim
         self.node_out_dim = node_out_dim  # Store node_out_dim
         self.graph_out_dim = graph_out_dim  # Store graph_out_dim
+        self.env_dim = env_dim  # Store env_dim
         edge_attr_dims = edge_attr_dims or [0] * self.S
 
         # backbone per scale

@@ -239,7 +239,6 @@ class DJMGNN(nn.Module):
 
         self.jk = JKAggregator([hidden_dim] * n_blocks, hidden_dim, mode=jk_mode)
 
-        # optional env projection
         env_in = env_dim if not env_mlp else hidden_dim
         if env_dim and env_mlp:
             self.env_proj = nn.Sequential(nn.Linear(env_dim, hidden_dim), nn.SiLU())
@@ -249,7 +248,6 @@ class DJMGNN(nn.Module):
         fused_graph_in = hidden_dim + env_in
         fused_node_in = hidden_dim + env_in
 
-        # heads
         self.node_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),

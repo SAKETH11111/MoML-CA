@@ -286,7 +286,6 @@ def main():
         logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
         
         logger.info("Starting alternating training...")
-
         start_time = time.time()
         
         # Initialize metrics with default values to handle case where max_steps is 0

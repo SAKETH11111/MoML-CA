@@ -80,6 +80,10 @@ data/qm9/processed/*.pt
 data/spice/*.hdf5
 data/spice/SPICE-*.hdf5
 
+# SPICE dataset files (large HDF5 files)
+data/spice/*.hdf5
+data/spice/SPICE-*.hdf5
+
 # Logs and temp files
 *.log
 *.tmp
@@ -117,7 +121,8 @@ memory-bank/progress.md
 memory-bank/systemPatterns.md
 docs/
 
-CLAUDE.md*.pt
+CLAUDE.md
+*.pt
 MoML-CA/data/
 data/spice/processed/
 *.pt
