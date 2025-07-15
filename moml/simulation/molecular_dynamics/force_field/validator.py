@@ -1,7 +1,7 @@
 import openmm.app as app
 import openmm.unit as unit
 import openmm
-from openmm import VerletIntegrator, Context, NonbondedForce
+from openmm import VerletIntegrator, Context
 from typing import Dict, List, Optional
 import xml.etree.ElementTree as ET
 from pathlib import Path

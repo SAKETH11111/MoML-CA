@@ -95,7 +95,7 @@ class DensityMonitor(BaseMonitor):
         self.density_drift_threshold = config.monitoring.density_drift_threshold
         
         # Calculate total system mass dynamically
-        self.total_mass = sum(p.mass for p in system.getDefaultParticles()) # Assuming default particles have mass
+        self.total_mass = sum(self.system.getParticleMass(i) for i in range(self.system.getNumParticles()))
         
     def update(self, state: State):
         """Update with new density state."""

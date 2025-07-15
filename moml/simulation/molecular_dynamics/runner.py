@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import logging
 
-from openmm import unit
+from openmm import app, unit, System, VerletIntegrator, Context
 
 from .config import MDConfig
 from .builder.system_builder import SystemBuilder
@@ -31,7 +31,8 @@ class MDRunner:
 
         # Setup monitors
         self.energy_monitor = EnergyMonitor(config)
-        self.density_monitor = DensityMonitor(config)
+        # density_monitor will be initialized in run() when system is available
+        self.density_monitor = None
         self.watchdog = Watchdog(config)
 
     def run(self,
@@ -71,6 +72,10 @@ class MDRunner:
                        output_dir: Path,
                        checkpoint_path: Optional[Path]) -> Dict:
         """Run a single simulation attempt."""
+
+        # Initialize density monitor now that system is available
+        if self.density_monitor is None:
+            self.density_monitor = DensityMonitor(self.config, system)
 
         # Setup simulation
         integrator = VerletIntegrator(self.config.integration.timestep * unit.femtoseconds)
@@ -119,19 +124,22 @@ class MDRunner:
 
         # Save final state
         final_state = simulation.context.getState(getPositions=True, getVelocities=True, getEnergy=True)
-        app.PDBFile.writeFile(simulation.topology,
-                            final_state.getPositions(),
-                            open(output_dir / "final.pdb", 'w'))
+        with open(output_dir / "final.pdb", 'w') as f:
+            app.PDBFile.writeFile(simulation.topology,
+                                final_state.getPositions(),
+                                f)
 
         # Save run metadata
         metadata = {
             "total_steps": self.config.production.total_steps,
             "elapsed_time": time.time() - start_time,
             "final_energy": final_state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole),
-            "final_temperature": 0.0,
+            "final_temperature": (2 * final_state.getKineticEnergy() / \
+                                  (system.getNumParticles() * 3 - system.getNumConstraints()) / \
+                                  unit.BOLTZMANN_CONSTANT_kB).value_in_unit(unit.kelvin),
         }
         try:
-            metadata["final_density"] = final_state.getDensity().value_in_unit(unit.grams_per_milliliter)
+            metadata["final_density"] = final_state.getDensity().value_in_unit(unit.gram / unit.milliliter)
         except Exception:
             metadata["final_density"] = "N/A"
 

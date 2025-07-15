@@ -4,7 +4,7 @@ Implements a deterministic protocol: minimization → NVT → NPT.
 """
 
 from typing import Tuple
-from openmm import app, Context, VerletIntegrator, MonteCarloBarostat, State, LocalEnergyMinimizer, CustomExternalForce, AndersenThermostat
+from openmm import app, Context, VerletIntegrator, MonteCarloBarostat, System, LocalEnergyMinimizer, CustomExternalForce, AndersenThermostat
 from openmm import unit
 import structlog
 

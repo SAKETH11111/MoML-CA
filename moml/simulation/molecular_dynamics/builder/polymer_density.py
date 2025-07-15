@@ -3,8 +3,8 @@ Compress polymer slabs to target density using NPT simulation.
 """
 
 import sys 
-from openmm import app, unit, LangevinIntegrator, Platform, MonteCarloBarostat, State
-import numpy as np
+from openmm import app, LangevinIntegrator, Platform, MonteCarloBarostat
+import openmm.unit
 
 import logging
 
@@ -28,9 +28,9 @@ def compress(topology, positions, forcefield, target_density, steps=50000, repor
     """
     system = forcefield.createSystem(topology, nonbondedMethod=app.PME,
                                    constraints=app.HBonds, rigidWater=True)
-    system.addForce(MonteCarloBarostat(10 * unit.bar, 300 * unit.kelvin, 25))
-    integrator = LangevinIntegrator(600 * unit.kelvin, 1 / unit.picoseconds,
-                                  0.002 * unit.picoseconds)
+    system.addForce(MonteCarloBarostat(10 * openmm.unit.bar, 300 * openmm.unit.kelvin, 25))
+    integrator = LangevinIntegrator(600 * openmm.unit.kelvin, 1 / openmm.unit.picoseconds,
+                                  0.002 * openmm.unit.picoseconds)
     platform = Platform.getPlatformByName("CPU")  # fast startup
     sim = app.Simulation(topology, system, integrator, platform)
     sim.context.setPositions(positions)
@@ -39,12 +39,11 @@ def compress(topology, positions, forcefield, target_density, steps=50000, repor
     # Add a reporter to get density
     sim.reporters.append(app.StateDataReporter(sys.stdout, report_interval, density=True, totalSteps=steps, speed=True, remainingTime=True, separator='\t'))
 
-    current_density = 0.0 * unit.gram / (unit.centimeter**3)
+    current_density = 0.0 * openmm.unit.gram / (openmm.unit.centimeter**3)
     for i in range(0, steps, report_interval):
         sim.step(report_interval)
         state = sim.context.getState(getPositions=True, getVelocities=True, getEnergy=True)
         volume = state.getPeriodicBoxVectors()[0][0] * state.getPeriodicBoxVectors()[1][1] * state.getPeriodicBoxVectors()[2][2]
-        mass = system.getMass(0) * topology.getNumAtoms() # Assuming all atoms have same mass for simplicity, or sum actual masses
         # A more accurate mass calculation would iterate through all atoms:
         total_mass = sum(system.getParticleMass(j) for j in range(system.getNumParticles()))
         current_density = total_mass / volume
@@ -56,7 +55,7 @@ def compress(topology, positions, forcefield, target_density, steps=50000, repor
             break
 
     # cool to 300 K
-    integrator.setTemperature(300 * unit.kelvin)
+    integrator.setTemperature(300 * openmm.unit.kelvin)
     sim.step(int(steps/3))
 
     # Get final positions

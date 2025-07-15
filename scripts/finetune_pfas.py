@@ -4,6 +4,7 @@ import argparse
 import yaml
 import torch
 import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch_geometric.loader import DataLoader as GraphDataLoader
 
 # Add project root to Python path
@@ -18,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description='Fine-tune DJMGNN on PFAS dataset.')
     parser.add_argument('--ckpt', type=str, required=True, help='Path to the pre-trained model checkpoint.')
     parser.add_argument('--max_steps', type=int, default=1000, help='Maximum fine-tuning steps.')
+    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping.')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for fine-tuning.')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate for fine-tuning.')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use for fine-tuning (cuda/cpu).')

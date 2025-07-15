@@ -1,7 +1,6 @@
 from typing import Optional, Union, Callable
 from torch_geometric.data import Dataset
 from torch_geometric.datasets import QM9 
-from torch.utils.data import DataLoader
 
 from .spice_dataset import SpiceDataset
 from .pfas_sdf_dataset import PFASSDFDataset

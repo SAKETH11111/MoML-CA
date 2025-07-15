@@ -315,7 +315,9 @@ class TestHierarchicalGraphDataset:
         dataset_no_transform = HierarchicalGraphDataset(data_dir=dummy_hierarchical_data_dir)
         idx_A = dataset_no_transform.molecule_ids.index("molA")
         original_item_A = dataset_no_transform[idx_A]
-        original_x_atom_A = original_item_A["atom"].x.clone()
+        original_x_atom_A = None
+        if original_item_A["atom"].x is not None:
+            original_x_atom_A = original_item_A["atom"].x.clone()
 
         dataset_with_transform = HierarchicalGraphDataset(
             data_dir=dummy_hierarchical_data_dir, transform=simple_transform

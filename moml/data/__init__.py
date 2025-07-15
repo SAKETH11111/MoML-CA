@@ -17,19 +17,23 @@ try:
         HierarchicalGraphDataset,
         PFASDataset,
     )
-except ImportError:
+except ImportError as e:
+    # Capture the exception message in a local variable
+    import_error_msg = str(e)
+
     # Create dummy classes when dependencies are not available
     class MolecularGraphDataset:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"MolecularGraphDataset requires additional dependencies")
-    
+            raise ImportError(f"MolecularGraphDataset requires additional dependencies: {import_error_msg}")
+
     class HierarchicalGraphDataset:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"HierarchicalGraphDataset requires additional dependencies")
-    
+            raise ImportError(f"HierarchicalGraphDataset requires additional dependencies: {import_error_msg}")
+
     class PFASDataset:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"PFASDataset requires additional dependencies")
+            raise ImportError(f"PFASDataset requires additional dependencies: {import_error_msg}")
+
 
 # Loader functions
 try:
@@ -38,15 +42,19 @@ try:
         load_datasets_from_splits,
         load_hierarchical_dataset,
     )
-except ImportError:
+except ImportError as e:
+    # Capture the exception message in a local variable
+    loader_import_error_msg = str(e)
+
     def load_dataset(*args, **kwargs):
-        raise ImportError(f"load_dataset requires additional dependencies")
-    
+        raise ImportError(f"load_dataset requires additional dependencies: {loader_import_error_msg}")
+
     def load_datasets_from_splits(*args, **kwargs):
-        raise ImportError(f"load_datasets_from_splits requires additional dependencies")
-    
+        raise ImportError(f"load_datasets_from_splits requires additional dependencies: {loader_import_error_msg}")
+
     def load_hierarchical_dataset(*args, **kwargs):
-        raise ImportError(f"load_hierarchical_dataset requires additional dependencies")
+        raise ImportError(f"load_hierarchical_dataset requires additional dependencies: {loader_import_error_msg}")
+
 
 # Splitting functions
 try:
@@ -55,15 +63,19 @@ try:
         stratified_split_dataset,
         scaffold_split_dataset,
     )
-except ImportError:
+except ImportError as e:
+    # Capture the exception message in a local variable
+    splitter_import_error_msg = str(e)
+
     def split_dataset(*args, **kwargs):
-        raise ImportError(f"split_dataset requires additional dependencies")
-    
+        raise ImportError(f"split_dataset requires additional dependencies: {splitter_import_error_msg}")
+
     def stratified_split_dataset(*args, **kwargs):
-        raise ImportError(f"stratified_split_dataset requires additional dependencies")
-    
+        raise ImportError(f"stratified_split_dataset requires additional dependencies: {splitter_import_error_msg}")
+
     def scaffold_split_dataset(*args, **kwargs):
-        raise ImportError(f"scaffold_split_dataset requires additional dependencies")
+        raise ImportError(f"scaffold_split_dataset requires additional dependencies: {splitter_import_error_msg}")
+
 
 # DataLoader utilities
 try:
@@ -72,15 +84,23 @@ try:
         create_dataloaders_from_directory,
         create_stratified_dataloaders,
     )
-except ImportError:
+except ImportError as e:
+    # Capture the exception message in a local variable
+    dataloader_import_error_msg = str(e)
+
     def prepare_dataloaders(*args, **kwargs):
-        raise ImportError(f"prepare_dataloaders requires additional dependencies")
-    
+        raise ImportError(f"prepare_dataloaders requires additional dependencies: {dataloader_import_error_msg}")
+
     def create_dataloaders_from_directory(*args, **kwargs):
-        raise ImportError(f"create_dataloaders_from_directory requires additional dependencies")
-    
+        raise ImportError(
+            f"create_dataloaders_from_directory requires additional dependencies: {dataloader_import_error_msg}"
+        )
+
     def create_stratified_dataloaders(*args, **kwargs):
-        raise ImportError(f"create_stratified_dataloaders requires additional dependencies")
+        raise ImportError(
+            f"create_stratified_dataloaders requires additional dependencies: {dataloader_import_error_msg}"
+        )
+
 
 # Molecule processing utilities
 try:
@@ -93,27 +113,33 @@ try:
         batch_process_molecules_dataset,
         graph_batch_process,
     )
-except ImportError:
+except ImportError as e:
+    # Capture the exception message in a local variable
+    processor_import_error_msg = str(e)
+
     def process_mol_file(*args, **kwargs):
-        raise ImportError(f"process_mol_file requires additional dependencies")
-    
+        raise ImportError(f"process_mol_file requires additional dependencies: {processor_import_error_msg}")
+
     def process_mol_file_to_graph(*args, **kwargs):
-        raise ImportError(f"process_mol_file_to_graph requires additional dependencies")
-    
+        raise ImportError(f"process_mol_file_to_graph requires additional dependencies: {processor_import_error_msg}")
+
     def batch_process_molecules(*args, **kwargs):
-        raise ImportError(f"batch_process_molecules requires additional dependencies")
-    
+        raise ImportError(f"batch_process_molecules requires additional dependencies: {processor_import_error_msg}")
+
     def process_dataset(*args, **kwargs):
-        raise ImportError(f"process_dataset requires additional dependencies")
-    
+        raise ImportError(f"process_dataset requires additional dependencies: {processor_import_error_msg}")
+
     def save_processed_molecules(*args, **kwargs):
-        raise ImportError(f"save_processed_molecules requires additional dependencies")
-    
+        raise ImportError(f"save_processed_molecules requires additional dependencies: {processor_import_error_msg}")
+
     def batch_process_molecules_dataset(*args, **kwargs):
-        raise ImportError(f"batch_process_molecules_dataset requires additional dependencies")
-    
+        raise ImportError(
+            f"batch_process_molecules_dataset requires additional dependencies: {processor_import_error_msg}"
+        )
+
     def graph_batch_process(*args, **kwargs):
-        raise ImportError(f"graph_batch_process requires additional dependencies")
+        raise ImportError(f"graph_batch_process requires additional dependencies: {processor_import_error_msg}")
+
 
 __all__ = [
     "MolecularGraphDataset",

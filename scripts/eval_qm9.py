@@ -43,10 +43,20 @@ def main():
         hidden_dim=mgnn_config.get('hidden_channels', 128),
         n_blocks=mgnn_config.get('num_layers', 4)
     )
-    checkpoint = torch.load(args.ckpt, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model = model.to(device)
-    model.eval()
+    try:
+        checkpoint = torch.load(args.ckpt, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model = model.to(device)
+        model.eval()
+    except FileNotFoundError:
+        print(f"Error: Checkpoint file not found at {args.ckpt}")
+        sys.exit(1)
+    except KeyError:
+        print(f"Error: 'model_state_dict' not found in checkpoint file {args.ckpt}. Is it a valid model checkpoint?")
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"Error loading model state dict from {args.ckpt}: {e}")
+        sys.exit(1)
 
     # --- Load Dataset ---
     print(f"Loading QM9 {args.split} split...")
@@ -59,9 +69,9 @@ def main():
     # The QM9 dataset in PyG doesn't have official splits, so we create one.
     # This is a simplified approach for validation.
     full_dataset = get_dataset("qm9", root="data", transform=transform)
-    # Use a fixed random seed for reproducibility of splits
-    torch.manual_seed(42)
-    shuffled_indices = torch.randperm(len(full_dataset))
+    # Use a fixed random state for reproducibility of splits
+    generator = torch.Generator().manual_seed(42)
+    shuffled_indices = torch.randperm(len(full_dataset), generator=generator)
     train_size = int(0.8 * len(full_dataset))
     val_size = int(0.1 * len(full_dataset))
     
@@ -78,11 +88,21 @@ def main():
     loader = GraphDataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
     # --- Load Target Statistics for Un-scaling ---
-    stats_path = "data/target_stats.yaml"
-    with open(stats_path, 'r') as f:
-        stats = yaml.safe_load(f)
-    mean = torch.tensor(stats['qm9']['mean'], device=device)
-    std = torch.tensor(stats['qm9']['std'], device=device)
+    stats_path = "data/target_stats.yaml" # Consider making this configurable via argparse
+    try:
+        with open(stats_path, 'r') as f:
+            stats = yaml.safe_load(f)
+        mean = torch.tensor(stats['qm9']['mean'], device=device)
+        std = torch.tensor(stats['qm9']['std'], device=device)
+    except FileNotFoundError:
+        print(f"Error: Target statistics file not found at {stats_path}. Please ensure it exists.")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML file {stats_path}: {e}")
+        sys.exit(1)
+    except KeyError:
+        print(f"Error: 'qm9' key not found in target statistics file {stats_path}. Please check the file content.")
+        sys.exit(1)
 
     # --- Evaluation Loop ---
     all_preds_scaled = []

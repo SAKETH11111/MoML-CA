@@ -55,22 +55,6 @@ class PFASDataLoader:
 
         # Hierarchical graph support
         self.coarsener: Optional[GraphCoarsener] = None
-    def _assign_labels_to_graph(self, graph, labels_data):
-        """Helper method to assign labels to a graph."""
-        if isinstance(labels_data, dict):
-            if "force_field_params" in labels_data:
-                graph.y_ff = torch.tensor(labels_data["force_field_params"], dtype=torch.float)
-            if "molecular_properties" in labels_data:
-                graph.y_props = torch.tensor(labels_data["molecular_properties"], dtype=torch.float)
-            if "adsorption_potential" in labels_data:
-                graph.y_ads = torch.tensor([labels_data["adsorption_potential"]], dtype=torch.float)
-        elif labels_data is not None:
-            graph.y = torch.tensor([labels_data], dtype=torch.float)
-        if self.config.get("hierarchical"):
-            self.coarsener = GraphCoarsener(
-                use_3d_coords=self.config.get("use_3d_coords", True),
-                use_pfas_features=self.config.get("use_pfas_specific_features", True),
-            )
 
         # Environmental and label configuration
         self.env_features = self.config.get(
@@ -102,6 +86,24 @@ class PFASDataLoader:
     # ------------------------------------------------------------------
     # Helper methods
     # ------------------------------------------------------------------
+    def _assign_labels_to_graph(self, graph, labels_data):
+        """Helper method to assign labels to a graph."""
+        if isinstance(labels_data, dict):
+            if "force_field_params" in labels_data:
+                graph.y_ff = torch.tensor(labels_data["force_field_params"], dtype=torch.float)
+            if "molecular_properties" in labels_data:
+                graph.y_props = torch.tensor(labels_data["molecular_properties"], dtype=torch.float)
+            if "adsorption_potential" in labels_data:
+                graph.y_ads = torch.tensor([labels_data["adsorption_potential"]], dtype=torch.float)
+        elif labels_data is not None:
+            graph.y = torch.tensor([labels_data], dtype=torch.float)
+        if self.config.get("hierarchical"):
+            graph_cfg = self.config.get("graph", {}) # Access graph_cfg from self.config
+            self.coarsener = GraphCoarsener(
+                use_3d_coords=graph_cfg.get("use_3d_coords", True),
+                use_pfas_features=graph_cfg.get("use_pfas_specific_features", True),
+            )
+
     def _load_json(self, path: str) -> Dict[str, Any]:
         """
         Safely loads and parses a JSON file from the specified path.
@@ -217,13 +219,13 @@ class PFASDataLoader:
                 qm = parse_orca_output(qm_file)
                 charges = qm.get("mulliken_charges")
                 if charges:
-                    additional["partial_charges"] = charges
+                    additional["partial_charges"] = list(charges) # Ensure it's a list of floats
             except Exception:
                 pass
 
         graph = self.graph_processor.file_to_graph(mol_path, additional)
         env = self.environment.get(mol_id, {})
-        if env:
+        if env and graph is not None: # Ensure graph is not None before adding features
             graph = self.add_environmental_features(graph, env)
         labels_data = self.labels.get(mol_id)
         label = labels_data

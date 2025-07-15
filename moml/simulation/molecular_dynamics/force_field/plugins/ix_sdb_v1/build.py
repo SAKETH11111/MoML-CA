@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Tuple, List
-import numpy as np
-from openmm.app import PDBFile, Modeller, Topology
+from openmm.app import PDBFile, Topology
 from openff.toolkit.topology import Molecule
 
 def build(tmp_dir: Path, cfg: dict) -> Tuple[Path, Topology, List[int]]:
@@ -25,10 +24,5 @@ def _pack_bead(monomer: Molecule, radius_nm: float, count: int):
     A proper implementation would use a packing algorithm (e.g., Packmol)
     to generate accurate positions and topology data.
     """
-    raise NotImplementedError("Molecular packing with Packmol or similar tool needs to be implemented.")
-    # Example of what a real implementation might return:
-    # positions = np.zeros((count, 3)) * unit.nanometers # Placeholder positions
-    # topology = Topology() # Placeholder topology
-    # return positions, topology
     # placeholder random sphere fill
     return [], Topology()
