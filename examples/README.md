@@ -4,153 +4,157 @@ This directory contains example scripts demonstrating how to use the MoML-CA (Mo
 
 ## Directory Structure
 
-- **`quickstart/`**: Basic examples to get started with MoML-CA
+- **`data_loading_example.py`**: Demonstration of loading and batching molecular graph data.
+- **`graph_generation_examples/`**: Examples for creating and visualizing molecular graphs.
+  - `molecular_graph_gen.py`: Unified tool for generating various molecular graph representations.
+  - `hierarchical_graph_example.py`: Creating hierarchical molecular graphs.
+- **`prediction_examples/`**: Examples for making predictions with trained models.
+  - `run_predict.py`: Command-line interface for molecular property predictions.
+- **`preprocessing_examples/`**: Examples for data preprocessing.
+  - `preprocess_example.py`: Preprocessing molecular structures into graph representations.
+- **`training_examples/`**: Examples for model training and evaluation.
+  - `train_example.py`: Training MGNN models on molecular graph data.
 
-  - `quickstart.py`: Comprehensive example of core functionality
-  - `custom_model.py`: Example of implementing a custom model
+## Data Loading Example
 
-- **`training/`**: Examples for model training and evaluation
+The `data_loading_example.py` script demonstrates how to use the `PFASDataLoader` to load and batch molecular graph data for MGNN training workflows.
 
-  - `train_model.py`: Complete training pipeline example
-  - `evaluate_model.py`: Model evaluation and metrics calculation
-  - `hyperparameter_tuning.py`: Hyperparameter optimization example
+### What You'll Learn
 
-- **`prediction/`**: Examples for making predictions with trained models
+- Loading single molecules by ID.
+- Creating batches from multiple molecule IDs.
+- Configuring the data loader for specific environmental features and label types.
 
-  - `prediction_example.py`: Basic prediction pipeline
-  - `run_predict.py`: Command-line interface for predictions
-  - `batch_predict.py`: Batch prediction on multiple molecules
-
-- **`molecular_graph/`**: Examples for working with molecular graphs
-
-  - `graph_creation.py`: Creating and manipulating molecular graphs
-  - `graph_features.py`: Extracting and visualizing graph features
-  - `hierarchical_graphs.py`: Working with hierarchical graph representations
-
-- **`preprocess/`**: Examples for data preprocessing
-  - `preprocessing_example.py`: Basic preprocessing pipeline
-  - `batch_preprocess.py`: Batch processing of molecular datasets
-  - `feature_extraction.py`: Extracting molecular features
-
-## Quickstart Example
-
-The `quickstart.py` script provides a comprehensive example showcasing the core functionality of MoML-CA:
+### Usage
 
 ```bash
 # From the project root directory:
-python -m examples.quickstart.quickstart
+python -m examples.data_loading_example --data_dir ./data/example_dataset
 ```
 
-### What You'll Learn
+## Graph Generation Examples
 
-- Converting molecules to graph representations
-- Creating hierarchical molecular graphs
-- Configuring and initializing a model
-- Training a model with the provided trainer utilities
-- Making predictions with a trained model
-- Calculating metrics and visualizing results
+The graph generation examples demonstrate how to create various types of molecular graphs.
 
-## Training Examples
+### `molecular_graph_gen.py`
 
-The training examples demonstrate how to train models on molecular datasets:
+A unified command-line tool for generating various types of molecular graph representations including atomic-level, hierarchical, and functional group analysis with optional quantum enhancement.
+
+#### What You'll Learn
+
+- Creating atomic-level graphs from molecule files.
+- Generating hierarchical graphs (atom, functional group, structural motif).
+- Analyzing functional groups in a molecule.
+- Integrating quantum properties from ORCA output files.
+
+#### Usage
 
 ```bash
-# Train a model
-python -m examples.training.train_model --config config.yaml
+# Generate an atomic-level graph with visualization
+python -m examples.graph_generation_examples.molecular_graph_gen atomic --mol molecule.mol --orca output.out --visualize
 
-# Evaluate a trained model
-python -m examples.training.evaluate_model --model_path model.pt
+# Generate hierarchical graphs
+python -m examples.graph_generation_examples.molecular_graph_gen hierarchical --mol pfoa.mol --output_dir ./graphs
 
-# Perform hyperparameter tuning
-python -m examples.training.hyperparameter_tuning --study_name "optimization_study"
+# Analyze functional groups
+python -m examples.graph_generation_examples.molecular_graph_gen analyze --mol molecule.mol
 ```
 
-### What You'll Learn
+### `hierarchical_graph_example.py`
 
-- Setting up training configurations
-- Using callbacks and monitoring
-- Implementing custom training loops
-- Evaluating model performance
-- Optimizing hyperparameters
+A command-line tool for creating hierarchical molecular graph representations at different granularity levels (atom, functional group, structural motif) with optional quantum properties integration.
+
+#### What You'll Learn
+
+- Creating hierarchical graphs from a molecule file.
+- Integrating quantum properties from ORCA output.
+- Visualizing the generated hierarchical graphs.
+
+#### Usage
+
+```bash
+# Create hierarchical graphs and visualize them
+python -m examples.graph_generation_examples.hierarchical_graph_example --mol_file molecule.mol --visualize
+```
 
 ## Prediction Examples
 
-The prediction examples show how to use trained models for making predictions:
+The prediction examples show how to use trained models for making predictions.
+
+### `run_predict.py`
+
+A command-line interface for making molecular property predictions using trained MGNN models with support for both single molecule and batch processing modes.
+
+#### What You'll Learn
+
+- Loading a trained model.
+- Making predictions on a single molecule or a batch of molecules.
+- Saving prediction results.
+
+#### Usage
 
 ```bash
-# Predict properties for a single molecule
-python -m examples.prediction.run_predict --model_path model.pt --mol_file molecule.mol
+# Single molecule prediction
+python -m examples.prediction_examples.run_predict --model_path model.pt --mol_file molecule.mol
 
-# Batch prediction on multiple molecules
-python -m examples.prediction.batch_predict --model_path model.pt --input_dir molecules/
+# Batch prediction
+python -m examples.prediction_examples.run_predict --model_path model.pt --mol_file ./molecules/ --batch_mode
 ```
-
-### What You'll Learn
-
-- Loading trained models
-- Making predictions on new molecules
-- Processing prediction results
-- Visualizing predictions
-- Batch processing for efficiency
-
-## Molecular Graph Examples
-
-The molecular graph examples demonstrate working with graph representations:
-
-```bash
-# Create and visualize molecular graphs
-python -m examples.molecular_graph.graph_creation --smiles "CCO"
-
-# Extract and analyze graph features
-python -m examples.molecular_graph.graph_features --input_file molecules.csv
-
-# Work with hierarchical graphs
-python -m examples.molecular_graph.hierarchical_graphs --config graph_config.yaml
-```
-
-### What You'll Learn
-
-- Creating molecular graphs from SMILES
-- Extracting graph features
-- Visualizing graph structures
-- Working with hierarchical representations
-- Analyzing graph properties
 
 ## Preprocessing Examples
 
-The preprocessing examples show how to prepare data for training:
+The preprocessing examples show how to prepare data for training.
+
+### `preprocess_example.py`
+
+A command-line tool for preprocessing molecular structures into graph representations suitable for machine learning with comprehensive feature statistics generation.
+
+#### What You'll Learn
+
+- Processing a directory of molecular files into graph representations.
+- Generating feature statistics for model configuration.
+- Saving processed graphs to disk for faster training.
+
+#### Usage
 
 ```bash
-# Preprocess a dataset
-python -m examples.preprocess.preprocessing_example --input_dir data/ --output_dir processed/
-
-# Batch process multiple files
-python -m examples.preprocess.batch_preprocess --config preprocess_config.yaml
-
-# Extract molecular features
-python -m examples.preprocess.feature_extraction --input_file molecules.csv
+# Preprocess a directory of molecules
+python -m examples.preprocessing_examples.preprocess_example --input_dir ./molecules --output_dir ./processed
 ```
 
-### What You'll Learn
+## Training Examples
 
-- Preprocessing molecular datasets
-- Extracting molecular features
-- Creating graph representations
-- Handling different file formats
-- Optimizing preprocessing pipelines
+The training examples demonstrate how to train models on molecular datasets.
+
+### `train_example.py`
+
+A command-line tool for training MGNN models on molecular graph data with comprehensive configuration options and checkpoint management.
+
+#### What You'll Learn
+
+- Configuring and training an MGNN model.
+- Using training and validation datasets.
+- Saving model checkpoints and training configuration.
+
+#### Usage
+
+```bash
+# Train a model
+python -m examples.training_examples.train_example --train_dir ./data/train --output_dir ./models
+```
 
 ## Output
 
 Running the examples will create:
 
-- An `output` directory in your current working directory
-- Saved model files (`.pt` format)
-- Visualization files (`.png` format)
-- Preprocessed data files
-- Log files and metrics
+- An `output` or specified output directory in your current working directory.
+- Saved model files (`.pt` format).
+- Visualization files (`.png` format).
+- Preprocessed data files (`.pt` format).
+- Log files and metrics.
 
 ## Additional Resources
 
-- Check the [main documentation](../docs/) for detailed API reference
-- See the [tests](../tests/) directory for more usage examples
-- Visit the [project website](https://github.com/yourusername/MoML-CA) for updates
+- Check the [main documentation](../docs/) for detailed API reference.
+- See the [tests](../tests/) directory for more usage examples.
+- Visit the [project website](https://github.com/SAKETH11111/MoML-CA) for updates.
