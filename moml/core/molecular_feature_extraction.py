@@ -392,7 +392,7 @@ class FunctionalGroupDetector:
             matches = mol.GetSubstructMatches(hydroxyl_pattern)
             return [match[0] for match in matches]  # Return oxygen atom indices
         except Exception as e:
-            logger.error(f"Error finding hydroxyl groups: {e}")
+            logger.error(f"Error finding hydroxyl groups")
             return []
 
     @classmethod

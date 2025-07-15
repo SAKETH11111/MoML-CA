@@ -175,7 +175,7 @@ class MolecularGraphDataset(Dataset):
                     logger.error(str(fnf_error))  # Logs "Molecule file not found: <path>"
                     # graph remains None
                 except Exception as e:
-                    logger.error(f"Unexpected error processing file {file_path} before transform: {e}")
+                    logger.error(f"Unexpected error processing file {file_path} before transform")
                     # graph remains None
 
                 # Apply transform if graph exists and transform is defined
@@ -273,7 +273,7 @@ class HierarchicalGraphDataset(Dataset):
                             logger.error(f"JSON at {json_path} is not a dict, cannot create graph.")
                             graphs[level] = None
                     except Exception as e:
-                        logger.error(f"Error loading graph from JSON {json_path}: {e}")
+                        logger.error(f"Error loading graph from JSON {json_path}")
                         graphs[level] = None
 
         # Add label if available
@@ -399,7 +399,7 @@ class PFASDataset(Dataset):
                     successfully_processed_original_indices.append(original_df_idx)
                 except Exception as e:
                     logger.error(
-                        f"Failed to process molecule (original index {original_df_idx}, SMILES: {self.smiles[original_df_idx]}) to graph: {e}"
+                        f"Failed to process molecule (original index {original_df_idx}, SMILES: {self.smiles[original_df_idx]}) to graph"
                     )
 
             self.graphs = processed_graphs

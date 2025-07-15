@@ -28,7 +28,7 @@ class TimeseriesExtractor:
             logger.error(f"Metrics configuration file not found: {self.metrics_config}")
             return {}
         except IOError as e:
-            logger.error(f"Error reading metrics configuration file {self.metrics_config}: {e}")
+            logger.error(f"Error reading metrics configuration file {self.metrics_config}")
             return {}
     
     def _atom_indices(self, traj: md.Trajectory, sel: Optional[str]) -> Optional[np.ndarray]:

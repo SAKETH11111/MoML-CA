@@ -38,7 +38,7 @@ class SpiceDataset(InMemoryDataset):
                 else:
                     self.data, self.slices = None, None # Handle case where (None, None) was saved
             except Exception as e:
-                logger.warning(f"Could not load processed data from {self.processed_paths[0]}: {e}")
+                logger.warning(f"Could not load processed data from {self.processed_paths[0]}")
                 self.data, self.slices = None, None # Fallback to empty
         else:
             self.data, self.slices = None, None # No processed file, so data is empty initially

@@ -54,7 +54,7 @@ def main():
             json.dump(parsed_data, f, indent=2)
         logger.info(f"Successfully wrote parsed data to {json_file}")
     except IOError as e:
-        logger.error(f"Failed to write JSON file {json_file}: {e}")
+        logger.error(f"Failed to write JSON file {json_file}")
         return
 
     # 2. Convert JSON to QM9-style NPZ
@@ -70,7 +70,7 @@ def main():
         subprocess.run(cmd, check=True, capture_output=True, text=True)
         logger.info(f"Successfully converted JSON to NPZ: {npz_file}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error converting JSON to NPZ: {e}")
+        logger.error(f"Error converting JSON to NPZ")
         return
 
     logger.info("Successfully completed parsing and conversion.")

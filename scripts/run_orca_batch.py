@@ -223,7 +223,7 @@ def cleanup_previous_orca_files(base_name: str, directory: str) -> None:
                 logging.debug(f"Deleted old file: {f_path}")
                 count_deleted +=1
             except OSError as e:
-                logging.warning(f"Could not delete old file {f_path}: {e}")
+                logging.warning(f"Could not delete old file {f_path}")
     if count_deleted > 0:
         logger.info(f"Cleaned up {count_deleted} old ORCA files for {base_name}.")
     else:
@@ -308,7 +308,7 @@ def run_orca_calculation(
         )
         return False
     except Exception as e:
-        logging.error(f"An unexpected error occurred while running ORCA for {input_file_basename}: {e}")
+        logging.error(f"An unexpected error occurred while running ORCA for {input_file_basename}")
         logging.error(f"Check {output_file_path} and {error_file_path} for any partial output.")
         return False
 
@@ -368,7 +368,7 @@ def process_sdf_file(
         orca_input_file_path.write_text(orca_input_content) # Use Path.write_text
         logger.info(f"Generated ORCA input file: {orca_input_file_path}")
     except IOError as e:
-        logger.error(f"Failed to write ORCA input file {orca_input_file_path}: {e}")
+        logger.error(f"Failed to write ORCA input file {orca_input_file_path}")
         return None
 
     if not run_orca_calculation(orca_executable, str(orca_input_file_path), str(output_dir)):
@@ -478,7 +478,7 @@ def main():
                 writer.writerows(dataset_rows)
             logger.info(f"Wrote/Appended {len(dataset_rows)} records to {DATASET_CSV}")
         except IOError as e:
-            logger.error(f"Could not write to CSV file {DATASET_CSV}: {e}")
+            logger.error(f"Could not write to CSV file {DATASET_CSV}")
     else:
         logger.warning("No successful ORCA runs with complete parsing to write to dataset CSV.")
 

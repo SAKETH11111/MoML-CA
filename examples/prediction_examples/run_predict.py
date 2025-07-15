@@ -78,7 +78,7 @@ def main():
         try:
             predictions = predictor.predict_from_file(args.mol_file, args.charges_file)
         except Exception as e:
-            print(f"Error during prediction for {args.mol_file}: {e}")
+            print(f"Error during prediction for {args.mol_file}")
             # Optionally, handle the error further, e.g., by exiting or returning
 
         # Convert tensors to lists for display

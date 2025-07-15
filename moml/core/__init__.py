@@ -42,41 +42,41 @@ try:
         find_charges_file,
         read_charges_from_file,
     )
-except ImportError as e:
+except ImportError:
     # Create dummy functions when dependencies are not available
     def MolecularGraphProcessor(*args, **kwargs):
-        raise ImportError(f"MolecularGraphProcessor requires additional dependencies: {e}")
+        raise ImportError("MolecularGraphProcessor requires additional dependencies (torch_geometric, rdkit)")
     
     def create_graph_processor(*args, **kwargs):
-        raise ImportError(f"create_graph_processor requires additional dependencies: {e}")
+        raise ImportError("create_graph_processor requires additional dependencies (torch_geometric, rdkit)")
     
     def mol_file_to_graph(*args, **kwargs):
-        raise ImportError(f"mol_file_to_graph requires additional dependencies: {e}")
+        raise ImportError("mol_file_to_graph requires additional dependencies (torch_geometric, rdkit)")
     
     def create_molecular_graph_json(*args, **kwargs):
-        raise ImportError(f"create_molecular_graph_json requires additional dependencies: {e}")
+        raise ImportError("create_molecular_graph_json requires additional dependencies (torch_geometric, rdkit)")
     
     def batch_create_graphs_from_molecules(*args, **kwargs):
-        raise ImportError(f"batch_create_graphs_from_molecules requires additional dependencies: {e}")
+        raise ImportError("batch_create_graphs_from_molecules requires additional dependencies (torch_geometric, rdkit)")
     
     def collate_graphs(*args, **kwargs):
-        raise ImportError(f"collate_graphs requires additional dependencies: {e}")
+        raise ImportError("collate_graphs requires additional dependencies (torch_geometric, rdkit)")
     
     def graph_to_device(*args, **kwargs):
-        raise ImportError(f"graph_to_device requires additional dependencies: {e}")
+        raise ImportError("graph_to_device requires additional dependencies (torch_geometric, rdkit)")
     
     def find_charges_file(*args, **kwargs):
-        raise ImportError(f"find_charges_file requires additional dependencies: {e}")
+        raise ImportError("find_charges_file requires additional dependencies (torch_geometric, rdkit)")
     
     def read_charges_from_file(*args, **kwargs):
-        raise ImportError(f"read_charges_from_file requires additional dependencies: {e}")
+        raise ImportError("read_charges_from_file requires additional dependencies (torch_geometric, rdkit)")
 
 # Hierarchical graph coarsening
 try:
     from .hierarchical_graph_coarsener import GraphCoarsener
-except ImportError as e:
+except ImportError:
     def GraphCoarsener(*args, **kwargs):
-        raise ImportError(f"GraphCoarsener requires additional dependencies: {e}")
+        raise ImportError("GraphCoarsener requires additional dependencies (torch_geometric, rdkit)")
 
 # Feature extraction and descriptor utilities
 try:
@@ -87,18 +87,18 @@ try:
         extract_fingerprints,
         # validate_smiles is provided in utils
     )
-except ImportError as e:
+except ImportError:
     def FunctionalGroupDetector(*args, **kwargs):
-        raise ImportError(f"FunctionalGroupDetector requires additional dependencies: {e}")
+        raise ImportError("FunctionalGroupDetector requires additional dependencies (rdkit)")
     
     def MolecularFeatureExtractor(*args, **kwargs):
-        raise ImportError(f"MolecularFeatureExtractor requires additional dependencies: {e}")
+        raise ImportError("MolecularFeatureExtractor requires additional dependencies (rdkit)")
     
     def calculate_molecular_descriptors(*args, **kwargs):
-        raise ImportError(f"calculate_molecular_descriptors requires additional dependencies: {e}")
+        raise ImportError("calculate_molecular_descriptors requires additional dependencies (rdkit)")
     
     def extract_fingerprints(*args, **kwargs):
-        raise ImportError(f"extract_fingerprints requires additional dependencies: {e}")
+        raise ImportError("extract_fingerprints requires additional dependencies (rdkit)")
 
 __all__ = [
     "MolecularGraphProcessor",

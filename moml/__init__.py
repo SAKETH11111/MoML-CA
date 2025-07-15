@@ -35,44 +35,44 @@ __version__ = "0.1.0"
 # Subpackages with conditional imports
 try:
     from . import core
-except ImportError as e:
+except ImportError:
     import warnings
-    warnings.warn(f"Could not import core module: {e}")
+    warnings.warn(f"Could not import core module")
     core = None
 
 try:
     from . import data
-except ImportError as e:
+except ImportError:
     import warnings
-    warnings.warn(f"Could not import data module: {e}")
+    warnings.warn(f"Could not import data module")
     data = None
 
 try:
     from . import models
-except ImportError as e:
+except ImportError:
     import warnings
-    warnings.warn(f"Could not import models module: {e}")
+    warnings.warn(f"Could not import models module")
     models = None
 
 try:
     from . import pipeline
-except ImportError as e:
+except ImportError:
     import warnings
-    warnings.warn(f"Could not import pipeline module: {e}")
+    warnings.warn(f"Could not import pipeline module")
     pipeline = None
 
 try:
     from . import simulation
-except ImportError as e:
+except ImportError:
     import warnings
-    warnings.warn(f"Could not import simulation module: {e}")
+    warnings.warn(f"Could not import simulation module")
     simulation = None
 
 try:
     from . import utils
-except ImportError as e:
+except ImportError:
     import warnings
-    warnings.warn(f"Could not import utils module: {e}")
+    warnings.warn(f"Could not import utils module")
     utils = None
 
 __all__ = [

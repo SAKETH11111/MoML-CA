@@ -67,8 +67,8 @@ try:
 
     IMPORTS_SUCCESSFUL = True
     print("Successfully imported moml modules!")
-except ImportError as e:
-    print(f"Failed to import required moml modules: {e}")
+except ImportError:
+    print(f"Failed to import required moml modules")
     IMPORTS_SUCCESSFUL = False
 
 

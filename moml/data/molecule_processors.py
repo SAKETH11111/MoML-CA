@@ -53,7 +53,7 @@ def process_mol_file(mol_file: str, processor=None, charges_file: Optional[str] 
                     logger.error(f"Invalid partial charges length {len(partial_charges)} for {mol_file}, expected {atom_count}")
                     additional_features = None
         except Exception as e:
-            print(f"Error reading charges from {charges_file}: {e}")
+            print(f"Error reading charges from {charges_file}")
 
     # Process file using the graph processor
     return processor.file_to_graph(mol_file, additional_features)
@@ -152,7 +152,7 @@ def batch_process_molecules(
             processed_files.append(output_file)
 
         except Exception as e:
-            print(f"Error processing {mol_file}: {e}")
+            print(f"Error processing {mol_file}")
 
     print(f"Processed {len(processed_files)} molecules successfully")
 
@@ -226,7 +226,7 @@ def graph_batch_process(
             processed_files.append(output_file)
 
         except Exception as e:
-            logger.error(f"Error processing {mol_file}: {e}")
+            logger.error(f"Error processing {mol_file}")
 
     logger.info(f"Processed {len(processed_files)} molecules successfully")
 

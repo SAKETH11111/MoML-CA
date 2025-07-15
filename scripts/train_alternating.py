@@ -43,7 +43,7 @@ def setup_logging():
             logger.info(f"File logger initialized. Logging to: {os.path.abspath(log_file_path)}")
         except Exception as e:
             # Log error to stream handler if file handler setup fails
-            logger.error(f"CRITICAL: Failed to initialize file logger for '{log_file_path}': {e}", exc_info=True)
+            logger.error(f"CRITICAL: Failed to initialize file logger for '{log_file_path}'", exc_info=True)
     
     # Stop messages from propagating to the root logger if it has other handlers
     logger.propagate = False 
@@ -189,7 +189,7 @@ def main():
             config = yaml.safe_load(f)
         logger.info(f"Loaded training configuration from {args.config_path}")
     except Exception as e:
-        logger.error(f"Error loading configuration file {args.config_path}: {e}", exc_info=True)
+        logger.error(f"Error loading configuration file {args.config_path}", exc_info=True)
         sys.exit(1)
     
     if args.device == 'auto':

@@ -58,10 +58,10 @@ def load_dataset(
                     if os.path.exists(full_path):
                         labels[full_path] = label
         except pd.errors.ParserError as e:
-            logging.error(f"Error parsing labels file {labels_file}: {e}")
+            logging.error(f"Error parsing labels file {labels_file}")
             raise
         except Exception as e:
-            logging.error(f"Error loading labels file {labels_file}: {e}")
+            logging.error(f"Error loading labels file {labels_file}")
             raise
 
     # Create dataset
@@ -144,7 +144,7 @@ def load_hierarchical_dataset(
                 labels[mol_id] = label
 
         except Exception as e:
-            logging.error(f"Error loading labels file {labels_file}: {e}")
+            logging.error(f"Error loading labels file {labels_file}")
             raise
 
     # Create datasets for each level

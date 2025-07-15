@@ -446,7 +446,7 @@ class MOMLPipelineOrchestrator:
 
                         return output_file
                     except Exception as e:
-                        logger.error(f"Error processing {mol_file}: {e}")
+                        logger.error(f"Error processing {mol_file}")
                         return None
 
                 # Process molecules in parallel if enabled
@@ -1018,7 +1018,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
                     pickle.dump(data_to_save, f_pkl)
                 logger.info(f"Saved PFAS preprocessing checkpoint to {checkpoint_file}")
             except Exception as e:
-                logger.error(f"Failed to save PFAS preprocessing checkpoint {checkpoint_file}: {e}")
+                logger.error(f"Failed to save PFAS preprocessing checkpoint {checkpoint_file}")
 
         # Future: Add other PFAS-specific checkpoints here if needed.
 

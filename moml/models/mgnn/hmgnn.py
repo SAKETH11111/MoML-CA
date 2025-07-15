@@ -364,7 +364,7 @@ class HMGNN(nn.Module):
                 concatenated_graph_embeds = torch.cat(graph_embeds, dim=1)
                 combined_graph_pred = self.combined_graph_head(concatenated_graph_embeds)
             except RuntimeError as e:
-                logger.error(f"HMGNN: Error during torch.cat(graph_embeds): {e}")
+                logger.error(f"HMGNN: Error during torch.cat(graph_embeds)")
                 logger.error(f"Shapes of graph_embeds: {[ge.shape for ge in graph_embeds]}")
                 # Fallback or re-raise, for now, let's create a dummy output to avoid crashing tests completely
                 # This indicates a deeper issue if shapes are still mismatched.

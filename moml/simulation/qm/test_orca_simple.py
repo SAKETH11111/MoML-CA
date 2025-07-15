@@ -60,7 +60,7 @@ def load_input_data(args, script_dir, output_dir):
             std = Path(script_dir).parents[2] / "data/processed/chemical_list/pfas20_standardized.csv"
             input_csv = str(std) if std.exists() else str(script_dir / "sample_pfas_data.csv")
         except Exception as e:
-            logger.error(f"Error finding input data: {e}")
+            logger.error(f"Error finding input data")
             sys.exit(1)
     if args.max_compounds:
         try:
@@ -77,7 +77,7 @@ def load_input_data(args, script_dir, output_dir):
             df.to_csv(filtered, index=False)
             input_csv = str(filtered)
         except Exception as e:
-            logger.error(f"Error processing input data: {e}")
+            logger.error(f"Error processing input data")
             sys.exit(1)
     return input_csv
 
@@ -109,7 +109,7 @@ def run_orca_wrapper(command):
     try:
         result = subprocess.run(command, capture_output=True, text=True)
     except (subprocess.CalledProcessError, OSError) as e:
-        logger.error(f"Error executing wrapper: {e}")
+        logger.error(f"Error executing wrapper")
         sys.exit(1)
     if result.returncode == 0:
         for line in result.stdout.splitlines():
@@ -125,7 +125,7 @@ def check_result_files(output_dir):
             df = pd.read_csv(results_csv)
             logger.info(f"Results entries: {len(df)}")
         except Exception as e:
-            logger.error(f"Error reading results: {e}")
+            logger.error(f"Error reading results")
     ml = output_dir / "ml_training_data.json"
     if ml.exists():
         try:
@@ -133,7 +133,7 @@ def check_result_files(output_dir):
                 data = json.load(f)
             logger.info(f"ML data entries: {len(data)}")
         except Exception as e:
-            logger.error(f"Error reading ML data: {e}")
+            logger.error(f"Error reading ML data")
     logger.info("Test completed")
 
 

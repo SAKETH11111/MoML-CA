@@ -103,7 +103,7 @@ class StandardizeTargets:
             logging.error(f"Statistics file not found at {stats_path}")
             raise FileNotFoundError(f"Statistics file not found: {stats_path}")
         except yaml.YAMLError as e:
-            logging.error(f"Error parsing YAML file {stats_path}: {e}")
+            logging.error(f"Error parsing YAML file {stats_path}")
             raise ValueError(f"Error parsing YAML file: {stats_path} - {e}")
         
         if dataset_name not in stats:

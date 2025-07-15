@@ -15,23 +15,23 @@ try:
         JKAggregator,
         DJMGNN,
     )
-except ImportError as e:
+except ImportError:
     # Create dummy classes when dependencies are not available
     class GraphConvLayer:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"GraphConvLayer requires additional dependencies: {e}")
+            raise ImportError(f"GraphConvLayer requires additional dependencies")
     
     class DenseGNNBlock:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"DenseGNNBlock requires additional dependencies: {e}")
+            raise ImportError(f"DenseGNNBlock requires additional dependencies")
     
     class JKAggregator:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"JKAggregator requires additional dependencies: {e}")
+            raise ImportError(f"JKAggregator requires additional dependencies")
     
     class DJMGNN:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"DJMGNN requires additional dependencies: {e}")
+            raise ImportError(f"DJMGNN requires additional dependencies")
 
 # Training utilities and callbacks
 try:
@@ -43,29 +43,29 @@ try:
         ModelCheckpoint,
         LearningRateScheduler,
     )
-except ImportError as e:
+except ImportError:
     # Create dummy classes when dependencies are not available
     class MGNNTrainer:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"MGNNTrainer requires additional dependencies: {e}")
+            raise ImportError(f"MGNNTrainer requires additional dependencies")
     
     def train_epoch(*args, **kwargs):
-        raise ImportError(f"train_epoch requires additional dependencies: {e}")
+        raise ImportError(f"train_epoch requires additional dependencies")
     
     def create_trainer(*args, **kwargs):
-        raise ImportError(f"create_trainer requires additional dependencies: {e}")
+        raise ImportError(f"create_trainer requires additional dependencies")
     
     class EarlyStopping:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"EarlyStopping requires additional dependencies: {e}")
+            raise ImportError(f"EarlyStopping requires additional dependencies")
     
     class ModelCheckpoint:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"ModelCheckpoint requires additional dependencies: {e}")
+            raise ImportError(f"ModelCheckpoint requires additional dependencies")
     
     class LearningRateScheduler:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"LearningRateScheduler requires additional dependencies: {e}")
+            raise ImportError(f"LearningRateScheduler requires additional dependencies")
 
 # Evaluation and prediction utilities
 try:
@@ -80,35 +80,35 @@ try:
         calculate_graph_level_metrics,
         visualize_predictions,
     )
-except ImportError as e:
+except ImportError:
     # Create dummy classes when dependencies are not available
     class MGNNPredictor:
         def __init__(self, *args, **kwargs):
-            raise ImportError(f"MGNNPredictor requires additional dependencies: {e}")
+            raise ImportError(f"MGNNPredictor requires additional dependencies")
     
     def create_predictor(*args, **kwargs):
-        raise ImportError(f"create_predictor requires additional dependencies: {e}")
+        raise ImportError(f"create_predictor requires additional dependencies")
     
     def batch_predict_from_files(*args, **kwargs):
-        raise ImportError(f"batch_predict_from_files requires additional dependencies: {e}")
+        raise ImportError(f"batch_predict_from_files requires additional dependencies")
     
     def calculate_metrics(*args, **kwargs):
-        raise ImportError(f"calculate_metrics requires additional dependencies: {e}")
+        raise ImportError(f"calculate_metrics requires additional dependencies")
     
     def calculate_regression_metrics(*args, **kwargs):
-        raise ImportError(f"calculate_regression_metrics requires additional dependencies: {e}")
+        raise ImportError(f"calculate_regression_metrics requires additional dependencies")
     
     def calculate_classification_metrics(*args, **kwargs):
-        raise ImportError(f"calculate_classification_metrics requires additional dependencies: {e}")
+        raise ImportError(f"calculate_classification_metrics requires additional dependencies")
     
     def calculate_node_level_metrics(*args, **kwargs):
-        raise ImportError(f"calculate_node_level_metrics requires additional dependencies: {e}")
+        raise ImportError(f"calculate_node_level_metrics requires additional dependencies")
     
     def calculate_graph_level_metrics(*args, **kwargs):
-        raise ImportError(f"calculate_graph_level_metrics requires additional dependencies: {e}")
+        raise ImportError(f"calculate_graph_level_metrics requires additional dependencies")
     
     def visualize_predictions(*args, **kwargs):
-        raise ImportError(f"visualize_predictions requires additional dependencies: {e}")
+        raise ImportError(f"visualize_predictions requires additional dependencies")
 
 __all__ = [
     "GraphConvLayer",

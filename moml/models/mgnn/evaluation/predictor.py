@@ -91,7 +91,7 @@ class MGNNPredictor:
                 # It's just the model weights
                 model_state = checkpoint
         except Exception as e:
-            raise ValueError(f"Failed to load model from {model_path}: {e}")
+            raise ValueError(f"Failed to load model from {model_path}")
 
         # Get model dimensions from config
         in_dim = self.config.get("in_dim", 0)
@@ -410,7 +410,7 @@ def batch_predict_from_files(
             graphs.append(graph)
             filenames.append(os.path.basename(file_path))
         except Exception as e:
-            print(f"Error processing {file_path}: {e}")
+            print(f"Error processing {file_path}")
 
     # Make predictions
     print(f"Making predictions on {len(graphs)} molecules...")

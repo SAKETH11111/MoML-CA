@@ -119,7 +119,7 @@ def main():
                 logger.info(f"Results header: {header}")
                 logger.info(f"First result: {first_result}")
         except Exception as e:
-            logger.error(f"Error reading results file: {e}")
+            logger.error(f"Error reading results file")
     else:
         logger.warning(f"Results summary file not found: {results_file}")
 
@@ -133,7 +133,7 @@ def main():
                 ml_data = json.load(f)
                 logger.info(f"ML training data contains {len(ml_data)} entries")
         except Exception as e:
-            logger.error(f"Error reading ML data file: {e}")
+            logger.error(f"Error reading ML data file")
     else:
         logger.warning(f"ML training data file not found: {ml_data_file}")
 

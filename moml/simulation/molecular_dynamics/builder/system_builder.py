@@ -96,7 +96,7 @@ class SystemBuilder:
                 # Add surface to force field using the build module
                 forcefield.registerTemplateGenerator(surface_build.get_xml)
             except Exception as e:
-                raise ValueError(f"Failed to load surface plugin {surface_name}: {e}") from e
+                raise ValueError(f"Failed to load surface plugin {surface_name}") from e
         
         # Add solvent if specified
         if solvent_name:
@@ -105,7 +105,7 @@ class SystemBuilder:
                 # Add solvent to force field using the build module
                 forcefield.registerTemplateGenerator(solvent_build.get_xml)
             except Exception as e:
-                raise ValueError(f"Failed to load solvent plugin {solvent_name}: {e}") from e
+                raise ValueError(f"Failed to load solvent plugin {solvent_name}") from e
         
         # Create modeller and add ions
         modeller = app.Modeller(pdb.topology, pdb.positions)

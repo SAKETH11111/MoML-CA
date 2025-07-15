@@ -182,7 +182,7 @@ def parse_single_orca_output(orca_output_path: str) -> Optional[Dict[str, Any]]:
 
 
     except Exception as e:
-        logger.error(f"Error parsing ORCA output file {orca_output_path}: {e}", exc_info=True)
+        logger.error(f"Error parsing ORCA output file {orca_output_path}", exc_info=True)
         return None
 
     # Check if all required fields were populated
@@ -232,7 +232,7 @@ def main():
             json.dump(all_qm_data, f, indent=2)
         logger.info(f"Successfully wrote consolidated QM data to {OUTPUT_JSON_FILE}")
     except IOError as e:
-        logger.error(f"Failed to write JSON output to {OUTPUT_JSON_FILE}: {e}")
+        logger.error(f"Failed to write JSON output to {OUTPUT_JSON_FILE}")
 
     # Report on any challenges
     missing_data_report = []

@@ -60,7 +60,7 @@ class MDRunner:
         try:
             return self._run_simulation(topology, system, positions, output_dir, checkpoint_path)
         except SimulationDiverged as e:
-            logging.error(f"Simulation diverged: {e}")
+            logging.error(f"Simulation diverged")
             # Optionally, try to recover from an earlier checkpoint
             return {"status": "failed", "reason": str(e)}
 
@@ -162,5 +162,5 @@ class MDRunner:
                 context.loadCheckpoint(f.read())
             return True
         except Exception as e:
-            logging.warning(f"Checkpoint verification failed for {path}: {e}")
+            logging.warning(f"Checkpoint verification failed for {path}")
             return False

@@ -71,7 +71,7 @@ def _process_single_mol_file_for_batch(args: Tuple[str, Optional[Dict[str, Any]]
             logger.error(f"Graph generation failed for {mol_file_path}, not saving .pt file.")
             return None
     except Exception as e:
-        logger.error(f"Error processing file {mol_file_path} in _process_single_mol_file_for_batch: {e}")
+        logger.error(f"Error processing file {mol_file_path} in _process_single_mol_file_for_batch")
         return None
 
 
@@ -515,7 +515,7 @@ class MolecularGraphProcessor:
             # mol_to_graph will handle AddHs internally with mol_processed
             return self.mol_to_graph(mol, additional_features)
         except Exception as e:
-            logger.error(f"Error processing molecule file {file_path}: {e}")
+            logger.error(f"Error processing molecule file {file_path}")
             return None
 
     def smiles_to_graph(
@@ -529,7 +529,7 @@ class MolecularGraphProcessor:
             # mol_to_graph will handle AddHs internally with mol_processed
             return self.mol_to_graph(mol, additional_features)
         except Exception as e:
-            logger.error(f"Error converting SMILES '{smiles}' to graph: {e}")
+            logger.error(f"Error converting SMILES '{smiles}' to graph")
             return None
 
     def _get_adjacency_matrix(self, mol: Chem.Mol) -> np.ndarray:
@@ -621,7 +621,7 @@ class MolecularGraphProcessor:
                 json.dump(json_data, f, indent=4)
             return output_path
         except Exception as e:
-            logger.error(f"Error processing molecule file {file_path} to JSON: {e}")
+            logger.error(f"Error processing molecule file {file_path} to JSON")
             return None
 
 
@@ -640,7 +640,7 @@ def mol_file_to_graph(
     except FileNotFoundError:
         return None
     except Exception as e:
-        logger.error(f"Failed to convert {mol_file_path} to graph: {e}")
+        logger.error(f"Failed to convert {mol_file_path} to graph")
         return None
 
 
@@ -761,7 +761,7 @@ def read_charges_from_file(charge_file: str) -> Optional[List[float]]:
             except json.JSONDecodeError:
                 logger.error(f"Could not decode JSON from {charge_file}")
             except (TypeError, ValueError) as e:
-                logger.error(f"Error processing charges from JSON file {charge_file}: {e}")
+                logger.error(f"Error processing charges from JSON file {charge_file}")
         else:
             raise ValueError(f"Unsupported charges file format: {file_ext}")
         return charges if charges else None
@@ -769,7 +769,7 @@ def read_charges_from_file(charge_file: str) -> Optional[List[float]]:
         logger.error(f"Charges file not found: {charge_file}")
         raise
     except Exception as e:
-        logger.error(f"Error reading charges from {charge_file}: {e}")
+        logger.error(f"Error reading charges from {charge_file}")
         return None
 
 
@@ -788,7 +788,7 @@ def create_molecular_graph_json(
         processor = create_graph_processor(config)
         return processor.file_to_json_graph(mol_file, output_dir, output_filename)
     except Exception as e:
-        logger.error(f"Failed to create JSON graph for {mol_file}: {e}")
+        logger.error(f"Failed to create JSON graph for {mol_file}")
         return None
 
 

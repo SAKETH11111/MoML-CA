@@ -88,7 +88,7 @@ def main():
                 atom_types = [Chem.GetPeriodicTable().GetElementSymbol(int(num)) for num in atom_nums]
                 print(f"  - Atoms: {atom_types}")
         except Exception as e:
-            print(f"Error processing {level} level graph at {path}: {e}")
+            print(f"Error processing {level} level graph at {path}")
             continue
 
     # Visualize the graphs if requested
@@ -111,7 +111,7 @@ def main():
                 visualize_molecular_graph(graph, vis_path, highlight_feature="functional_group")
                 print(f"- Created visualization: {Path(vis_path).name}")
             except Exception as e:
-                print(f"Error visualizing {level} level graph at {path}: {e}")
+                print(f"Error visualizing {level} level graph at {path}")
 
     print("\nDone!")
 

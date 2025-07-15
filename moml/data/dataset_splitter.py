@@ -154,7 +154,7 @@ def scaffold_split_dataset(
             try:
                 scaffold = MurckoScaffold.MurckoScaffoldSmiles(mol=mol, includeChirality=False)
             except Exception as e:
-                logger.error(f"Error generating Murcko scaffold for SMILES at index {i} ('{smiles}'): {e}")
+                logger.error(f"Error generating Murcko scaffold for SMILES at index {i} ('{smiles}')")
                 scaffold = f"scaffold_error_{i}"
 
         if scaffold not in scaffolds:

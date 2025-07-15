@@ -68,8 +68,8 @@ class PFASDataLoader:
             graph.y = torch.tensor([labels_data], dtype=torch.float)
         if self.config.get("hierarchical"):
             self.coarsener = GraphCoarsener(
-                use_3d_coords=graph_cfg.get("use_3d_coords", True),
-                use_pfas_features=graph_cfg.get("use_pfas_specific_features", True),
+                use_3d_coords=self.config.get("use_3d_coords", True),
+                use_pfas_features=self.config.get("use_pfas_specific_features", True),
             )
 
         # Environmental and label configuration

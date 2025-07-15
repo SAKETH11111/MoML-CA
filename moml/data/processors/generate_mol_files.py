@@ -70,7 +70,7 @@ def generate_3d_mol(smiles: str) -> Optional[Chem.Mol]:
         return mol_h # Return with hydrogens, common for SDF/MOL files intended for further processing
 
     except Exception as e:
-        logger.error(f"Error processing SMILES {smiles}: {e}")
+        logger.error(f"Error processing SMILES {smiles}")
         return None
 
 
@@ -113,7 +113,7 @@ def save_molecule_file(
         logger.info(f"Saved molecule {identifier} to {output_path}")
         return True
     except Exception as e:
-        logger.error(f"Could not save molecule {identifier} to {output_path}: {e}")
+        logger.error(f"Could not save molecule {identifier} to {output_path}")
         return False
 
 

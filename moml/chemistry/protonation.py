@@ -65,5 +65,3 @@ def protonate(smiles: str, pH: float) -> Tuple[Chem.Mol, int]:
     # fallback: just return original
     # mol is already input_mol from the initial check
     return Chem.AddHs(input_mol), Chem.GetFormalCharge(input_mol)
-        raise ValueError(f"Invalid SMILES string: {smiles}")
-    return Chem.AddHs(mol), Chem.GetFormalCharge(mol)

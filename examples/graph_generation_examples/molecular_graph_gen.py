@@ -192,7 +192,7 @@ def analyze_functional_groups(mol_file: str) -> None:
             print("  No other functional groups found")
 
     except Exception as e:
-        print(f"Error analyzing functional groups: {e}")
+        print(f"Error analyzing functional groups")
 
 
 def main():

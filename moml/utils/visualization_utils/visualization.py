@@ -684,7 +684,7 @@ def visualize_hierarchical_graphs(hierarchical_graphs: Dict[str, str], output_di
             print_graph_statistics(graph)
 
         except Exception as e:
-            logger.error(f"Error visualizing {level} graph: {e}")
+            logger.error(f"Error visualizing {level} graph")
 
 
 # ============================================================================

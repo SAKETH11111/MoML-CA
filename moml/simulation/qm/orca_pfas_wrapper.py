@@ -230,7 +230,7 @@ def generate_3d_structure(smiles: str, molecule_id: str) -> Optional[Chem.Mol]:
         return mol
 
     except Exception as e:
-        logger.error(f"Exception during 3D structure generation for {molecule_id} (SMILES: {smiles}): {e}")
+        logger.error(f"Exception during 3D structure generation for {molecule_id} (SMILES: {smiles})")
         return None
 
 
@@ -350,7 +350,7 @@ def generate_orca_input(
         return True, input_file_path
 
     except Exception as e:
-        logger.error(f"Error generating ORCA input for {molecule_id}: {e}")
+        logger.error(f"Error generating ORCA input for {molecule_id}")
         return False, ""
 
 
@@ -464,7 +464,7 @@ def run_orca_calculation(
         logger.error(f"ORCA executable not found at {orca_executable}. Please check the path.")
         return False, ""
     except Exception as e:
-        logger.error(f"An unexpected error occurred while running ORCA for {molecule_name}: {e}")
+        logger.error(f"An unexpected error occurred while running ORCA for {molecule_name}")
         return False, ""
 
 
@@ -709,7 +709,7 @@ def main() -> None:
         logger.error(f"Input CSV file not found: {args.input_csv}")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"Error loading input CSV data: {e}")
+        logger.error(f"Error loading input CSV data")
         sys.exit(1)
 
     if args.smiles_col not in df.columns:
@@ -753,7 +753,7 @@ def main() -> None:
         results_df.to_csv(summary_csv_path, index=False)
         logger.info(f"Processing summary saved to: {summary_csv_path}")
     except Exception as e:
-        logger.error(f"Failed to save summary CSV: {e}")
+        logger.error(f"Failed to save summary CSV")
 
     successful_runs = sum(1 for r in processed_results if r.get("success"))
     total_runs = len(processed_results)

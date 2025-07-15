@@ -166,7 +166,7 @@ def main():
         simulation.step(100)
         print("  Smoke test PASSED. XML is likely valid.")
     except Exception as e:
-        print(f"  Smoke test FAILED: {e}")
+        print(f"  Smoke test FAILED")
         print("  The generated XML file may be invalid.")
 
 if __name__ == "__main__":

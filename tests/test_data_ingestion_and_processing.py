@@ -67,7 +67,7 @@ def import_module(module_path, module_name):
         except Exception as e2:
             raise ImportError(f"Failed to import {module_path}: {e2}") from e
 
-        raise ImportError(f"Failed to import {module_path}: {e}")
+        raise ImportError(f"Failed to import {module_path}")
 
 
 # Setup logging
@@ -88,8 +88,8 @@ class TestDataProcessing(unittest.TestCase):
             self.process_dataset = getattr(module, "process_dataset")
             self.calculate_basic_descriptors = getattr(module, "calculate_basic_descriptors")
             logger.info("Successfully imported molecule_processing module")
-        except ImportError as e:
-            logger.error(f"Failed to import molecule_processing: {e}")
+        except ImportError:
+            logger.error(f"Failed to import molecule_processing")
             self.skipTest("Could not import molecule_processing module")
 
         # Sample SMILES for testing
@@ -182,8 +182,8 @@ class TestDataProcessing(unittest.TestCase):
             module = import_module("utils.quantum.orca_parser", "orca_parser")
             self.assertIsNotNone(getattr(module, "parse_orca_output", None))
             logger.info("ORCA parser import successful.")
-        except ImportError as e:
-            logger.error(f"ORCA parser import failed: {e}")
+        except ImportError:
+            logger.error(f"ORCA parser import failed")
             self.skipTest("Could not import orca_parser module")
 
     def test_mock_graph_generation(self):
@@ -197,8 +197,8 @@ class TestDataProcessing(unittest.TestCase):
             self.assertIsNotNone(getattr(module, "mol_file_to_graph", None))
             self.assertIsNotNone(getattr(module, "create_graph_from_orca_data", None))
             logger.info("Graph generator import successful.")
-        except ImportError as e:
-            logger.error(f"Graph generator import failed: {e}")
+        except ImportError:
+            logger.error(f"Graph generator import failed")
             self.skipTest("Could not import unified_graph_generator module")
 
     def test_orchestrator_import(self):
@@ -213,8 +213,8 @@ class TestDataProcessing(unittest.TestCase):
             orchestrator_class = getattr(module, "PFASPipelineOrchestrator")
             orchestrator_class()
             logger.info("Pipeline orchestrator import and instantiation successful.")
-        except ImportError as e:
-            logger.error(f"Pipeline orchestrator import failed: {e}")
+        except ImportError:
+            logger.error(f"Pipeline orchestrator import failed")
             self.skipTest("Could not import pfas_pipeline_orchestrator module")
 
 

@@ -488,7 +488,7 @@ class TestMolecularGraphProcessor:
                         ), f"Node count mismatch for {pt_path}. Expected {original_mol.GetNumAtoms()}, got {loaded_data.num_nodes}"
 
                     except Exception as e:
-                        pytest.fail(f"Failed to load or validate .pt file {pt_path}: {e}")
+                        pytest.fail(f"Failed to load or validate .pt file {pt_path}")
 
     def test_mol_to_json_graph(self, graph_processor: MolecularGraphProcessor, methane_mol_3d: Chem.Mol):
         """Test mol_to_json_graph method."""

@@ -678,6 +678,6 @@ class GraphCoarsener:
                 print(f"Created hierarchical graphs for {base_name}")
 
             except Exception as e:
-                print(f"Error creating hierarchical graphs for {base_name}: {e}")
+                print(f"Error creating hierarchical graphs for {base_name}")
 
         return all_graph_paths

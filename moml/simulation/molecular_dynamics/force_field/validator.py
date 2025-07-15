@@ -88,7 +88,7 @@ class ForceFieldValidator:
                     topology = pdb.topology
                     positions = pdb.positions
                 except Exception as e:
-                    errors.append(f"Failed to load PDB file {pdb_path}: {e}")
+                    errors.append(f"Failed to load PDB file {pdb_path}")
                     return errors
             
             if topology is None or positions is None:

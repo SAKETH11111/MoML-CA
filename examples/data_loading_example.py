@@ -29,14 +29,14 @@ def main():
         print(" env features:", env)
         print(" nodes:", graph.num_nodes)
     except Exception as e:
-        print(f"Could not load molecule1: {e}")
+        print(f"Could not load molecule1")
 
     # Create a batch from a list of molecule ids
     try:
         batch = loader.get_batch(["molecule1", "molecule2"], batch_size=2)
         print("Batch contains", batch.num_graphs, "graphs")
     except Exception as e:
-        print(f"Batching failed: {e}")
+        print(f"Batching failed")
 
 
 if __name__ == "__main__":

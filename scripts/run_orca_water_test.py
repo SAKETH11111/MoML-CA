@@ -51,7 +51,7 @@ def run_orca_water_test(orca_executable_path: str, output_dir_name: str = "orca_
             f.write(orca_input_content)
         logging.info(f"Generated ORCA input file: {input_file_path}")
     except IOError as e:
-        logging.error(f"Error writing ORCA input file {input_file_path}: {e}")
+        logging.error(f"Error writing ORCA input file {input_file_path}")
         return
 
     logging.info(f"Starting ORCA calculation for {input_filename} in {output_dir}")
@@ -82,7 +82,7 @@ def run_orca_water_test(orca_executable_path: str, output_dir_name: str = "orca_
                 with open(error_file_path, "r") as f_err_read:
                     logging.error(f"Captured STDERR (see {error_file_path}):\n{f_err_read.read(1000)}...")
             except Exception as e:
-                logging.warning(f"Could not read output/error files for logging: {e}")
+                logging.warning(f"Could not read output/error files for logging")
             logging.info("ORCA calculation for water failed.")
         else:
             logging.info(f"ORCA run completed successfully for {input_filename}.")
@@ -98,7 +98,7 @@ def run_orca_water_test(orca_executable_path: str, output_dir_name: str = "orca_
     except FileNotFoundError:
         logging.error(f"ORCA executable not found at {orca_executable_path}. Please check the path.")
     except Exception as e:
-        logging.error(f"An unexpected error occurred during ORCA execution: {e}")
+        logging.error(f"An unexpected error occurred during ORCA execution")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a single ORCA test calculation for a water molecule.")

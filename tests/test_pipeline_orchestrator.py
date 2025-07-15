@@ -37,8 +37,8 @@ try:
     from moml.pipeline import PFASPipelineOrchestrator
 
     PIPELINE_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Pipeline module not available: {e}")
+except ImportError:
+    logger.warning(f"Pipeline module not available")
     PIPELINE_AVAILABLE = False
 
 # Sample SMILES for testing
@@ -113,7 +113,7 @@ def cleanup_test_environment(test_dir: str):
         shutil.rmtree(test_dir)
         logger.info(f"Cleaned up test directory: {test_dir}")
     except Exception as e:
-        logger.warning(f"Failed to clean up test directory {test_dir}: {e}")
+        logger.warning(f"Failed to clean up test directory {test_dir}")
 
 
 class TestPFASPipelineOrchestrator(unittest.TestCase):

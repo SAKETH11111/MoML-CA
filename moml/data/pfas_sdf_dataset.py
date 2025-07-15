@@ -38,7 +38,7 @@ class PFASSDFDataset(InMemoryDataset):
                 else:
                     self.data, self.slices = None, None
             except Exception as e:
-                print(f"Could not load processed PFAS data from {self.processed_paths[0]}: {e}")
+                print(f"Could not load processed PFAS data from {self.processed_paths[0]}")
                 self.data, self.slices = None, None
         else:
             self.data, self.slices = None, None
@@ -81,7 +81,7 @@ class PFASSDFDataset(InMemoryDataset):
                         data_list.append(data)
                         
             except Exception as e:
-                print(f"Error processing {sdf_file}: {e}")
+                print(f"Error processing {sdf_file}")
                 continue
         
         print(f"Successfully processed {len(data_list)} PFAS molecules")
@@ -151,7 +151,7 @@ class PFASSDFDataset(InMemoryDataset):
             return Data(z=z, pos=pos, edge_index=edge_index, y=y)
             
         except Exception as e:
-            print(f"Error converting molecule to data: {e}")
+            print(f"Error converting molecule to data")
             return None
     
     def _compute_molecular_descriptors(self, mol: Chem.Mol) -> torch.Tensor:
@@ -187,7 +187,7 @@ class PFASSDFDataset(InMemoryDataset):
             return torch.tensor(descriptors, dtype=torch.float)
             
         except Exception as e:
-            print(f"Error computing molecular descriptors: {e}")
+            print(f"Error computing molecular descriptors")
             # Return zeros if computation fails
             return torch.zeros(19, dtype=torch.float)
     

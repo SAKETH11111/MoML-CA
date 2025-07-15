@@ -33,7 +33,7 @@ def safe_parse_orca_output(path: str) -> Dict[str, Any]:
         print(f"Warning: ORCA output file not found: {path}")
         return data
     except IOError as e:
-        print(f"Warning: Failed to read ORCA output file {path}: {e}")
+        print(f"Warning: Failed to read ORCA output file {path}")
         return data
 
     # Mulliken charges -- use the last occurrence in the file

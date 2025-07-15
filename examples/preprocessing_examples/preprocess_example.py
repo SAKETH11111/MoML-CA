@@ -126,7 +126,7 @@ def main():
                 print(f"Warning: Labels file {args.labels_file} has invalid format. Expected columns: filename, label")
 
         except Exception as e:
-            print(f"Error loading labels file: {e}")
+            print(f"Error loading labels file")
 
     # Process molecular files and collect statistics
     feature_stats = {"num_nodes": [], "num_edges": [], "node_feature_dim": None, "edge_feature_dim": None}
@@ -160,7 +160,7 @@ def main():
             processed_files += 1
 
         except Exception as e:
-            print(f"Error processing file {file_path}: {e}")
+            print(f"Error processing file {file_path}")
 
     print(f"Successfully processed {processed_files} files")
 
