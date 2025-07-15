@@ -17,20 +17,20 @@ import os
 import logging
 import argparse
 import pandas as pd
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import json
 import time
 import pickle
 from datetime import datetime
+import concurrent.futures
+import functools # Added for partial
 
 from moml.core import (
     calculate_molecular_descriptors,
     create_graph_processor,
 )
-from moml.simulation.quantum_mechanics.parser.orca_parser import batch_process_molecules
+from moml.simulation.qm.parser.orca_parser import batch_process_molecules
 from moml.data import process_dataset, process_mol_file_to_graph, graph_batch_process
-
-import concurrent.futures
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -134,7 +134,7 @@ class MOMLPipelineOrchestrator:
         logger.info(f"Output directory: {self.config['output_dir']}")
         logger.info(f"Working directory: {self.config['working_dir']}")
 
-    def _deep_update(self, d: Dict, u: Dict) -> Dict:
+    def _deep_update(self, d: Dict[str, Any], u: Dict[str, Any]) -> Dict[str, Any]:
         """
         Deep update dictionary d with values from dictionary u.
 
@@ -152,7 +152,7 @@ class MOMLPipelineOrchestrator:
                 d[k] = v
         return d
 
-    def _process_molecule_features(self, df, molecule_id_column="common_name"):
+    def _process_molecule_features(self, df: pd.DataFrame, molecule_id_column: str = "common_name") -> pd.DataFrame:
         """
         Common method to process molecule features
         This method centralizes feature extraction logic to avoid redundancy.
@@ -214,8 +214,8 @@ class MOMLPipelineOrchestrator:
 
     def run_orca_calculations(
         self,
-        df: pd.DataFrame = None,
-        input_file: str = None,
+        df: Optional[pd.DataFrame] = None,
+        input_file: Optional[str] = None,
         smiles_col: str = "SMILES",
         id_col: str = "common_name",
         force_rerun: bool = False,
@@ -282,7 +282,7 @@ class MOMLPipelineOrchestrator:
         return orca_results
 
     def generate_molecular_graphs(
-        self, mol_dir: str = None, orca_dir: str = None, output_dir: str = None, force_rerun: bool = False
+        self, mol_dir: Optional[str] = None, orca_dir: Optional[str] = None, output_dir: Optional[str] = None, force_rerun: bool = False
     ) -> List[str]:
         """
         Generate molecular graphs from molecule files and ORCA outputs.
@@ -422,7 +422,7 @@ class MOMLPipelineOrchestrator:
                 }
 
                 # Function to process a single molecule
-                def process_single_molecule(mol_file, config=config):
+                def process_single_molecule(mol_file: str) -> Optional[str]:
                     # Instantiate processor inside worker to avoid non-picklable objects
                     processor = create_graph_processor(config)
                     try:
@@ -446,7 +446,7 @@ class MOMLPipelineOrchestrator:
 
                         return output_file
                     except Exception as e:
-                        logger.error(f"Error processing {mol_file}: {e}")
+                        logger.error(f"Error processing {mol_file}")
                         return None
 
                 # Process molecules in parallel if enabled
@@ -456,12 +456,14 @@ class MOMLPipelineOrchestrator:
                 if max_workers > 1:
                     logger.info(f"Processing {len(mol_file_paths)} molecules in parallel with {max_workers} workers")
                     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-                        results = list(executor.map(process_single_molecule, mol_file_paths))
+                        # Pass config explicitly to process_single_molecule
+                        partial_process_single_molecule = functools.partial(process_single_molecule, config=config)
+                        results = list(executor.map(partial_process_single_molecule, mol_file_paths))
                         graph_files = [f for f in results if f is not None]
                 else:
                     logger.info(f"Processing {len(mol_file_paths)} molecules sequentially")
                     for mol_file in mol_file_paths:
-                        result = process_single_molecule(mol_file)
+                        result = process_single_molecule(mol_file, config=config)
                         if result:
                             graph_files.append(result)
 
@@ -480,7 +482,7 @@ class MOMLPipelineOrchestrator:
 
     def run_full_pipeline(
         self, input_file: str, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """
         Run the complete molecular analysis pipeline from data preprocessing to graph generation.
 
@@ -503,23 +505,25 @@ class MOMLPipelineOrchestrator:
 
             # Step 2: Run ORCA calculations
             logger.info("Step 2: Running ORCA calculations")
-            # Check if we should skip QM calculations
-            if self.config.get("execution", {}).get("skip_qm", False):
-                logger.info("Skipping ORCA calculations as configured")
-                orca_results = None
+            if not self.state.get("orca_calculated") or force_rerun:
+                logger.info("Running ORCA calculations...")
+                if self.config["execution"].get("skip_qm"):
+                    logger.info("Skipping ORCA calculations as per configuration")
+                else:
+                    self.run_orca_calculations(
+                        df, smiles_col=smiles_col, id_col=id_col, force_rerun=force_rerun
+                    )
             else:
-                orca_results = self.run_orca_calculations(
-                    df, smiles_col=smiles_col, id_col=id_col, force_rerun=force_rerun
-                )
+                logger.info("ORCA calculations already completed, skipping.")
 
             # Step 3: Generate molecular graphs
             logger.info("Step 3: Generating molecular graphs")
-            # Check if we should skip graph generation
-            if self.config.get("execution", {}).get("skip_graph_generation", False):
-                logger.info("Skipping molecular graph generation as configured")
-                graph_files = []
-            else:
-                graph_files = self.generate_molecular_graphs(force_rerun=force_rerun)
+            if not self.state.get("graphs_generated") or force_rerun:
+                logger.info("Generating molecular graphs...")
+                if self.config["execution"].get("skip_graph_generation"):
+                    logger.info("Skipping graph generation as per configuration")
+                else:
+                    self.generate_molecular_graphs(force_rerun=force_rerun)
 
             # Collect results
             pipeline_results = {
@@ -551,7 +555,7 @@ class MOMLPipelineOrchestrator:
         with open(state_file, "w") as f:
             json.dump(self.state, f, indent=2)
 
-    def resume_pipeline(self, input_file: str = None, smiles_col: str = "SMILES", id_col: str = "common_name") -> Dict:
+    def resume_pipeline(self, input_file: Optional[str] = None, smiles_col: str = "SMILES", id_col: str = "common_name") -> Dict[str, Any]:
         """
         Resume the pipeline from the last successful stage.
 
@@ -613,9 +617,9 @@ class MOMLPipelineOrchestrator:
                     logger.info("Skipping ORCA calculations as configured")
                     orca_results = None
                 else:
-                    orca_results = self.run_orca_calculations(df, smiles_col=smiles_col, id_col=id_col)
+                    self.run_orca_calculations(df, smiles_col=smiles_col, id_col=id_col)
 
-                graph_files = self.generate_molecular_graphs()
+                self.generate_molecular_graphs()
             else:
                 logger.info("All pipeline stages already completed or skipped as configured")
                 df = self.preprocess_data(input_file, smiles_col, id_col)
@@ -790,8 +794,8 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         return self.run_preprocessing_stage(input_file, smiles_col, id_col, force_rerun)
 
     def run_orca_calculations(
-        self, df=None, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False
-    ):
+        self, df: Optional[pd.DataFrame] = None, input_file: Optional[str] = None, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False
+    ) -> pd.DataFrame:
         """
         Run ORCA quantum mechanical calculations for PFAS molecules.
 
@@ -848,7 +852,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         # 1. Filter to PFAS compounds if the flag exists
         pfas_df = df
         if "is_pfas" in df.columns:
-            pfas_df = df[df["is_pfas"] == True].copy()
+            pfas_df = df[df["is_pfas"]].copy()
             logger.info(f"Identified {len(pfas_df)} PFAS compounds out of {len(df)} total compounds")
             
             # Save list of PFAS compounds for reference
@@ -924,7 +928,7 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
         logger.info("PFAS dataset analysis completed")
         return pfas_df
 
-    def execute_pipeline(self, input_file=None, smiles_col="SMILES", id_col="common_name", force_rerun=False):
+    def execute_pipeline(self, input_file: Optional[str] = None, smiles_col: str = "SMILES", id_col: str = "common_name", force_rerun: bool = False) -> Dict[str, Any]:
         """
         Run the complete PFAS analysis pipeline.
 
@@ -1014,12 +1018,12 @@ class PFASPipelineOrchestrator(MOMLPipelineOrchestrator):
                     pickle.dump(data_to_save, f_pkl)
                 logger.info(f"Saved PFAS preprocessing checkpoint to {checkpoint_file}")
             except Exception as e:
-                logger.error(f"Failed to save PFAS preprocessing checkpoint {checkpoint_file}: {e}")
+                logger.error(f"Failed to save PFAS preprocessing checkpoint {checkpoint_file}")
 
         # Future: Add other PFAS-specific checkpoints here if needed.
 
 
-def main():
+def main() -> None:
     """Main function for command-line execution."""
     parser = argparse.ArgumentParser(description="Molecular Analysis Pipeline")
     parser.add_argument("--config", help="Path to configuration file")

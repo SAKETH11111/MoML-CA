@@ -1,5 +1,10 @@
 ! B3LYP STO-3G Opt CHELPG
+%maxcore 4000 
 %pal nprocs 16
+end
+%scf
+   maxiter 200 
+   conv 1e-7   
 end
 %output
    Print[P_Basis] 2

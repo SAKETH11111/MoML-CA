@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SMIRNOFF version="0.3" aromaticity_model="OEAroModel_MDL">
+    <LibraryCharges version="0.3">
+        <LibraryCharge smirks="[6:1]" charge1="0.022711701691150665 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:2]" charge1="-0.006292130798101425 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:3]" charge1="-0.006292130798101425 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:4]" charge1="-0.006292130798101425 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[6:5]" charge1="-0.010864872485399246 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:6]" charge1="-0.0044144801795482635 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:7]" charge1="-0.0044144801795482635 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[6:8]" charge1="-0.01207176223397255 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:9]" charge1="-0.004632525146007538 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:10]" charge1="-0.004632525146007538 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[6:11]" charge1="-0.010479085147380829 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:12]" charge1="-0.004754014313220978 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:13]" charge1="-0.004754014313220978 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[6:14]" charge1="-0.008833616971969604 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:15]" charge1="-0.00466538593173027 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:16]" charge1="-0.00466538593173027 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[6:17]" charge1="-0.01066882535815239 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:18]" charge1="-0.00481896847486496 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:19]" charge1="-0.00481896847486496 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[6:20]" charge1="0.017967522144317627 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:21]" charge1="-0.005517750978469849 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[9:22]" charge1="-0.005517750978469849 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[6:23]" charge1="0.00225202739238739 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[8:24]" charge1="0.0005453042685985565 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[8:25]" charge1="-0.0007960423827171326 * elementary_charge ** 1"></LibraryCharge>
+        <LibraryCharge smirks="[1:26]" charge1="-0.006754089146852493 * elementary_charge ** 1"></LibraryCharge>
+    </LibraryCharges>
+    <vdW version="0.4" potential="Lennard-Jones-12-6" combining_rules="Lorentz-Berthelot" scale12="0.0" scale13="0.0" scale14="0.5" scale15="1.0" cutoff="9.0 * angstrom ** 1" switch_width="1.0 * angstrom ** 1" periodic_method="cutoff" nonperiodic_method="no-cutoff">
+        <Atom smirks="[6:1]" epsilon="0.01038949005305767 * kilocalories_per_mole ** 1" rmin_half="0.006630098447203636 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:2]" epsilon="0.00825100764632225 * kilocalories_per_mole ** 1" rmin_half="0.00135062076151371 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:3]" epsilon="0.00825100764632225 * kilocalories_per_mole ** 1" rmin_half="0.00135062076151371 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:4]" epsilon="0.00825100764632225 * kilocalories_per_mole ** 1" rmin_half="0.00135062076151371 * angstrom ** 1"></Atom>
+        <Atom smirks="[6:5]" epsilon="0.011509865522384644 * kilocalories_per_mole ** 1" rmin_half="0.005589621141552925 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:6]" epsilon="0.0068223560228943825 * kilocalories_per_mole ** 1" rmin_half="0.0015103574842214584 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:7]" epsilon="0.0068223560228943825 * kilocalories_per_mole ** 1" rmin_half="0.0015103574842214584 * angstrom ** 1"></Atom>
+        <Atom smirks="[6:8]" epsilon="0.02171340025961399 * kilocalories_per_mole ** 1" rmin_half="0.007861483842134476 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:9]" epsilon="0.007072621025145054 * kilocalories_per_mole ** 1" rmin_half="0.001519051380455494 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:10]" epsilon="0.007072621025145054 * kilocalories_per_mole ** 1" rmin_half="0.001519051380455494 * angstrom ** 1"></Atom>
+        <Atom smirks="[6:11]" epsilon="0.015156090259552002 * kilocalories_per_mole ** 1" rmin_half="0.007232971489429474 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:12]" epsilon="0.007181955501437187 * kilocalories_per_mole ** 1" rmin_half="0.0014944272115826607 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:13]" epsilon="0.007181955501437187 * kilocalories_per_mole ** 1" rmin_half="0.0014944272115826607 * angstrom ** 1"></Atom>
+        <Atom smirks="[6:14]" epsilon="0.011260569095611572 * kilocalories_per_mole ** 1" rmin_half="0.006239056587219238 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:15]" epsilon="0.007110621314495802 * kilocalories_per_mole ** 1" rmin_half="0.0014991872012615204 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:16]" epsilon="0.007110621314495802 * kilocalories_per_mole ** 1" rmin_half="0.0014991872012615204 * angstrom ** 1"></Atom>
+        <Atom smirks="[6:17]" epsilon="0.022047553211450577 * kilocalories_per_mole ** 1" rmin_half="0.0081425029784441 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:18]" epsilon="0.007179891690611839 * kilocalories_per_mole ** 1" rmin_half="0.001531193032860756 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:19]" epsilon="0.007179891690611839 * kilocalories_per_mole ** 1" rmin_half="0.001531193032860756 * angstrom ** 1"></Atom>
+        <Atom smirks="[6:20]" epsilon="0.0007348760846070945 * kilocalories_per_mole ** 1" rmin_half="0.002179986797273159 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:21]" epsilon="0.007807459216564894 * kilocalories_per_mole ** 1" rmin_half="0.0013767015188932419 * angstrom ** 1"></Atom>
+        <Atom smirks="[9:22]" epsilon="0.007807459216564894 * kilocalories_per_mole ** 1" rmin_half="0.0013767015188932419 * angstrom ** 1"></Atom>
+        <Atom smirks="[6:23]" epsilon="0.0014781812205910683 * kilocalories_per_mole ** 1" rmin_half="0.006051937118172646 * angstrom ** 1"></Atom>
+        <Atom smirks="[8:24]" epsilon="0.001502219121903181 * kilocalories_per_mole ** 1" rmin_half="0.0007540341466665268 * angstrom ** 1"></Atom>
+        <Atom smirks="[8:25]" epsilon="0.006822786759585142 * kilocalories_per_mole ** 1" rmin_half="0.0012992219999432564 * angstrom ** 1"></Atom>
+        <Atom smirks="[1:26]" epsilon="0.002551846671849489 * kilocalories_per_mole ** 1" rmin_half="0.001998116262257099 * angstrom ** 1"></Atom>
+    </vdW>
+</SMIRNOFF>

@@ -159,9 +159,12 @@ def parse_orca_out(out_path: Path) -> Optional[dict]:
     if not (mE and mD and mQ):
         logging.warning(f"Couldn't parse all required data (Energy, Dipole, CHELPG) from {out_path.name}")
         # Log which specific parts are missing for better debugging
-        if not mE: logging.warning(f"  Missing: FINAL SINGLE POINT ENERGY in {out_path.name}")
-        if not mD: logging.warning(f"  Missing: Total Dipole Moment (Debye) in {out_path.name}")
-        if not mQ: logging.warning(f"  Missing: CHELPG Charges block in {out_path.name}")
+        if not mE:
+            logging.warning(f"  Missing: FINAL SINGLE POINT ENERGY in {out_path.name}")
+        if not mD:
+            logging.warning(f"  Missing: Total Dipole Moment (Debye) in {out_path.name}")
+        if not mQ:
+            logging.warning(f"  Missing: CHELPG Charges block in {out_path.name}")
         return None
 
     charges = []
@@ -220,7 +223,7 @@ def cleanup_previous_orca_files(base_name: str, directory: str) -> None:
                 logging.debug(f"Deleted old file: {f_path}")
                 count_deleted +=1
             except OSError as e:
-                logging.warning(f"Could not delete old file {f_path}: {e}")
+                logging.warning(f"Could not delete old file {f_path}")
     if count_deleted > 0:
         logger.info(f"Cleaned up {count_deleted} old ORCA files for {base_name}.")
     else:
@@ -250,15 +253,15 @@ def run_orca_calculation(
     logger.info(f"  Error file will be: {error_file_path}")
     
     command = [orca_executable, input_file_basename] # ORCA expects just the filename if cwd is set
-            logger.info(f"Executing ORCA command: {' '.join(command)} in directory {output_dir}")
+    logger.info(f"Executing ORCA command: {' '.join(command)} in directory {output_dir}")
 
     try:
-        with open(output_file_path, "w") as f_stdout, open(error_file_path, "w") as f_stderr:
+        with open(output_file_path, "w") as f_out, open(error_file_path, "w") as f_err:
             process = subprocess.run(
                 command,
                 cwd=output_dir, # Run ORCA from the output directory
-                stdout=f_stdout,
-                stderr=f_stderr,
+                stdout=f_out,
+                stderr=f_err,
                 text=True, # Ensure text mode for stdout/stderr
                 check=False, # Don't raise exception for non-zero exit codes immediately
                 timeout=7200  # Timeout after 2 hours, adjust as needed
@@ -305,19 +308,19 @@ def run_orca_calculation(
         )
         return False
     except Exception as e:
-        logging.error(f"An unexpected error occurred while running ORCA for {input_file_basename}: {e}")
+        logging.error(f"An unexpected error occurred while running ORCA for {input_file_basename}")
         logging.error(f"Check {output_file_path} and {error_file_path} for any partial output.")
         return False
 
 
-def process_sdf_file( # Renamed from process_molecule in new script, kept existing name
-    sdf_file_path: Path, # Changed to Path type
+def process_sdf_file(
+    sdf_file_path: Path,
     orca_executable: str,
-    output_dir: Path, # Changed to Path type
+    output_dir: Path,
     num_cores: int
-) -> Optional[dict]: # Returns dict or None
+) -> Optional[dict]:
     """
-    Processes a single SDF file by preparing the molecule, generating an ORCA input file, running the ORCA calculation, and parsing the output for quantum mechanical properties.
+    Processes a single SDF file: generates an ORCA input, runs the calculation, and parses the output.
     
     Attempts to generate a 3D conformer if missing, optimizes geometry, and cleans up previous ORCA files before calculation. Returns a dictionary of parsed results if successful, or None if any step fails.
     """
@@ -365,7 +368,7 @@ def process_sdf_file( # Renamed from process_molecule in new script, kept existi
         orca_input_file_path.write_text(orca_input_content) # Use Path.write_text
         logger.info(f"Generated ORCA input file: {orca_input_file_path}")
     except IOError as e:
-        logger.error(f"Failed to write ORCA input file {orca_input_file_path}: {e}")
+        logger.error(f"Failed to write ORCA input file {orca_input_file_path}")
         return None
 
     if not run_orca_calculation(orca_executable, str(orca_input_file_path), str(output_dir)):
@@ -435,7 +438,9 @@ def main():
 
     for sdf_file_str in args.sdf_files:
         sdf_file_path = Path(sdf_file_str) # Convert to Path object
-        parsed_result = process_sdf_file(sdf_file_path, orca_executable, output_dir_path, args.num_cores)
+        parsed_result = process_sdf_file(
+            sdf_file_path, orca_executable, output_dir_path, args.num_cores
+        )
         if parsed_result:
             dataset_rows.append(parsed_result)
             successful_runs += 1
@@ -473,7 +478,7 @@ def main():
                 writer.writerows(dataset_rows)
             logger.info(f"Wrote/Appended {len(dataset_rows)} records to {DATASET_CSV}")
         except IOError as e:
-            logger.error(f"Could not write to CSV file {DATASET_CSV}: {e}")
+            logger.error(f"Could not write to CSV file {DATASET_CSV}")
     else:
         logger.warning("No successful ORCA runs with complete parsing to write to dataset CSV.")
 

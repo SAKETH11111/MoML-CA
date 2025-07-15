@@ -1,18 +1,17 @@
 """
 Unit tests for the ForceFieldMapper class in
-moml.simulation.molecular_dynamics.force_field_mapper.
+moml.simulation.molecular_dynamics.force_field.mapper.
 """
 
 import pytest
 import os
-import logging
 import tempfile
 import shutil
 from rdkit import Chem
 from rdkit.Chem import AllChem
 import torch
 
-from moml.simulation.molecular_dynamics.force_field_mapper import ForceFieldMapper
+from moml.simulation.molecular_dynamics.force_field.mapper import ForceFieldMapper
 
 
 # Helper function to create RDKit molecules

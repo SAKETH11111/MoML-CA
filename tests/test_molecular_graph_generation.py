@@ -34,16 +34,14 @@ except ImportError:
 
 # Try to import torch and torch_geometric
 try:
-    import torch
-    import numpy as np
     import pandas as pd
     from torch_geometric.data import Data as PyGData
 
     TORCH_AVAILABLE = True
     print("PyTorch and PyTorch Geometric import successful!")
-except ImportError as e:
+except ImportError:
     TORCH_AVAILABLE = False
-    print(f"Failed to import PyTorch or PyTorch Geometric: {e}")
+    print(f"Failed to import PyTorch or PyTorch Geometric")
 
 # Import from consolidated moml modules
 try:
@@ -53,8 +51,8 @@ try:
 
     IMPORTS_SUCCESSFUL = True
     print("Successfully imported moml modules!")
-except ImportError as e:
-    print(f"Failed to import required moml modules: {e}")
+except ImportError:
+    print(f"Failed to import required moml modules")
     IMPORTS_SUCCESSFUL = False
 
 

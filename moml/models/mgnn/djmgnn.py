@@ -2,8 +2,33 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
 import logging
+
+# Conditional imports for torch_geometric
+try:
+    from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
+    HAS_TORCH_GEOMETRIC = True
+except ImportError:
+    HAS_TORCH_GEOMETRIC = False
+    # Create dummy classes/functions
+    class NNConv(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            raise ImportError("torch_geometric is required for NNConv")
+    
+    class GraphNorm(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            raise ImportError("torch_geometric is required for GraphNorm")
+    
+    def global_mean_pool(*args, **kwargs):
+        raise ImportError("torch_geometric is required for global_mean_pool")
+    
+    def global_add_pool(*args, **kwargs):
+        raise ImportError("torch_geometric is required for global_add_pool")
+    
+    def global_max_pool(*args, **kwargs):
+        raise ImportError("torch_geometric is required for global_max_pool")
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +46,13 @@ def rbf_encode_dist(dists, K=32, d_min=0.0, d_max=10.0):
 class GraphConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, edge_attr_dim):
         super().__init__()
+        if not HAS_TORCH_GEOMETRIC:
+            raise ImportError("torch_geometric is required for GraphConvLayer")
+        
         self.actual_edge_attr_dim = edge_attr_dim
-        _mlp_input_dim = 1 if edge_attr_dim == 0 else edge_attr_dim
-
-        self.edge_mlp = nn.Sequential(nn.Linear(_mlp_input_dim, in_channels * out_channels), nn.ReLU())
+        self._mlp_input_dim = 1 if edge_attr_dim == 0 else edge_attr_dim
+ 
+        self.edge_mlp = nn.Sequential(nn.Linear(self._mlp_input_dim, in_channels * out_channels), nn.ReLU())
         self.conv = NNConv(in_channels, out_channels, nn=self.edge_mlp, aggr="add")
         self.norm = GraphNorm(out_channels)
         self.res_connection = in_channels == out_channels
@@ -38,12 +66,12 @@ class GraphConvLayer(nn.Module):
             edge_attr_for_nnconv_input = None
 
         if edge_attr_for_nnconv_input is None and edge_index.numel() > 0:
-            dummy_dim = self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], 'in_features') else self.actual_edge_attr_dim
+            dummy_dim = self._mlp_input_dim
             edge_attr_for_nnconv_input = x.new_ones(edge_index.size(1), dummy_dim)
         elif edge_index.numel() == 0:
             edge_attr_for_nnconv_input = torch.empty(
-                0, self.edge_mlp[0].in_features if hasattr(self.edge_mlp[0], "in_features") else 1
-            ).to(x.device)
+                0, self._mlp_input_dim, device=x.device
+            )
 
         h = self.conv(x, edge_index, edge_attr_for_nnconv_input)
         h = self.norm(h)
@@ -58,21 +86,33 @@ class DenseGNNBlock(nn.Module):
     def __init__(self, in_dim, hidden_dim, n_layers, transition_dim, edge_attr_dim):
         super().__init__()
         self.in_dim = in_dim
-        self.layers, cur_dim = nn.ModuleList(), in_dim
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers
+        
+        self.initial_proj = nn.Linear(in_dim, hidden_dim)
+        
+        self.conv_layers = nn.ModuleList()
+        self.transition_layers = nn.ModuleList()
+        
         for _ in range(n_layers):
-            self.layers.append(GraphConvLayer(cur_dim, hidden_dim, edge_attr_dim))
-            cur_dim += hidden_dim
-        self.transition = nn.Linear(cur_dim, transition_dim)
+            self.conv_layers.append(GraphConvLayer(hidden_dim, hidden_dim, edge_attr_dim))
+            # Transition layer to process concatenated features
+            self.transition_layers.append(nn.Linear(hidden_dim * 2, hidden_dim))
+
+        self.final_transition = nn.Linear(hidden_dim, transition_dim)
         self.norm = GraphNorm(transition_dim)
 
     def forward(self, x, edge_index, edge_attr):
-        outs = [x]
-        for layer in self.layers:
-            h = layer(torch.cat(outs, 1), edge_index, edge_attr)
-            outs.append(h)
-        h_concat = torch.cat(outs, 1)
-        h_transition = self.transition(h_concat)
-        return F.relu(self.norm(h_transition))
+        h = self.initial_proj(x)
+        
+        for i in range(self.n_layers):
+            h_conv = self.conv_layers[i](h, edge_index, edge_attr)
+            h_cat = torch.cat([h, h_conv], 1)
+            h = self.transition_layers[i](h_cat)
+            h = F.relu(h)
+            
+        h_final = self.final_transition(h)
+        return F.relu(self.norm(h_final))
 
 
 class JKAggregator(nn.Module):
@@ -188,7 +228,7 @@ class DJMGNN(nn.Module):
         jk_mode="attention",
         node_output_dims=3, 
         graph_output_dims=19, 
-        spice_graph_output_dims=1,
+        energy_output_dims=1,
         dropout=0.2, 
         pool_type="mean",
         p_dropedge=0.1,
@@ -199,18 +239,23 @@ class DJMGNN(nn.Module):
         env_mlp: bool = False,
     ):
         super().__init__()
+        if not HAS_TORCH_GEOMETRIC:
+            raise ImportError("torch_geometric is required for DJMGNN")
+        
         self.env_dim = env_dim
         self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = p_dropedge, use_supernode, use_rbf, rbf_K
         self.hidden_dim = hidden_dim
         self.node_output_dims = node_output_dims  
         self.graph_output_dims = graph_output_dims
-        self.spice_graph_output_dims = spice_graph_output_dims
+        self.energy_output_dims = energy_output_dims
 
-        self.input_edge_attr_dim = in_edge_dim  
+        self.input_edge_attr_dim = in_edge_dim
+        self.in_node_dim = in_node_dim
+        self.initial_proj = nn.Linear(self.in_node_dim, hidden_dim)
         self.processed_edge_attr_dim = self.input_edge_attr_dim + (self.rbf_K if self.use_rbf else 0)
 
         self.blocks = nn.ModuleList()
-        current_block_in_dim = in_node_dim
+        current_block_in_dim = hidden_dim
         for _ in range(n_blocks):
             self.blocks.append(
                 DenseGNNBlock(
@@ -244,10 +289,10 @@ class DJMGNN(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, graph_output_dims)
         )
-        self.head_graph_spice_energy = nn.Sequential(
+        self.head_energy = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, spice_graph_output_dims)
+            nn.Linear(hidden_dim, energy_output_dims)
         )
         self.pool = {"mean": global_mean_pool, "add": global_add_pool, "max": global_max_pool}.get(
             pool_type, global_mean_pool
@@ -287,12 +332,8 @@ class DJMGNN(nn.Module):
             if edge_attr.numel() > 0:
                 super_e = edge_attr.new_zeros(edge1.size(1) + edge2.size(1), edge_attr.size(1))
                 new_edge_attr = torch.cat([edge_attr, super_e], 0)
-            elif self.processed_edge_attr_dim > 0:
-                super_e = x.new_zeros(edge1.size(1) + edge2.size(1), self.processed_edge_attr_dim)
-                if edge_attr is None:
-                    new_edge_attr = super_e
-                if new_edge_attr is None and self.processed_edge_attr_dim > 0:
-                    pass
+            elif self.processed_edge_attr_dim > 0 and edge_attr is None:
+                new_edge_attr = x.new_zeros(edge1.size(1) + edge2.size(1), self.processed_edge_attr_dim)
 
         batch_for_original_nodes = batch[:num_nodes_original]
         batch_for_super_nodes = torch.arange(num_graphs, device=device)
@@ -308,12 +349,12 @@ class DJMGNN(nn.Module):
         mask = torch.rand(edge_index.size(1), device=edge_index.device) > self.p_dropedge
         return edge_index[:, mask], (edge_attr[mask] if edge_attr is not None and edge_attr.numel() > 0 else edge_attr)
 
-    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None, env_vec=None):
-        if x.numel() == 0:
+    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None):
+        if x is None or x.numel() == 0:
             return {
                 "node_pred": torch.empty(0, self.node_output_dims).to(x.device), 
-                "graph_pred_main": torch.empty(0, self.graph_output_dims).to(x.device), 
-                "graph_pred_spice_energy": torch.empty(0, self.spice_graph_output_dims).to(x.device)
+                "graph_pred": torch.empty(0, self.graph_output_dims).to(x.device), 
+                "energy_pred": torch.empty(0, self.energy_output_dims).to(x.device)
             }
 
         num_edges_initial = edge_index.size(1)
@@ -358,11 +399,11 @@ class DJMGNN(nn.Module):
                     f"DJMGNN: FATAL current_edge_attr dim {current_edge_attr.size(1)} mismatch with processed_edge_attr_dim {self.processed_edge_attr_dim}. This indicates a bug."
                 )
         elif self.processed_edge_attr_dim > 0:
-             logger.warning(
+            logger.warning(
                 f"DJMGNN: current_edge_attr is None, but processed_edge_attr_dim is {self.processed_edge_attr_dim}. Creating zeros."
-             )
-             if num_edges_initial > 0:
-                 current_edge_attr = torch.zeros(num_edges_initial, self.processed_edge_attr_dim, device=x.device)
+            )
+            if num_edges_initial > 0:
+                current_edge_attr = torch.zeros(num_edges_initial, self.processed_edge_attr_dim, device=x.device)
 
         current_batch = batch if batch is not None else x.new_zeros(x.size(0), dtype=torch.long)
 
@@ -373,10 +414,13 @@ class DJMGNN(nn.Module):
         current_edge_index, current_edge_attr = self.drop_edges(current_edge_index, current_edge_attr)
 
         h_intermediate, outs = current_x, []
+        if h_intermediate.size(-1) != self.hidden_dim:
+            h_intermediate = self.initial_proj(h_intermediate)
+
         for block in self.blocks:
             if h_intermediate.numel() == 0:
-                block_output_dim = block.transition.out_features if hasattr(block, "transition") else self.hidden_dim
-                h_intermediate = torch.empty(0, block_output_dim).to(x.device)
+                block_output_dim = self.hidden_dim
+                h_intermediate = torch.empty(0, block_output_dim, device=x.device)
             else:
                 h_intermediate = block(h_intermediate, current_edge_index, current_edge_attr)
             outs.append(h_intermediate)
@@ -385,11 +429,11 @@ class DJMGNN(nn.Module):
 
         if h_aggregated is None or h_aggregated.numel() == 0:
             num_output_nodes = 0
-            batch_size_for_graph_pred = current_batch.max().item() + 1 if current_batch.numel() > 0 else 0
-            out_node = torch.empty(num_output_nodes, self.node_output_dims).to(x.device) 
-            out_graph_main = torch.empty(batch_size_for_graph_pred, self.graph_output_dims).to(x.device) 
-            out_graph_spice_energy = torch.empty(batch_size_for_graph_pred, self.spice_graph_output_dims).to(x.device)
-            return {"node_pred": out_node, "graph_pred_main": out_graph_main, "graph_pred_spice_energy": out_graph_spice_energy}
+            batch_size_for_graph_pred = int(current_batch.max().item() + 1) if current_batch.numel() > 0 else 0
+            out_node = torch.empty(num_output_nodes, self.node_output_dims, device=x.device)
+            out_graph = torch.empty(batch_size_for_graph_pred, self.graph_output_dims, device=x.device)
+            out_energy = torch.empty(batch_size_for_graph_pred, self.energy_output_dims, device=x.device)
+            return {"node_pred": out_node, "graph_pred": out_graph, "energy_pred": out_energy}
 
         num_original_nodes = x.size(0) 
         
@@ -405,7 +449,8 @@ class DJMGNN(nn.Module):
         graph_emb_input = h_aggregated 
         graph_emb = self.pool(graph_emb_input, current_batch)
         
-        out_graph_main = self.graph_head(graph_emb)
-        out_graph_spice_energy = self.head_graph_spice_energy(graph_emb)
+        out_graph = self.graph_head(graph_emb)
+        out_energy = self.head_energy(graph_emb)
         
-        return {"node_pred": out_node, "graph_pred_main": out_graph_main, "graph_pred_spice_energy": out_graph_spice_energy}
+        return {"node_pred": out_node, "graph_pred": out_graph, "energy_pred": out_energy}
+        

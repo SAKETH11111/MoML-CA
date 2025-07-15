@@ -5,13 +5,13 @@ from typing import Dict, Any, List
 
 from rdkit import Chem
 
-from moml.simulation.molecular_dynamics.force_field_mapper import ForceFieldMapper
+from moml.simulation.molecular_dynamics.force_field.mapper import ForceFieldMapper
 
 
 def safe_parse_orca_output(path: str) -> Dict[str, Any]:
     """Lightweight ORCA output parser extracting geometry and Mulliken charges.
 
-    The full parser in :mod:`moml.simulation.quantum_mechanics.parser.orca_parser`
+    The full parser in :mod:`moml.simulation.qm.parser.orca_parser` # Updated reference
     uses a complex regular expression for the dipole moment section which can be
     very slow on large output files.  For the purpose of generating force-field
     labels we only need the final Mulliken charges and the optimised geometry.
@@ -33,7 +33,7 @@ def safe_parse_orca_output(path: str) -> Dict[str, Any]:
         print(f"Warning: ORCA output file not found: {path}")
         return data
     except IOError as e:
-        print(f"Warning: Failed to read ORCA output file {path}: {e}")
+        print(f"Warning: Failed to read ORCA output file {path}")
         return data
 
     # Mulliken charges -- use the last occurrence in the file
@@ -89,6 +89,15 @@ def load_smiles_map(csv_path: str) -> Dict[str, str]:
     The CSV file must contain columns named 'DTXSID' and 'SMILES'. Returns a dictionary mapping each 'DTXSID' value (as a string) to its corresponding 'SMILES' string.
     """
     df = pd.read_csv(csv_path)
+    
+    required_columns = ['DTXSID', 'SMILES']
+    if not all(col in df.columns for col in required_columns):
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        raise KeyError(
+            f"Missing required columns in CSV file '{csv_path}': {', '.join(missing_cols)}. "
+            "Expected columns: 'DTXSID', 'SMILES'."
+        )
+    
     return dict(zip(df['DTXSID'].astype(str), df['SMILES']))
 
 

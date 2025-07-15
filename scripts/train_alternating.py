@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
-
 import os
 import sys
 import argparse
 import logging
 import time
 import yaml
+import glob
 
 import torch
 import torch.nn as nn
@@ -16,21 +15,44 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from moml.data.dataset import get_dataset
 from moml.models.mgnn.djmgnn import DJMGNN
-
+from moml.data.feature_transforms import CreateEdges, FeaturizeNodes, StandardizeTargets
+from torchvision.transforms import Compose
 
 def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('alternating_training.log'),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
+    # Get the logger for the current module (__main__ when run as a script)
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    # Prevent adding handlers multiple times if this function were ever called more than once
+    if not logger.handlers:
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+        # StreamHandler for terminal output
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+        # FileHandler for output to alternating_training.log
+        try:
+            log_file_path = 'alternating_training.log'
+            file_handler = logging.FileHandler(log_file_path, mode='a') # 'a' for append
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            # This message goes to both handlers if file_handler was added successfully.
+            # Check for this message in both terminal and the log file.
+            logger.info(f"File logger initialized. Logging to: {os.path.abspath(log_file_path)}")
+        except Exception as e:
+            # Log error to stream handler if file handler setup fails
+            logger.error(f"CRITICAL: Failed to initialize file logger for '{log_file_path}'", exc_info=True)
+    
+    # Stop messages from propagating to the root logger if it has other handlers
+    logger.propagate = False 
+    return logger
 
 
 def create_cycle_iterator(dataloader):
+    if dataloader is None:
+        return None
     while True:
         for batch in dataloader:
             yield batch
@@ -38,7 +60,10 @@ def create_cycle_iterator(dataloader):
 
 def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type: str = "graph"):
     batch = batch.to(device)
-    
+    if not hasattr(batch, 'x') or batch.x is None:
+        logger.warning("Batch is missing 'x' attribute. Skipping loss computation.")
+        return torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)
+
     out = model(
         x=batch.x,
         edge_index=batch.edge_index,
@@ -48,75 +73,70 @@ def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type
     )
     
     node_pred = out.get("node_pred")
-    if task_type == "node":
-        graph_pred = out.get("graph_pred_spice_energy")
-    else:
-        graph_pred = out.get("graph_pred_main")
+    graph_pred = out.get("graph_pred")
+    energy_pred = out.get("energy_pred")
     
     node_loss = torch.tensor(0.0, device=device)
-    if node_pred is not None and hasattr(batch, 'node_y') and batch.node_y is not None:
+    graph_loss = torch.tensor(0.0, device=device)
+    energy_loss = torch.tensor(0.0, device=device)
+
+    # Node-level loss (SPICE)
+    if task_type == "node" and node_pred is not None and hasattr(batch, 'node_y') and batch.node_y is not None:
         if batch.node_y.numel() > 0 and node_pred.numel() > 0:
             if node_pred.shape == batch.node_y.shape:
                 node_loss = nn.MSELoss()(node_pred, batch.node_y)
             else:
                 logger.warning(f"Node prediction shape {node_pred.shape} mismatch with target shape {batch.node_y.shape}. Skipping node loss.")
-        elif node_pred.numel() == 0 and batch.node_y.numel() == 0:
-            pass
-        else:
-            logger.warning(f"Node prediction or target is empty while the other is not. Pred empty: {node_pred.numel()==0}, Target empty: {batch.node_y.numel()==0}. Skipping node loss.")
 
-    graph_loss = torch.tensor(0.0, device=device)
-    if graph_pred is not None and hasattr(batch, 'y') and batch.y is not None:
+    # Graph-level loss (QM9)
+    if task_type == "graph" and graph_pred is not None and hasattr(batch, 'y') and batch.y is not None:
         if batch.y.numel() > 0 and graph_pred.numel() > 0:
             targets = batch.y
+            if graph_pred.shape == targets.shape:
+                graph_loss = nn.MSELoss()(graph_pred, targets)
+            else:
+                logger.warning(f"Graph prediction shape {graph_pred.shape} mismatch with target shape {targets.shape}. Skipping graph loss.")
+        elif graph_pred is not None:
+            logger.warning(f"Graph prediction or target data is missing or empty. Skipping graph loss.")
+    
+    # Energy loss (SPICE)
+    if task_type == "node" and energy_pred is not None and hasattr(batch, 'y_graph') and batch.y_graph is not None:
+        if batch.y_graph.numel() > 0 and energy_pred.numel() > 0:
+            targets = batch.y_graph
             if targets.dim() == 1:
                 targets = targets.view(-1, 1)
-            
-            if graph_pred.size(-1) != targets.size(-1):
-                logger.warning(
-                    f"Graph prediction dim {graph_pred.size(-1)} mismatch with target dim {targets.size(-1)}. "
-                    f"Attempting to adjust. Graph pred shape: {graph_pred.shape}, Target shape: {targets.shape}"
-                )
-                if targets.size(-1) == 1 and graph_pred.size(-1) > 1:
-                    graph_pred_adjusted = graph_pred[:, :1]
-                    graph_loss = nn.MSELoss()(graph_pred_adjusted, targets)
-                elif graph_pred.size(-1) == 1 and targets.size(-1) > 1:
-                    logger.warning("Graph prediction is single-dim but target is multi-dim. Skipping graph loss or apply specific logic.")
-                else:
-                    min_dim = min(graph_pred.size(-1), targets.size(-1))
-                    if min_dim > 0:
-                        graph_pred_adjusted = graph_pred[:, :min_dim]
-                        targets_adjusted = targets[:, :min_dim]
-                        graph_loss = nn.MSELoss()(graph_pred_adjusted, targets_adjusted)
-                    else:
-                        logger.warning("Min dimension for graph loss is 0. Skipping graph loss.")
+
+            if energy_pred.size(-1) == targets.size(-1):
+                targets = torch.clamp(targets, -5, 5)
+                energy_loss = nn.MSELoss()(energy_pred, targets)
             else:
-                graph_loss = nn.MSELoss()(graph_pred, targets)
-        elif graph_pred.numel() == 0 and batch.y.numel() == 0:
-            pass
-        else:
-             logger.warning(f"Graph prediction or target is empty while the other is not. Pred empty: {graph_pred.numel()==0}, Target empty: {batch.y.numel()==0}. Skipping graph loss.")
+                logger.warning(f"SPICE energy prediction dim {energy_pred.size(-1)} mismatch with target dim {targets.size(-1)}. Skipping energy loss.")
 
-    return node_loss, graph_loss
+    return node_loss, graph_loss, energy_loss
 
 
-def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_weight, logger, lambda_weight=1000.0, task_type: str = "graph"):
+def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_weight, logger, lambda_weight=1000.0, lambda_energy_weight=1.0, task_type: str = "graph"):
     model.train()
     optimizer.zero_grad()
     
-    node_loss, graph_loss = compute_losses(model, batch, device, logger, lambda_weight, task_type=task_type)
+    node_loss, graph_loss, energy_loss = compute_losses(model, batch, device, logger, lambda_weight, task_type=task_type)
     
-    total_loss = loss_node_weight * lambda_weight * node_loss + loss_graph_weight * graph_loss
+    total_loss = (loss_node_weight * lambda_weight * node_loss) + \
+                 (loss_graph_weight * graph_loss) + \
+                 (loss_node_weight * lambda_energy_weight * energy_loss) # energy loss is also on node step
     
-    if total_loss > 0:
+    if torch.isfinite(total_loss) and total_loss > 0:
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+    elif not torch.isfinite(total_loss):
+        logger.warning(f"Non-finite loss detected ({total_loss}). Skipping step.")
     
     return {
         'total_loss': total_loss.item() if total_loss > 0 else 0.0,
         'node_loss': node_loss.item() if isinstance(node_loss, torch.Tensor) else node_loss,
         'graph_loss': graph_loss.item() if isinstance(graph_loss, torch.Tensor) else graph_loss,
+        'energy_loss': energy_loss.item() if isinstance(energy_loss, torch.Tensor) else energy_loss,
         'loss_node_weight': loss_node_weight,
         'loss_graph_weight': loss_graph_weight
     }
@@ -137,17 +157,30 @@ def save_checkpoint(model, optimizer, step, loss, checkpoint_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='Alternating training for DJMGNN')
-    parser.add_argument('--max_steps', type=int, default=10000, help='Maximum training steps')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
-    parser.add_argument('--lambda_weight', type=float, default=1000.0, help='Lambda weighting factor')
+    parser.add_argument('--max_steps', type=int, default=8000, help='Maximum training steps')
+    parser.add_argument('--batch_graph', type=int, default=8, help='Batch size for graph-level tasks')
+    parser.add_argument('--batch_node', type=int, default=4, help='Batch size for node-level tasks')
+    parser.add_argument('--lr', type=float, default=3e-5, help='Learning rate')
+    parser.add_argument('--loss_node_weight', type=float, default=1.0, help='Weight for the node-level loss component.')
+    parser.add_argument('--lambda_weight', type=float, default=1000.0, help='Lambda weighting factor for node loss')
+    parser.add_argument('--lambda_energy_weight', type=float, default=1.0, help='Lambda weighting factor for SPICE energy loss')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
     parser.add_argument('--save_every', type=int, default=1000, help='Save checkpoint every N steps')
+    parser.add_argument('--log_every', type=int, default=20, help='Log every N steps')
     parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
     parser.add_argument('--config_path', type=str, default='config/training_config.template.yaml', help='Path to training config YAML file')
+    parser.add_argument('--fresh_start', action='store_true', help='Start training from scratch, ignoring existing checkpoints.')
+    parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Specific checkpoint file to resume from.')
+    parser.add_argument('--ckpt', type=str, default=None, help='Alias for --resume_from_checkpoint.')
+    parser.add_argument('--graph_dataset', type=str, default='qm9', help='Dataset for graph-level tasks (e.g., "qm9", "pfas").')
+    parser.add_argument('--node_dataset', type=str, default='spice', help='Dataset for node-level tasks (e.g., "spice", "none").')
     args = parser.parse_args()
     
-    logger = setup_logging()
+    if args.ckpt:
+        args.resume_from_checkpoint = args.ckpt
+
+    logger = setup_logging() # Logging is set up here
+    # The first log messages will now include the one from setup_logging itself
     logger.info("Starting alternating training for DJMGNN")
     logger.info(f"Arguments: {vars(args)}")
 
@@ -156,7 +189,7 @@ def main():
             config = yaml.safe_load(f)
         logger.info(f"Loaded training configuration from {args.config_path}")
     except Exception as e:
-        logger.error(f"Error loading configuration file {args.config_path}: {e}", exc_info=True)
+        logger.error(f"Error loading configuration file {args.config_path}", exc_info=True)
         sys.exit(1)
     
     if args.device == 'auto':
@@ -165,59 +198,90 @@ def main():
         device = torch.device(args.device)
     logger.info(f"Using device: {device}")
     
-    try:
-        print("Loading datasets...")
+    # Set in_node_dim based on dataset
+    in_node_dim_cfg = 29
     
-        try:
-            qm9_dataset = get_dataset("qm9", split="train")
-            pfas_dataset = get_dataset("pfas", split="train")
-            ds_graph = torch.utils.data.ConcatDataset([qm9_dataset, pfas_dataset])
-            print(f"Loaded QM9 ({len(qm9_dataset)}) + PFAS ({len(pfas_dataset)}) datasets")
-        except Exception as e:
-            print(f"Could not load QM9 dataset: {e}")
-            print("Using only PFAS dataset for graph-level tasks")
-            ds_graph = get_dataset("pfas", split="train")
-        
-        graph_loader = GraphDataLoader(
-            ds_graph, 
-            batch_size=args.batch_size, 
-            shuffle=True,
-            num_workers=2
-        )
+    try:
+        transform_graph = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.graph_dataset)])
+        transform_node = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.node_dataset)])
 
-        ds_node = get_dataset("spice", split="train")
-        node_loader = GraphDataLoader(
-            ds_node, 
-            batch_size=args.batch_size, 
+        # Graph-level dataset
+        ds_graph = get_dataset(args.graph_dataset, root="data", transform=transform_graph)
+        graph_loader = GraphDataLoader(
+            ds_graph,
+            batch_size=args.batch_graph,
             shuffle=True,
-            num_workers=2
+            num_workers=4
         )
-        
         graph_cycle = create_cycle_iterator(graph_loader)
-        node_cycle = create_cycle_iterator(node_loader)
+        logger.info(f"Loaded {args.graph_dataset.upper()} dataset for graph-level tasks with {len(ds_graph)} samples.")
+
+        # Node-level dataset
+        node_cycle = None
+        if args.node_dataset.lower() != 'none':
+            try:
+                ds_node = get_dataset(args.node_dataset, root="data", split="train", transform=transform_node)
+                node_loader = GraphDataLoader(
+                    ds_node,
+                    batch_size=args.batch_node,
+                    shuffle=True,
+                    num_workers=4
+                )
+                node_cycle = create_cycle_iterator(node_loader)
+                logger.info(f"Loaded {args.node_dataset.upper()} dataset for node-level tasks with {len(ds_node)} samples.")
+            except Exception as e:
+                logger.warning(f"Could not load {args.node_dataset.upper()} dataset: {e}. Node-level tasks will be skipped.")
+        else:
+            logger.info("No node-level dataset specified. Training will be graph-only.")
         
         logger.info("Initializing DJMGNN model...")
 
         mgnn_config = config.get('mgnn', {})
-        in_node_dim_cfg = mgnn_config.get('in_node_dim', 1)
         graph_output_dims_cfg = mgnn_config.get('graph_output_dims', 19) 
         node_output_dims_cfg = mgnn_config.get('node_output_dims', 3)   
-        spice_graph_output_dims_cfg = mgnn_config.get('spice_graph_output_dims', 1)
+        energy_output_dims_cfg = mgnn_config.get('energy_output_dims', 1)
         hidden_dim_cfg = mgnn_config.get('hidden_channels', 128) 
-        n_blocks_cfg = mgnn_config.get('num_layers', 4) 
+        n_blocks_cfg = mgnn_config.get('num_layers', 4)
+        in_edge_dim_cfg = mgnn_config.get('in_edge_dim', 0)
 
         model = DJMGNN(
-            in_node_dim=in_node_dim_cfg, 
-            in_edge_dim=0,
-            node_output_dims=node_output_dims_cfg,     
-            graph_output_dims=graph_output_dims_cfg,   
-            spice_graph_output_dims=spice_graph_output_dims_cfg,
+            in_node_dim=in_node_dim_cfg,
+            in_edge_dim=in_edge_dim_cfg,
+            node_output_dims=node_output_dims_cfg,
+            graph_output_dims=graph_output_dims_cfg,
+            energy_output_dims=energy_output_dims_cfg,
             hidden_dim=hidden_dim_cfg,        
             n_blocks=n_blocks_cfg             
         )
         model = model.to(device)
         
         optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+        start_step = 0
+        if not args.fresh_start:
+            checkpoint_to_load = None
+            if args.resume_from_checkpoint:
+                if os.path.exists(args.resume_from_checkpoint):
+                    checkpoint_to_load = args.resume_from_checkpoint
+                else:
+                    logger.warning(f"Specified checkpoint {args.resume_from_checkpoint} not found. Attempting to load latest.")
+            
+            if checkpoint_to_load is None: # Fallback to latest if specific one not provided or not found
+                checkpoint_to_load = max(glob.glob(os.path.join(args.checkpoint_dir, '*.pt')), key=os.path.getctime, default=None)
+
+            if checkpoint_to_load:
+                logger.info(f"Resuming from checkpoint: {checkpoint_to_load}")
+                checkpoint = torch.load(checkpoint_to_load, map_location=device)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                # For fine-tuning, we load weights but start the step count from 0
+                # start_step = checkpoint.get('step', 0)
+                logger.info(f"Loaded model state from step {checkpoint.get('step', 0)} with loss {checkpoint.get('loss', 'N/A')}")
+            else:
+                logger.info("No checkpoint found. Starting from scratch.")
+        else:
+            logger.info("Starting fresh training as per --fresh_start flag.")
+
         
         logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
         
@@ -229,21 +293,25 @@ def main():
             'total_loss': 0.0,
             'node_loss': 0.0,
             'graph_loss': 0.0,
+            'energy_loss': 0.0,
             'loss_node_weight': 0,
             'loss_graph_weight': 0
         }
         
-        for step in range(args.max_steps):
-            if step % 2 == 0:
+        for step in range(start_step, args.max_steps):
+            # Determine which task to perform
+            if node_cycle and step % 2 != 0:
+                # Perform a node-level task
+                batch = next(node_cycle)
+                loss_node_weight = args.loss_node_weight
+                loss_graph_weight = 0
+                task_type = "node"
+            else:
+                # Perform a graph-level task
                 batch = next(graph_cycle)
                 loss_node_weight = 0
                 loss_graph_weight = 1
                 task_type = "graph"
-            else:
-                batch = next(node_cycle)
-                loss_node_weight = 1
-                loss_graph_weight = 1
-                task_type = "node"
             
             metrics = train_step(
                 model=model,
@@ -254,16 +322,20 @@ def main():
                 loss_graph_weight=loss_graph_weight,
                 logger=logger,
                 lambda_weight=args.lambda_weight,
+                lambda_energy_weight=args.lambda_energy_weight,
                 task_type=task_type
             )
             
-            if step % 100 == 0:
+            # Log the graph step and the subsequent node step when the graph step is a logging step
+            if step % args.log_every == 0 or \
+               (node_cycle and task_type == "node" and (step - 1) % args.log_every == .0):
                 elapsed_time = time.time() - start_time
                 logger.info(
                     f"Step {step:5d} | Task: {task_type:5s} | "
                     f"Total Loss: {metrics['total_loss']:.6f} | "
                     f"Node Loss: {metrics['node_loss']:.6f} | "
                     f"Graph Loss: {metrics['graph_loss']:.6f} | "
+                    f"Energy Loss: {metrics['energy_loss']:.6f} | "
                     f"Time: {elapsed_time:.1f}s"
                 )
             
@@ -273,14 +345,27 @@ def main():
                 )
                 logger.info(f"Saved checkpoint: {checkpoint_path}")
         
-        final_checkpoint = save_checkpoint(
-            model, optimizer, args.max_steps, metrics['total_loss'], args.checkpoint_dir
-        )
-        logger.info(f"Training completed. Final checkpoint: {final_checkpoint}")
-        
+        # This final_checkpoint save is important if max_steps is reached or if start_step >= max_steps
+        if args.max_steps > 0 and start_step < args.max_steps : # Avoid saving if no steps were run or if already past max_steps
+            final_checkpoint = save_checkpoint(
+                model, optimizer, args.max_steps, metrics.get('total_loss', 0.0), args.checkpoint_dir
+            )
+            logger.info(f"Training completed. Final checkpoint: {final_checkpoint}")
+        elif start_step >= args.max_steps:
+             logger.info(f"Training already completed or surpassed max_steps (start_step: {start_step}, max_steps: {args.max_steps}). No new checkpoint saved.")
+        else: # max_steps is 0 or negative
+            logger.info(f"Training completed (max_steps was {args.max_steps}, start_step was {start_step}). No new checkpoint saved beyond initial load if applicable.")
+
         total_time = time.time() - start_time
         logger.info(f"Total training time: {total_time:.2f} seconds")
         
+    except KeyboardInterrupt:
+        logger.warning("Training interrupted by user.")
+        if 'model' in locals() and 'optimizer' in locals() and 'step' in locals() and 'metrics' in locals():
+            final_checkpoint = save_checkpoint(
+                model, optimizer, step, metrics.get('total_loss', 0.0), args.checkpoint_dir
+            )
+            logger.info(f"Saved partial checkpoint: {final_checkpoint}")
     except Exception as e:
         logger.error(f"Training failed: {str(e)}", exc_info=True)
         raise

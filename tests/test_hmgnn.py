@@ -165,7 +165,7 @@ class TestCrossScaleAttention:
     def test_set_cluster_mappings(self, dummy_cluster_mappings):
         attn_scale_dims = [HIDDEN_DIM_HMGNN] * NUM_SCALES
         num_scales_val = len(attn_scale_dims)
-        attention = CrossScaleAttentionMH(n_scales=num_scales_val, hidden_dim=CROSS_ATTN_HIDDEN_DIM)
+        CrossScaleAttentionMH(n_scales=num_scales_val, hidden_dim=CROSS_ATTN_HIDDEN_DIM)
         # The set_cluster_mappings method does not exist on CrossScaleAttentionMH.
         # Cluster mappings are typically passed to the forward method or handled internally.
         # Commenting out for now; will need to investigate how mappings are used.
@@ -368,6 +368,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             n_blocks=self.N_BLOCKS_HMGNN,
             layers_per_block=self.LAYERS_PER_BLOCK_HMGNN,
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,
@@ -398,6 +400,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             n_blocks=self.N_BLOCKS_HMGNN,
             layers_per_block=self.LAYERS_PER_BLOCK_HMGNN,
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,
@@ -425,6 +429,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_ABSENT,
             cross_scale_exchange=False,
         )
@@ -439,6 +445,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=single_scale_dims,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             edge_attr_dims=single_edge_dims,
             cross_scale_exchange=False,
         )
@@ -458,6 +466,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,
             cross_scale_exchange=True,
         )
@@ -478,6 +488,8 @@ class TestHMGNN:
         model = HMGNN(
             scale_dims=SCALE_NODE_DIMS_HMGNN,
             hidden_dim=HIDDEN_DIM_HMGNN,
+            env_dim=0,  # Add env_dim parameter
+            env_mlp=False,  # Add env_mlp parameter
             n_blocks=self.N_BLOCKS_HMGNN,
             layers_per_block=self.LAYERS_PER_BLOCK_HMGNN,
             edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT,
@@ -509,9 +521,22 @@ class TestHMGNN:
         """
         Tests that the `create_hierarchical_mgnn` factory function returns an `HMGNN` instance with the correct number of scales.
         """
-        model = create_hierarchical_mgnn(
-            scale_dims=SCALE_NODE_DIMS_HMGNN, hidden_dim=HIDDEN_DIM_HMGNN, edge_attr_dims=SCALE_EDGE_ATTR_DIMS_PRESENT
-        )
+        model_config = {
+            "scale_dims": SCALE_NODE_DIMS_HMGNN,
+            "hidden_dim": HIDDEN_DIM_HMGNN,
+            "edge_attr_dims": SCALE_EDGE_ATTR_DIMS_PRESENT,
+            "node_out_dim": 1,  # Add default or test-specific value
+            "graph_out_dim": 1, # Add default or test-specific value
+            "n_blocks": 2,      # Add default or test-specific value
+            "layers_per_block": 2, # Add default or test-specific value
+            "jk_mode": "concat",    # Add default or test-specific value
+            "cross_scale_exchange": False, # Add default or test-specific value
+            "dropout": 0.0,      # Add default or test-specific value
+            "n_heads_cs": 4,     # Add default or test-specific value
+            "edge_dim_cs": 0,    # Add default or test-specific value
+            "pool_type": "add"   # Add default or test-specific value
+        }
+        model = create_hierarchical_mgnn(config=model_config)
         assert isinstance(model, HMGNN)
         assert len(model.scale_gnns) == NUM_SCALES
         # assert model.hidden_dim == HIDDEN_DIM_HMGNN # HMGNN class does not store hidden_dim as self.hidden_dim

@@ -1,0 +1,10 @@
+id: "ro_pa_v1"
+family: "flex_polymer"
+version: "1.0"
+description: "Reverse-osmosis thin-film composite polyamide."
+extends: "nf_polyamide_v1" # inherit build code; overrides below
+default_build:
+  repeat_units: [6, 6, 3]
+  target_density_g_cm3: 1.3
+references:
+  - doi: 10.1038/s41467-019-08616-4

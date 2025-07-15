@@ -192,7 +192,7 @@ def analyze_functional_groups(mol_file: str) -> None:
             print("  No other functional groups found")
 
     except Exception as e:
-        print(f"Error analyzing functional groups: {e}")
+        print(f"Error analyzing functional groups")
 
 
 def main():
@@ -232,12 +232,12 @@ def main():
     )
 
     # Hierarchical graph command
-    hierarchical_parser = subparsers.add_parser(
+    subparsers.add_parser(
         "hierarchical", parents=[graph_parser], help="Generate hierarchical graphs"
     )
 
     # Analyze command
-    analyze_parser = subparsers.add_parser("analyze", parents=[common_parser], help="Analyze functional groups")
+    subparsers.add_parser("analyze", parents=[common_parser], help="Analyze functional groups")
 
     args = parser.parse_args()
 

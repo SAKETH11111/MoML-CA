@@ -6,6 +6,7 @@ This script:
 1. Uses pytest to discover and run all test modules in the tests directory.
 2. Supports running specific test modules or all tests.
 3. Supports pytest's verbosity options.
+4. Provides specific test categories and organization.
 """
 
 import sys
@@ -13,6 +14,7 @@ import argparse
 import logging
 import pytest
 import os
+from pathlib import Path
 
 # Setup logging (pytest handles its own verbose output, this is for the script itself)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -25,10 +27,63 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# Define test categories
+TEST_CATEGORIES = {
+    "all": "Run all tests",
+    "md": "Run molecular dynamics tests",
+    "graph": "Run graph-related tests",
+    "ml": "Run machine learning tests",
+    "data": "Run data processing tests"
+}
+
+def get_test_files_by_category():
+    """Get test files organized by category."""
+    tests_dir = Path(__file__).parent
+    test_files = {
+        "md": ["test_molecular_dynamics.py"],
+        "graph": [
+            "test_simple_graph_structure.py",
+            "test_molecular_graph_structure.py",
+            "test_molecular_graph_processor.py",
+            "test_molecular_graph_generation.py",
+            "test_hierarchical_graph_coarsening.py"
+        ],
+        "ml": [
+            "test_mgnn_metrics.py",
+            "test_mgnn_predictor.py",
+            "test_mgnn_trainer.py",
+            "test_hmgnn.py",
+            "test_mgnn_callbacks.py",
+            "test_djmgnn.py"
+        ],
+        "data": [
+            "test_datasets.py",
+            "test_dataset_loader_and_splitter.py",
+            "test_data_ingestion_and_processing.py",
+            "test_qm9_npz_loader.py",
+            "test_pfas_feature_extraction.py"
+        ]
+    }
+    
+    # Convert to full paths
+    return {
+        category: [str(tests_dir / file) for file in files]
+        for category, files in test_files.items()
+    }
 
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Run tests using pytest.")
+    
+    # Add category argument
+    parser.add_argument(
+        "--category",
+        "-c",
+        choices=list(TEST_CATEGORIES.keys()),
+        default="all",
+        help="Test category to run. Default is 'all'."
+    )
+    
     parser.add_argument(
         "modules",
         nargs="*",
@@ -48,34 +103,35 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+def get_test_files(args):
+    """Get the list of test files to run based on arguments."""
+    if args.modules:
+        return args.modules
+    
+    if args.category == "all":
+        return None  # Let pytest discover all tests
+    
+    test_files_by_category = get_test_files_by_category()
+    return test_files_by_category.get(args.category, [])
 
 if __name__ == "__main__":
     args = parse_arguments()
-
     pytest_args = []
 
     # Handle verbosity
     if args.verbose > 0:
         pytest_args.append("-" + "v" * args.verbose)
 
-    # Handle specific modules/paths to test
-    if args.modules:
-        # Pytest expects paths to files or directories.
-        # The old script took module names like 'test_datasets'.
-        # We'll assume the user will now provide paths like 'tests/test_datasets.py'.
-        pytest_args.extend(args.modules)
-    else:
-        # If no modules are specified, pytest will typically search the current
-        # directory or a configured testpaths directory.
-        # We can explicitly tell it to run tests in the 'tests' directory.
-        # This assumes the script is run from the project root or that 'tests' is discoverable.
-        # If run_all_tests.py is in tests/, then pytest will discover from tests/ by default.
-        pass  # Pytest default behavior is usually fine here.
-
+    # Get test files to run
+    test_files = get_test_files(args)
+    if test_files:
+        pytest_args.extend(test_files)
+    
     # Add any extra pytest arguments
     if args.pytest_args:
         pytest_args.extend(args.pytest_args)
 
+    logger.info(f"Running tests for category: {args.category}")
     logger.info(f"Running pytest with arguments: {pytest_args}")
 
     # Ensure the 'tests' directory is the target if no specific modules are given

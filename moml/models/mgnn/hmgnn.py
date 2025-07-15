@@ -1,3 +1,4 @@
+
 """
 hmgnn.py  – Hierarchical Molecular Graph Neural Network (HMGNN)
 
@@ -10,8 +11,6 @@ DenseGNNBlock and JKAggregator are reused from `djmgnn.py`.
 from __future__ import annotations
 import math
 import logging
-
-logger = logging.getLogger(__name__)
 from typing import List, Optional, Dict, Any, Tuple
 
 import torch
@@ -22,6 +21,7 @@ from torch_scatter import scatter_add
 
 from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator  # adjust the path if needed
 
+logger = logging.getLogger(__name__)
 
 #  GPU scatter / gather helpers
 def aggregate_fine_to_coarse(feat: torch.Tensor, fine2coarse: torch.Tensor, coarse_count: torch.Tensor) -> torch.Tensor:
@@ -211,7 +211,9 @@ class HMGNN(nn.Module):
         pool_type: str = "mean",
     ):
         super().__init__()
+        self.env_dim = env_dim  # Store env_dim
         self.S = len(scale_dims)
+        self.dropout = dropout  # Store dropout
         self.hidden_dim = hidden_dim  # Store hidden_dim
         self.node_out_dim = node_out_dim  # Store node_out_dim
         self.graph_out_dim = graph_out_dim  # Store graph_out_dim
@@ -362,7 +364,7 @@ class HMGNN(nn.Module):
                 concatenated_graph_embeds = torch.cat(graph_embeds, dim=1)
                 combined_graph_pred = self.combined_graph_head(concatenated_graph_embeds)
             except RuntimeError as e:
-                logger.error(f"HMGNN: Error during torch.cat(graph_embeds): {e}")
+                logger.error(f"HMGNN: Error during torch.cat(graph_embeds)")
                 logger.error(f"Shapes of graph_embeds: {[ge.shape for ge in graph_embeds]}")
                 # Fallback or re-raise, for now, let's create a dummy output to avoid crashing tests completely
                 # This indicates a deeper issue if shapes are still mismatched.
@@ -373,7 +375,8 @@ class HMGNN(nn.Module):
                     -1
                 ].out_features  # Get out_features of last linear layer
                 combined_graph_pred = torch.zeros(
-                    (bs, out_dim_combined_graph_head), device=graph_embeds[0].device if graph_embeds else "cpu"
+                    bs, out_dim_combined_graph_head,
+                    device=graph_embeds[0].device if graph_embeds else torch.device("cpu")
                 )
 
         output_dict["node_pred"] = node_preds[0] if node_preds else None  # atom-level default (finest scale)
@@ -402,36 +405,47 @@ class HMGNN(nn.Module):
 
 
 #  Factory convenience
-def create_hierarchical_mgnn(
-    scale_dims: List[int],
-    hidden_dim: int = 64,
-    n_blocks: int = 2,
-    layers_per_block: int = 3,
-    edge_attr_dims: Optional[List[int]] = None,
-    jk_mode: str = "attention",
-    node_out_dim: int = 1,
-    graph_out_dim: int = 1,
-    cross_scale_exchange: bool = True,
-    dropout: float = 0.2,
-    n_heads_cs: int = 4,
-    edge_dim_cs: int = 0,
-    pool_type: str = "mean",
-) -> HMGNN:
-    """Easy constructor mirroring DJMGNN.create_* style."""
+def create_hierarchical_mgnn(config: Dict) -> HMGNN:
+    """Create a hierarchical MGNN model from a configuration dictionary.
+    
+    Args:
+        config: Configuration dictionary containing model parameters:
+            - scale_dims: List of input dimensions for each scale
+            - hidden_dim: Hidden dimension size
+            - edge_attr_dims: Optional list of edge attribute dimensions for each scale
+            - node_out_dim: Output dimension for node predictions
+            - graph_out_dim: Output dimension for graph predictions
+            - n_blocks: Number of GNN blocks per scale
+            - layers_per_block: Number of layers per block
+            - jk_mode: Jumping knowledge mode
+            - cross_scale_exchange: Whether to use cross-scale attention
+            - dropout: Dropout rate
+            - n_heads_cs: Number of attention heads for cross-scale attention
+            - edge_dim_cs: Edge dimension for cross-scale attention
+            - pool_type: Pooling type for graph-level predictions
+    
+    Returns:
+        HMGNN instance
+    """
+    # If edge_attr_dims is None, create a list of zeros with same length as scale_dims
+    edge_attr_dims = config.get("edge_attr_dims")
+    if edge_attr_dims is None:
+        edge_attr_dims = [0] * len(config["scale_dims"])
+    
     return HMGNN(
-        scale_dims=scale_dims,
-        hidden_dim=hidden_dim,
+        scale_dims=config["scale_dims"],
+        hidden_dim=config["hidden_dim"],
         env_dim=0,
         env_mlp=False,
-        n_blocks=n_blocks,
-        layers_per_block=layers_per_block,
+        n_blocks=config["n_blocks"],
+        layers_per_block=config["layers_per_block"],
         edge_attr_dims=edge_attr_dims,
-        jk_mode=jk_mode,
-        node_out_dim=node_out_dim,
-        graph_out_dim=graph_out_dim,
-        cross_scale_exchange=cross_scale_exchange,
-        dropout=dropout,
-        n_heads_cs=n_heads_cs,
-        edge_dim_cs=edge_dim_cs,
-        pool_type=pool_type,
+        jk_mode=config["jk_mode"],
+        node_out_dim=config["node_out_dim"],
+        graph_out_dim=config["graph_out_dim"],
+        cross_scale_exchange=config["cross_scale_exchange"],
+        dropout=config["dropout"],
+        n_heads_cs=config["n_heads_cs"],
+        edge_dim_cs=config["edge_dim_cs"],
+        pool_type=config["pool_type"],
     )

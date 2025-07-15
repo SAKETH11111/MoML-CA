@@ -17,17 +17,13 @@ sys.path.append(project_root)
 
 # Try to import RDKit
 try:
-    from rdkit import Chem
-    from rdkit.Chem import AllChem, Descriptors
 
     print("RDKit import successful!")
 except ImportError:
     pytest.skip("RDKit not installed, skipping SMILES validation tests", allow_module_level=True)
 
-# Import from consolidated moml module
 from moml.core import calculate_molecular_descriptors
 from moml.utils import validate_smiles
-
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("test_smiles_validation")

@@ -1,0 +1,12 @@
+id: "ix_sdb_v1"
+family: "flex_polymer"
+version: "1.0"
+description: "Styrene–divinylbenzene strongly basic quaternary amine ion-exchange resin."
+default_build:
+  bead_count: 1
+  bead_radius_nm: 2.5
+  crosslink_density: 2.0 # mol %
+  freeze_atoms: false
+required_env_vec: ["pH", "IonicStrength"]
+references:
+  - doi: 10.1016/j.watres.2022.118973

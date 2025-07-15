@@ -13,6 +13,8 @@ import pandas as pd
 import logging
 import tempfile
 import pytest
+from moml.core import calculate_molecular_descriptors
+from moml.data import process_dataset, save_processed_molecules
 
 # Add project root to path to enable imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -21,15 +23,10 @@ sys.path.append(project_root)
 # Try to import RDKit
 try:
     from rdkit import Chem
-    from rdkit.Chem import AllChem, Descriptors
-
-    print("RDKit import successful!")
 except ImportError:
     pytest.skip("RDKit not installed, skipping dataset processing tests", allow_module_level=True)
 
 # Import from consolidated moml modules
-from moml.core import calculate_molecular_descriptors
-from moml.data import process_dataset, save_processed_molecules
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -92,7 +89,6 @@ def run_tests():
     # Create temporary directory for test files
     temp_dir = tempfile.TemporaryDirectory()
     test_csv = os.path.join(temp_dir.name, "mock_pfas_data.csv")
-    processed_csv = os.path.join(temp_dir.name, "processed_pfas_data.csv")
 
     # Test 1: Create mock dataset
     print("Test 1: Creating mock dataset")
@@ -204,7 +200,7 @@ class TestDatasetProcessing:
     def mock_dataset_file(self, tmp_path):
         """Create a temporary mock dataset file."""
         test_csv = tmp_path / "mock_pfas_data.csv"
-        df = create_mock_dataset(test_csv)
+        create_mock_dataset(test_csv)
         return test_csv
 
     def test_process_dataset(self, mock_dataset_file):
@@ -216,7 +212,6 @@ class TestDatasetProcessing:
         assert "rdkit_mol" in processed_df.columns
 
         # Dynamically compute expected valid SMILES
-        from rdkit import Chem
         df_orig = pd.read_csv(mock_dataset_file)
         expected_valid = df_orig["smiles"].apply(lambda s: Chem.MolFromSmiles(s) is not None).sum()
         assert processed_df["is_valid_smiles"].sum() == expected_valid

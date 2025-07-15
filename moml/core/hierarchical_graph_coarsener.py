@@ -27,7 +27,7 @@ import numpy as np
 
 from moml.core.molecular_feature_extraction import FunctionalGroupDetector, MolecularFeatureExtractor
 from moml.core import create_graph_processor
-from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output
+from moml.simulation.qm.parser.orca_parser import parse_orca_output
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -678,6 +678,6 @@ class GraphCoarsener:
                 print(f"Created hierarchical graphs for {base_name}")
 
             except Exception as e:
-                print(f"Error creating hierarchical graphs for {base_name}: {e}")
+                print(f"Error creating hierarchical graphs for {base_name}")
 
         return all_graph_paths

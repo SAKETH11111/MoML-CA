@@ -22,7 +22,7 @@ import subprocess
 import argparse
 import logging
 import json
-from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output # Corrected import
+from moml.simulation.qm.parser.orca_parser import parse_orca_output 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ def main():
             json.dump(parsed_data, f, indent=2)
         logger.info(f"Successfully wrote parsed data to {json_file}")
     except IOError as e:
-        logger.error(f"Failed to write JSON file {json_file}: {e}")
+        logger.error(f"Failed to write JSON file {json_file}")
         return
 
     # 2. Convert JSON to QM9-style NPZ
@@ -67,10 +67,10 @@ def main():
         npz_file,
     ]
     try:
-        result_process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
         logger.info(f"Successfully converted JSON to NPZ: {npz_file}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error converting JSON to NPZ: {e}")
+        logger.error(f"Error converting JSON to NPZ")
         return
 
     logger.info("Successfully completed parsing and conversion.")

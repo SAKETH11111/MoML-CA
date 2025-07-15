@@ -312,7 +312,6 @@ def generate_molecule_grid(
 
     # Calculate grid dimensions
     n_mols = len(prepared_mols)
-    n_rows = (n_mols + n_cols - 1) // n_cols
 
     # Create a grid image
     img = Draw.MolsToGridImage(prepared_mols, molsPerRow=n_cols, subImgSize=size, legends=labels, useSVG=False)
@@ -329,35 +328,31 @@ def save_molecule_grid(
     n_cols: int = 4,
     title: Optional[str] = None,
 ) -> str:
-    """Save a grid of molecule images to file.
+    """Save a grid of molecular images to a file.
 
     Args:
-        mols: List of RDKit molecule objects
-        output_path: Path to save the image
-        labels: Optional list of labels for each molecule
-        size: Size of each molecule image (width, height)
-        n_cols: Number of columns in the grid
-        title: Optional title for the entire grid
+        mols (List[Chem.Mol]): A list of RDKit molecule objects to display.
+        output_path (str): The path to save the image file.
+        labels (Optional[List[str]]): Optional list of labels for each molecule.
+        size (Tuple[int, int]): The size (width, height) in pixels for each molecule image.
+        n_cols (int): The number of columns in the grid.
+        title (Optional[str]): An optional title for the entire grid.
 
     Returns:
-        Path to the saved image
+        str: The path to the saved image file.
     """
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    # Generate the grid
     grid_img = generate_molecule_grid(mols, labels, size, n_cols)
 
     # Save with matplotlib for better formatting
-    fig = plt.figure(figsize=(grid_img.shape[1] / 100, grid_img.shape[0] / 100), dpi=100)
+    plt.figure(figsize=(grid_img.shape[1] / 100, grid_img.shape[0] / 100), dpi=100)
 
     if title:
-        plt.title(title, fontsize=14)
+        plt.title(title, fontsize=16)
 
     plt.imshow(grid_img)
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    plt.axis("off")  # Remove axes
+
+    plt.savefig(output_path, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
     return output_path
@@ -689,7 +684,7 @@ def visualize_hierarchical_graphs(hierarchical_graphs: Dict[str, str], output_di
             print_graph_statistics(graph)
 
         except Exception as e:
-            logger.error(f"Error visualizing {level} graph: {e}")
+            logger.error(f"Error visualizing {level} graph")
 
 
 # ============================================================================

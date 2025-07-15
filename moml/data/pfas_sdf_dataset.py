@@ -1,19 +1,18 @@
 import os
 import glob
-from itertools import repeat
 from typing import Callable, List, Optional
 import torch
 import numpy as np
-from torch_geometric.data import Dataset, Data
+from torch_geometric.data import InMemoryDataset, Data
 from rdkit import Chem
-from rdkit.Chem import Descriptors, rdMolDescriptors
+from rdkit.Chem import Descriptors, Crippen # Added Crippen
 
 # Suppress RDKit warnings
 from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.*')
 
 
-class PFASSDFDataset(Dataset):
+class PFASSDFDataset(InMemoryDataset):
     """
     Dataset for PFAS molecules from SDF files.
     Computes 19-dimensional molecular descriptors as graph-level targets.
@@ -29,6 +28,20 @@ class PFASSDFDataset(Dataset):
     ):
         self.split = split
         super().__init__(root, transform, pre_transform, pre_filter)
+        
+        # Explicitly load data if processed file exists
+        if os.path.exists(self.processed_paths[0]):
+            try:
+                loaded_data = torch.load(self.processed_paths[0])
+                if loaded_data[0] is not None:
+                    self.data, self.slices = loaded_data
+                else:
+                    self.data, self.slices = None, None
+            except Exception as e:
+                print(f"Could not load processed PFAS data from {self.processed_paths[0]}")
+                self.data, self.slices = None, None
+        else:
+            self.data, self.slices = None, None
         
     @property
     def raw_file_names(self) -> List[str]:
@@ -68,7 +81,7 @@ class PFASSDFDataset(Dataset):
                         data_list.append(data)
                         
             except Exception as e:
-                print(f"Error processing {sdf_file}: {e}")
+                print(f"Error processing {sdf_file}")
                 continue
         
         print(f"Successfully processed {len(data_list)} PFAS molecules")
@@ -81,9 +94,13 @@ class PFASSDFDataset(Dataset):
             data_list = [self.pre_transform(data) for data in data_list]
         
         # Save processed data
-        split_suffix = f"_{self.split}" if self.split else ""
-        processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        torch.save(self.collate(data_list), processed_path)
+        if not data_list:
+            # Handle empty dataset
+            torch.save((None, None), self.processed_paths[0])
+            return
+
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
     
     def _mol_to_data(self, mol: Chem.Mol) -> Optional[Data]:
         """Convert RDKit molecule to PyTorch Geometric Data object."""
@@ -96,7 +113,7 @@ class PFASSDFDataset(Dataset):
                 return None
             
             # Node features: atomic numbers
-            x = torch.tensor([atom.GetAtomicNum() for atom in atoms], dtype=torch.long)
+            z = torch.tensor([atom.GetAtomicNum() for atom in atoms], dtype=torch.long)
             
             # Node positions (3D coordinates)
             try:
@@ -131,10 +148,10 @@ class PFASSDFDataset(Dataset):
             # Compute 19-dimensional molecular descriptors as targets
             y = self._compute_molecular_descriptors(mol)
             
-            return Data(x=x, pos=pos, edge_index=edge_index, y=y)
+            return Data(z=z, pos=pos, edge_index=edge_index, y=y)
             
         except Exception as e:
-            print(f"Error converting molecule to data: {e}")
+            print(f"Error converting molecule to data")
             return None
     
     def _compute_molecular_descriptors(self, mol: Chem.Mol) -> torch.Tensor:
@@ -153,7 +170,7 @@ class PFASSDFDataset(Dataset):
                 Descriptors.NumSaturatedRings(mol),        # Saturated rings
                 mol.GetNumHeavyAtoms(),                    # Number of heavy atoms (instead of FractionCsp3)
                 Descriptors.BalabanJ(mol),                 # Balaban J index
-                rdMolDescriptors.BertzCT(mol),                  # Bertz complexity
+                Descriptors.BertzCT(mol),                  # Bertz complexity
                 Descriptors.HallKierAlpha(mol),            # Hall-Kier alpha
                 Descriptors.Kappa1(mol),                   # Kappa shape index 1
                 Descriptors.Kappa2(mol),                   # Kappa shape index 2
@@ -170,33 +187,7 @@ class PFASSDFDataset(Dataset):
             return torch.tensor(descriptors, dtype=torch.float)
             
         except Exception as e:
-            print(f"Error computing molecular descriptors: {e}")
+            print(f"Error computing molecular descriptors")
             # Return zeros if computation fails
             return torch.zeros(19, dtype=torch.float)
     
-    def len(self) -> int:
-        """Return the number of samples in the dataset."""
-        # Load processed data to get length
-        split_suffix = f"_{self.split}" if self.split else ""
-        processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        if not hasattr(self, '_data_list_len'):
-            # Load only if not already loaded or length not cached
-            if not hasattr(self, 'data') or self.data is None:
-                self.data, self.slices = torch.load(processed_path, weights_only=False)
-            self._data_list_len = self.slices[list(self.slices.keys())[0]].size(0) -1 if self.slices else 0
-        return self._data_list_len
-
-    def get(self, idx: int) -> Data:
-        """Get a single sample from the dataset."""
-        split_suffix = f"_{self.split}" if self.split else ""
-        processed_path = os.path.join(self.processed_dir, f"pfas_sdf{split_suffix}.pt")
-        if not hasattr(self, 'data') or self.data is None:
-             self.data, self.slices = torch.load(processed_path, weights_only=False)
-        
-        data = Data()
-        for key in self.data.keys:
-            item, slices = self.data[key], self.slices[key]
-            s = list(repeat(slice(None), item.dim()))
-            s[self.data.__cat_dim__(key, item)] = slice(slices[idx], slices[idx+1])
-            data[key] = item[s]
-        return data

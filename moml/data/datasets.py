@@ -12,14 +12,55 @@ from torch.utils.data import Dataset
 from typing import Dict, List, Optional, Any, Callable
 import glob
 from tqdm import tqdm
-from rdkit import Chem
-from rdkit.Chem import AllChem
 import logging
-from moml.core import create_graph_processor
-from moml.core.molecular_graph_processor import MolecularGraphProcessor
+
+# Conditional imports for optional dependencies
+try:
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    HAS_RDKIT = True
+except ImportError:
+    HAS_RDKIT = False
+    # Create dummy Chem module
+    class Chem:
+        @staticmethod
+        def MolFromSmiles(smiles):
+            return None
+        
+        @staticmethod
+        def MolToSmiles(mol):
+            return ""
+    
+    class AllChem:
+        @staticmethod
+        def EmbedMolecule(mol):
+            return -1
+
+try:
+    from moml.core import create_graph_processor
+    from moml.core.molecular_graph_processor import MolecularGraphProcessor
+    HAS_GRAPH_PROCESSOR = True
+except ImportError:
+    HAS_GRAPH_PROCESSOR = False
+    def create_graph_processor(*args, **kwargs):
+        raise ImportError("Graph processor requires additional dependencies")
+    
+    class MolecularGraphProcessor:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("MolecularGraphProcessor requires additional dependencies")
 import json
 from packaging import version
-from torch_geometric.data import Data
+
+try:
+    from torch_geometric.data import Data
+    HAS_TORCH_GEOMETRIC = True
+except ImportError:
+    HAS_TORCH_GEOMETRIC = False
+    # Create dummy Data class
+    class Data:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +175,7 @@ class MolecularGraphDataset(Dataset):
                     logger.error(str(fnf_error))  # Logs "Molecule file not found: <path>"
                     # graph remains None
                 except Exception as e:
-                    logger.error(f"Unexpected error processing file {file_path} before transform: {e}")
+                    logger.error(f"Unexpected error processing file {file_path} before transform")
                     # graph remains None
 
                 # Apply transform if graph exists and transform is defined
@@ -232,7 +273,7 @@ class HierarchicalGraphDataset(Dataset):
                             logger.error(f"JSON at {json_path} is not a dict, cannot create graph.")
                             graphs[level] = None
                     except Exception as e:
-                        logger.error(f"Error loading graph from JSON {json_path}: {e}")
+                        logger.error(f"Error loading graph from JSON {json_path}")
                         graphs[level] = None
 
         # Add label if available
@@ -358,7 +399,7 @@ class PFASDataset(Dataset):
                     successfully_processed_original_indices.append(original_df_idx)
                 except Exception as e:
                     logger.error(
-                        f"Failed to process molecule (original index {original_df_idx}, SMILES: {self.smiles[original_df_idx]}) to graph: {e}"
+                        f"Failed to process molecule (original index {original_df_idx}, SMILES: {self.smiles[original_df_idx]}) to graph"
                     )
 
             self.graphs = processed_graphs

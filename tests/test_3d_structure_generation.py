@@ -11,17 +11,18 @@ import sys
 import pytest
 import logging
 import tempfile
+import numpy as np
+from pathlib import Path
 
 try:
     from rdkit import Chem
-    from rdkit.Chem import AllChem, Descriptors, Draw
 
     print("RDKit import successful!")
 except ImportError:
     pytest.skip("RDKit not installed, skipping 3D structure generation tests", allow_module_level=True)
 
 # Import the function from the original module
-from moml.simulation.quantum_mechanics.parser.orca_parser import smiles_to_3d_structure
+from moml.simulation.qm.parser.orca_parser import smiles_to_3d_structure
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

@@ -11,13 +11,43 @@ import json
 import torch
 import logging
 import glob
-from torch_geometric.data import Data, Batch
-from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors
-from rdkit.Chem import Lipinski
-from rdkit.Chem import QED
 from typing import Dict, List, Tuple, Optional, Union, Any
 import numpy as np
+
+# Conditional imports for optional dependencies
+try:
+    from torch_geometric.data import Data, Batch
+    HAS_TORCH_GEOMETRIC = True
+except ImportError:
+    HAS_TORCH_GEOMETRIC = False
+    # Create dummy classes for when torch_geometric is not available
+    class Data:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+    
+    class Batch:
+        @staticmethod
+        def from_data_list(data_list):
+            return data_list
+
+try:
+    from rdkit import Chem
+    from rdkit.Chem import AllChem, Descriptors
+    from rdkit.Chem import Lipinski
+    from rdkit.Chem import QED
+    HAS_RDKIT = True
+except ImportError:
+    HAS_RDKIT = False
+    # Create dummy Chem module for when rdkit is not available
+    class Chem:
+        @staticmethod
+        def MolFromSmiles(smiles):
+            return None
+        
+        @staticmethod
+        def MolToSmiles(mol):
+            return ""
 import concurrent.futures
 
 
@@ -28,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 
 # Top-level helper function for pickling in multiprocessing
-def _process_single_mol_file_for_batch(args: Tuple[str, Optional[Dict], str]) -> Optional[str]:
+def _process_single_mol_file_for_batch(args: Tuple[str, Optional[Dict[str, Any]], str]) -> Optional[str]:
     mol_file_path, config_dict, output_dir_for_pt = args
     try:
         graph_data = mol_file_to_graph(mol_file_path, config=config_dict)
@@ -41,7 +71,7 @@ def _process_single_mol_file_for_batch(args: Tuple[str, Optional[Dict], str]) ->
             logger.error(f"Graph generation failed for {mol_file_path}, not saving .pt file.")
             return None
     except Exception as e:
-        logger.error(f"Error processing file {mol_file_path} in _process_single_mol_file_for_batch: {e}")
+        logger.error(f"Error processing file {mol_file_path} in _process_single_mol_file_for_batch")
         return None
 
 
@@ -107,6 +137,9 @@ class MolecularGraphProcessor:
     }
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        if not HAS_RDKIT:
+            raise ImportError("RDKit is required for MolecularGraphProcessor. Please install rdkit.")
+        
         self.config = config or {}
         self.use_partial_charges = self.config.get("use_partial_charges", True)
         self.use_3d_coords = self.config.get("use_3d_coords", True)
@@ -197,7 +230,7 @@ class MolecularGraphProcessor:
         partial_charge_val: Optional[float] = None,
         distance_features_map: Optional[Dict[int, Dict[str, float]]] = None,
         homo_lumo_contrib_val: Optional[List[float]] = None,
-    ) -> List[float]:
+    ) -> List[Union[int, float]]:
         features = []
         atom_idx = atom.GetIdx()
         is_f_atom = atom.GetAtomicNum() == 9
@@ -271,7 +304,7 @@ class MolecularGraphProcessor:
 
     def _get_bond_features(
         self, bond: Chem.Bond, bond_lengths_map: Optional[Dict[Tuple[int, int], float]] = None
-    ) -> List[float]:
+    ) -> List[Union[int, float]]:
         features = []
         begin_atom, end_atom = bond.GetBeginAtom(), bond.GetEndAtom()
         is_cf_bond_val = (begin_atom.GetAtomicNum() == 6 and end_atom.GetAtomicNum() == 9) or (
@@ -340,7 +373,7 @@ class MolecularGraphProcessor:
             # or if AddHs failed to change atom count when it should have.
             if (
                 mol_with_hs_attempt.GetNumAtoms() > initial_atom_count
-                or (initial_atom_count > 0 and Descriptors.HeavyAtomCount(mol_processed) < initial_atom_count)
+                or (initial_atom_count > 0 and Descriptors.HeavyAtomCount(mol_processed) < initial_atom_count) # type: ignore
                 or (initial_atom_count == 0 and mol_with_hs_attempt.GetNumAtoms() > 0)
             ):  # handles H2, or if it was already all H
                 mol_processed = mol_with_hs_attempt
@@ -359,8 +392,8 @@ class MolecularGraphProcessor:
         if self.use_3d_coords and mol_processed.GetNumConformers() == 0:
             try:
                 logger.info(f"Attempting to generate 3D coordinates for molecule: {Chem.MolToSmiles(mol_processed)}")
-                AllChem.EmbedMolecule(mol_processed, AllChem.ETKDGv3())
-                AllChem.UFFOptimizeMolecule(mol_processed)
+                AllChem.EmbedMolecule(mol_processed, AllChem.ETKDGv3()) # type: ignore
+                AllChem.UFFOptimizeMolecule(mol_processed) # type: ignore
                 if mol_processed.GetNumConformers() == 0:
                     logger.warning(
                         f"Failed to generate 3D coordinates for {Chem.MolToSmiles(mol_processed)}. Creating dummy 2D-like conformer."
@@ -482,7 +515,7 @@ class MolecularGraphProcessor:
             # mol_to_graph will handle AddHs internally with mol_processed
             return self.mol_to_graph(mol, additional_features)
         except Exception as e:
-            logger.error(f"Error processing molecule file {file_path}: {e}")
+            logger.error(f"Error processing molecule file {file_path}")
             return None
 
     def smiles_to_graph(
@@ -496,7 +529,7 @@ class MolecularGraphProcessor:
             # mol_to_graph will handle AddHs internally with mol_processed
             return self.mol_to_graph(mol, additional_features)
         except Exception as e:
-            logger.error(f"Error converting SMILES '{smiles}' to graph: {e}")
+            logger.error(f"Error converting SMILES '{smiles}' to graph")
             return None
 
     def _get_adjacency_matrix(self, mol: Chem.Mol) -> np.ndarray:
@@ -544,13 +577,13 @@ class MolecularGraphProcessor:
 
     def _get_molecule_descriptors(self, mol: Chem.Mol) -> Dict[str, float]:
         return {
-            "mol_weight": Descriptors.MolWt(mol),
-            "logp": Descriptors.MolLogP(mol),
-            "num_h_acceptors": Lipinski.NumHAcceptors(mol),
-            "num_h_donors": Lipinski.NumHDonors(mol),
-            "num_rotatable_bonds": Lipinski.NumRotatableBonds(mol),
-            "tpsa": Descriptors.TPSA(mol),
-            "qed": QED.qed(mol),
+            "mol_weight": Descriptors.MolWt(mol), # type: ignore
+            "logp": Descriptors.MolLogP(mol), # type: ignore
+            "num_h_acceptors": Lipinski.NumHAcceptors(mol), # type: ignore
+            "num_h_donors": Lipinski.NumHDonors(mol), # type: ignore
+            "num_rotatable_bonds": Lipinski.NumRotatableBonds(mol), # type: ignore
+            "tpsa": Descriptors.TPSA(mol), # type: ignore
+            "qed": QED.qed(mol), # type: ignore
         }
 
     def file_to_json_graph(
@@ -588,11 +621,11 @@ class MolecularGraphProcessor:
                 json.dump(json_data, f, indent=4)
             return output_path
         except Exception as e:
-            logger.error(f"Error processing molecule file {file_path} to JSON: {e}")
+            logger.error(f"Error processing molecule file {file_path} to JSON")
             return None
 
 
-def create_graph_processor(config: Dict[str, Any] = None) -> MolecularGraphProcessor:
+def create_graph_processor(config: Optional[Dict[str, Any]] = None) -> MolecularGraphProcessor:
     return MolecularGraphProcessor(config=config)
 
 
@@ -607,7 +640,7 @@ def mol_file_to_graph(
     except FileNotFoundError:
         return None
     except Exception as e:
-        logger.error(f"Failed to convert {mol_file_path} to graph: {e}")
+        logger.error(f"Failed to convert {mol_file_path} to graph")
         return None
 
 
@@ -627,14 +660,14 @@ def collate_graphs(graphs: List[Data]) -> Data:
     if not graphs:
         return Batch()
 
-    class DummyDataset(torch.utils.data.Dataset):
-        def __init__(self, data_list):
+    class DummyDataset(torch.utils.data.Dataset[Data]):
+        def __init__(self, data_list: List[Data]):
             self.data_list = data_list
 
-        def __len__(self):
+        def __len__(self) -> int:
             return len(self.data_list)
 
-        def __getitem__(self, idx):
+        def __getitem__(self, idx: int) -> Data:
             return self.data_list[idx]
 
     # Ensure collate_fn is compatible if PyG version changes behavior
@@ -728,7 +761,7 @@ def read_charges_from_file(charge_file: str) -> Optional[List[float]]:
             except json.JSONDecodeError:
                 logger.error(f"Could not decode JSON from {charge_file}")
             except (TypeError, ValueError) as e:
-                logger.error(f"Error processing charges from JSON file {charge_file}: {e}")
+                logger.error(f"Error processing charges from JSON file {charge_file}")
         else:
             raise ValueError(f"Unsupported charges file format: {file_ext}")
         return charges if charges else None
@@ -736,7 +769,7 @@ def read_charges_from_file(charge_file: str) -> Optional[List[float]]:
         logger.error(f"Charges file not found: {charge_file}")
         raise
     except Exception as e:
-        logger.error(f"Error reading charges from {charge_file}: {e}")
+        logger.error(f"Error reading charges from {charge_file}")
         return None
 
 
@@ -755,7 +788,7 @@ def create_molecular_graph_json(
         processor = create_graph_processor(config)
         return processor.file_to_json_graph(mol_file, output_dir, output_filename)
     except Exception as e:
-        logger.error(f"Failed to create JSON graph for {mol_file}: {e}")
+        logger.error(f"Failed to create JSON graph for {mol_file}")
         return None
 
 

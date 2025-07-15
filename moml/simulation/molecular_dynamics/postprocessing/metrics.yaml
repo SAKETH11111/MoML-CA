@@ -1,0 +1,62 @@
+# Metrics configuration for MD trajectory analysis
+# Each metric is defined by a type and optional parameters
+
+# Protein backbone RMSD
+backbone_rmsd:
+  type: rmsd
+  selection: "protein and backbone"
+  ref_frame: 0
+
+# Protein sidechain RMSD
+sidechain_rmsd:
+  type: rmsd
+  selection: "protein and sidechain"
+  ref_frame: 0
+
+# Protein RMSF
+protein_rmsf:
+  type: rmsf
+  selection: "protein"
+
+# Protein radius of gyration
+protein_rg:
+  type: rg
+  selection: "protein"
+
+# Protein solvent accessible surface area
+protein_sasa:
+  type: sasa
+  selection: "protein"
+  probe_radius: 0.14 # nm
+
+# Protein hydrogen bonds
+protein_hbonds:
+  type: hbonds
+  selection: "protein"
+  distance_cutoff: 0.3 # nm
+  angle_cutoff: 120 # degrees
+
+# Active site RMSD (if present)
+active_site_rmsd:
+  type: rmsd
+  selection: "resid 1 to 10" # Example selection, adjust as needed
+  ref_frame: 0
+
+# Active site SASA
+active_site_sasa:
+  type: sasa
+  selection: "resid 1 to 10" # Example selection, adjust as needed
+  probe_radius: 0.14 # nm
+
+# Ligand RMSD (if present)
+ligand_rmsd:
+  type: rmsd
+  selection: "resname LIG" # Adjust resname as needed
+  ref_frame: 0
+
+# Protein-ligand contacts
+protein_ligand_contacts:
+  type: hbonds
+  selection: "protein or resname LIG" # Adjust resname as needed
+  distance_cutoff: 0.4 # nm
+  angle_cutoff: 120 # degrees
