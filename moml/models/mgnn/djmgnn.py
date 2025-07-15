@@ -2,8 +2,33 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
 import logging
+
+# Conditional imports for torch_geometric
+try:
+    from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
+    HAS_TORCH_GEOMETRIC = True
+except ImportError:
+    HAS_TORCH_GEOMETRIC = False
+    # Create dummy classes/functions
+    class NNConv(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            raise ImportError("torch_geometric is required for NNConv")
+    
+    class GraphNorm(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            raise ImportError("torch_geometric is required for GraphNorm")
+    
+    def global_mean_pool(*args, **kwargs):
+        raise ImportError("torch_geometric is required for global_mean_pool")
+    
+    def global_add_pool(*args, **kwargs):
+        raise ImportError("torch_geometric is required for global_add_pool")
+    
+    def global_max_pool(*args, **kwargs):
+        raise ImportError("torch_geometric is required for global_max_pool")
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +46,9 @@ def rbf_encode_dist(dists, K=32, d_min=0.0, d_max=10.0):
 class GraphConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, edge_attr_dim):
         super().__init__()
+        if not HAS_TORCH_GEOMETRIC:
+            raise ImportError("torch_geometric is required for GraphConvLayer")
+        
         self.actual_edge_attr_dim = edge_attr_dim
         self._mlp_input_dim = 1 if edge_attr_dim == 0 else edge_attr_dim
  
@@ -211,6 +239,9 @@ class DJMGNN(nn.Module):
         env_mlp: bool = False,
     ):
         super().__init__()
+        if not HAS_TORCH_GEOMETRIC:
+            raise ImportError("torch_geometric is required for DJMGNN")
+        
         self.env_dim = env_dim
         self.p_dropedge, self.use_super, self.use_rbf, self.rbf_K = p_dropedge, use_supernode, use_rbf, rbf_K
         self.hidden_dim = hidden_dim
@@ -368,9 +399,9 @@ class DJMGNN(nn.Module):
                     f"DJMGNN: FATAL current_edge_attr dim {current_edge_attr.size(1)} mismatch with processed_edge_attr_dim {self.processed_edge_attr_dim}. This indicates a bug."
                 )
         elif self.processed_edge_attr_dim > 0:
-             logger.warning(
+            logger.warning(
                 f"DJMGNN: current_edge_attr is None, but processed_edge_attr_dim is {self.processed_edge_attr_dim}. Creating zeros."
-             )
+            )
             if num_edges_initial > 0:
                 current_edge_attr = torch.zeros(num_edges_initial, self.processed_edge_attr_dim, device=x.device)
 

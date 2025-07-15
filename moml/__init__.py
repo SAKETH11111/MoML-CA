@@ -32,13 +32,48 @@ Public API:
 
 __version__ = "0.1.0"
 
-# Subpackages
-from . import core
-from . import data
-from . import models
-from . import pipeline
-from . import simulation
-from . import utils
+# Subpackages with conditional imports
+try:
+    from . import core
+except ImportError as e:
+    import warnings
+    warnings.warn(f"Could not import core module: {e}")
+    core = None
+
+try:
+    from . import data
+except ImportError as e:
+    import warnings
+    warnings.warn(f"Could not import data module: {e}")
+    data = None
+
+try:
+    from . import models
+except ImportError as e:
+    import warnings
+    warnings.warn(f"Could not import models module: {e}")
+    models = None
+
+try:
+    from . import pipeline
+except ImportError as e:
+    import warnings
+    warnings.warn(f"Could not import pipeline module: {e}")
+    pipeline = None
+
+try:
+    from . import simulation
+except ImportError as e:
+    import warnings
+    warnings.warn(f"Could not import simulation module: {e}")
+    simulation = None
+
+try:
+    from . import utils
+except ImportError as e:
+    import warnings
+    warnings.warn(f"Could not import utils module: {e}")
+    utils = None
 
 __all__ = [
     "__version__",
