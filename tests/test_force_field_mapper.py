@@ -1,6 +1,6 @@
 """
 Unit tests for the ForceFieldMapper class in
-moml.simulation.molecular_dynamics.force_field_mapper.
+moml.simulation.molecular_dynamics.force_field.mapper.
 """
 
 import pytest

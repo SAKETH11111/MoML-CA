@@ -15,7 +15,7 @@ from .molecular_dynamics.force_field.mapper import (
 )
 
 # Quantum mechanics (ORCA) parsers and I/O
-from .qm.parser.orca_parser import (
+from .qm.parser.orca_parser import ( # Updated import path
     parse_orca_output,
     extract_partial_charges_from_orca,
     extract_orbital_contributions_from_orca,

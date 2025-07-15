@@ -22,7 +22,7 @@ import subprocess
 import argparse
 import logging
 import json
-from moml.simulation.quantum_mechanics.parser.orca_parser import parse_orca_output # Corrected import
+from moml.simulation.qm.parser.orca_parser import parse_orca_output # Updated import path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

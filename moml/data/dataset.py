@@ -1,11 +1,10 @@
 from typing import Optional, Union, Callable
 from torch_geometric.data import Dataset
-from torch_geometric.datasets import QM9
-from torch.utils.data import ConcatDataset
+from torch_geometric.datasets import QM9 
+from torch.utils.data import
 
 from .spice_dataset import SpiceDataset
 from .pfas_sdf_dataset import PFASSDFDataset
-from .spice_dataset import SpiceDataset
 from .feature_transforms import CreateEdges, FeaturizeNodes
 
 

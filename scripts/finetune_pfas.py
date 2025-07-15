@@ -5,7 +5,6 @@ import yaml
 import torch
 import torch.optim as optim
 from torch_geometric.loader import DataLoader as GraphDataLoader
-from tqdm import tqdm
 
 # Add project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,12 +56,20 @@ def main():
         FeaturizeNodes(),
         StandardizeTargets(dataset_name="pfas"),
     ])
-    dataset = get_dataset("pfas", root="data", transform=transform)
-    loader = GraphDataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    full_dataset = get_dataset("pfas", root="data", transform=transform)
+    
+    # Split dataset into training and validation sets
+    train_size = int(0.8 * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
+
+    train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = GraphDataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
     # --- Fine-tuning Setup ---
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = torch.nn.L1Loss()  # Use MAE loss
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.8, patience=5, verbose=True)
 
     # --- Fine-tuning Loop ---
     print(f"Starting fine-tuning for {args.max_steps} steps...")
@@ -71,8 +78,11 @@ def main():
     ema_loss = None
     beta = 0.95
     done = False
+    best_val_loss = float('inf')
+    patience_counter = 0
+
     while not done:
-        for batch in loader:
+        for batch in train_loader:
             if step >= args.max_steps:
                 done = True
                 break
@@ -103,16 +113,49 @@ def main():
                 print(f"Step {step:5d} | Loss: {loss.item():.6f} | EMA Loss: {ema_loss:.6f}")
 
             if step > 0 and step % args.save_every == 0:
-                intermediate_save_path = args.save_path.replace('.pt', f'_step_{step}.pt')
-                os.makedirs(os.path.dirname(intermediate_save_path), exist_ok=True)
-                torch.save({
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'step': step,
-                    'loss': loss.item(),
-                }, intermediate_save_path)
-                print(f"Saved intermediate checkpoint to {intermediate_save_path}")
-            
+                # Validation step
+                model.eval()
+                val_losses = []
+                with torch.no_grad():
+                    for val_batch in val_loader:
+                        val_batch = val_batch.to(device)
+                        val_out = model(
+                            x=val_batch.x,
+                            edge_index=val_batch.edge_index,
+                            batch=val_batch.batch
+                        )
+                        val_preds = val_out['graph_pred']
+                        val_targets = val_batch.y.view(val_preds.shape)
+                        val_loss = loss_fn(val_preds, val_targets)
+                        val_losses.append(val_loss.item())
+                avg_val_loss = sum(val_losses) / len(val_losses)
+                print(f"Validation Loss at step {step}: {avg_val_loss:.6f}")
+                
+                scheduler.step(avg_val_loss) # Update learning rate scheduler
+
+                # Early stopping logic
+                if avg_val_loss < best_val_loss:
+                    best_val_loss = avg_val_loss
+                    patience_counter = 0
+                    intermediate_save_path = args.save_path.replace('.pt', f'_step_{step}_best.pt')
+                    os.makedirs(os.path.dirname(intermediate_save_path), exist_ok=True)
+                    torch.save({
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'step': step,
+                        'loss': loss.item(),
+                        'val_loss': avg_val_loss,
+                    }, intermediate_save_path)
+                    print(f"Saved best intermediate checkpoint to {intermediate_save_path}")
+                else:
+                    patience_counter += 1
+                    if patience_counter >= args.patience: # Assuming args.patience is defined
+                        print(f"Early stopping triggered at step {step} due to no improvement in validation loss.")
+                        done = True
+                        break
+                
+                model.train() # Set model back to training mode
+
             step += 1
 
     # --- Save Fine-tuned Model ---

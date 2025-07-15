@@ -41,11 +41,18 @@ def load_plugin(plugin_name: str) -> Tuple[Dict[str, Any], Any]:
     try:
         build_module = importlib.import_module(module_path, package=__package__)
     except ImportError as e:
-        raise ImportError(f"Failed to load plugin module {plugin_name}: {e}")
+        raise ImportError(f"Failed to load plugin module {plugin_name}: {e}") from e
     
+    # Validate that the build_module has the expected interface
+    if not hasattr(build_module, 'build') or not callable(build_module.build):
+        raise AttributeError(
+            f"Plugin module {plugin_name} does not have a callable 'build' function. "
+            "Please ensure the plugin module provides the required interface."
+        )
+
     # Load config
     import yaml
     with open(config_file) as f:
         config = yaml.safe_load(f)
     
-    return config, build_module 
+    return config, build_module

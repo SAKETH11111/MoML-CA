@@ -23,6 +23,24 @@ class SystemConfig(BaseModel):
             raise ValueError("Box dimensions must be positive")
         return v
 
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("Temperature must be greater than 0 Kelvin.")
+        if v > 1000: # Example upper limit, adjust as needed
+            raise ValueError("Temperature seems unusually high. Please verify.")
+        return v
+
+    @field_validator('pressure')
+    @classmethod
+    def validate_pressure(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("Pressure cannot be negative.")
+        if v > 1000: # Example upper limit, adjust as needed (e.g., 1000 atm)
+            raise ValueError("Pressure seems unusually high. Please verify.")
+        return v
+
 class IntegrationConfig(BaseModel):
     """Configuration for MD integration"""
     timestep: float = Field(2.0, description="Integration timestep in femtoseconds")

@@ -84,7 +84,8 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         if mulliken_header_match:
             start_index = mulliken_header_match.end()
             # Define a pattern for a single charge line: number, symbol, optional colon, charge
-            charge_line_pattern = re.compile(f"^\\s*\\d+\\s+[A-Za-z]{{1,3}}\\s*:?\\s*({FLOAT})")
+            # This pattern is reused for both Mulliken and Loewdin charges
+            CHARGE_LINE_PATTERN = re.compile(f"^\\s*\\d+\\s+[A-Za-z]{{1,3}}\\s*:?\\s*({FLOAT})")
 
             temp_mulliken_charges = []
 
@@ -103,7 +104,7 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
                 if not line_strip:  # Skip empty lines that might be before the actual end
                     continue
 
-                match = charge_line_pattern.match(line_strip)
+                match = CHARGE_LINE_PATTERN.match(line_strip)
                 if match:
                     try:
                         temp_mulliken_charges.append(float(match.group(1)))
@@ -122,9 +123,8 @@ def parse_orca_output(orca_output_path: str) -> Dict[str, Union[List[float], np.
         loewdin_header_match = re.search(r"LOEWDIN ATOMIC CHARGES", content)
         if loewdin_header_match:
             start_index = loewdin_header_match.end()
-            charge_line_pattern = re.compile(
-                f"^\\s*\\d+\\s+[A-Za-z]{{1,3}}\\s*:?\\s*({FLOAT})"
-            )  # Symbol can be 1-3 chars e.g. Cl, Br
+            # Reuse the defined pattern
+            charge_line_pattern = CHARGE_LINE_PATTERN
 
             temp_loewdin_charges = []
 

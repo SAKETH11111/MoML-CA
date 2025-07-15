@@ -329,6 +329,17 @@ def save_molecule_grid(
     title: Optional[str] = None,
 ) -> str:
     """Save a grid of molecular images to a file.
+
+    Args:
+        mols (List[Chem.Mol]): A list of RDKit molecule objects to display.
+        output_path (str): The path to save the image file.
+        labels (Optional[List[str]]): Optional list of labels for each molecule.
+        size (Tuple[int, int]): The size (width, height) in pixels for each molecule image.
+        n_cols (int): The number of columns in the grid.
+        title (Optional[str]): An optional title for the entire grid.
+
+    Returns:
+        str: The path to the saved image file.
     """
     grid_img = generate_molecule_grid(mols, labels, size, n_cols)
 

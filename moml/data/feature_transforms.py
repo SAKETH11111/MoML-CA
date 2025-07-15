@@ -1,8 +1,11 @@
 import torch
 from torch_geometric.data import Data
 from rdkit import Chem
+import logging # Added for error logging
+import yaml # Moved import to top
 
 from moml.core.molecular_feature_extraction import MolecularFeatureExtractor
+
 
 class CreateEdges:
     """A transform that creates edges based on a distance cutoff if they don't exist."""
@@ -35,7 +38,7 @@ class FeaturizeNodes:
                 if i < j:
                     mol.AddBond(i, j, Chem.BondType.SINGLE)
         
-        # It's okay if sanitization fails for some structures, 
+        # It's okay if sanitization fails for some structures,
         # we extract features that don't rely on it.
         try:
             Chem.SanitizeMol(mol)
@@ -90,13 +93,18 @@ class PadQM9Features:
             data.x = torch.cat([data.x, padding], dim=1)
         
         return data
-import yaml
-
 class StandardizeTargets:
     """A transform to standardize targets using pre-computed statistics."""
     def __init__(self, stats_path="data/target_stats.yaml", dataset_name="qm9"):
-        with open(stats_path, 'r') as f:
-            stats = yaml.safe_load(f)
+        try:
+            with open(stats_path, 'r') as f:
+                stats = yaml.safe_load(f)
+        except FileNotFoundError:
+            logging.error(f"Statistics file not found at {stats_path}")
+            raise FileNotFoundError(f"Statistics file not found: {stats_path}")
+        except yaml.YAMLError as e:
+            logging.error(f"Error parsing YAML file {stats_path}: {e}")
+            raise ValueError(f"Error parsing YAML file: {stats_path} - {e}")
         
         if dataset_name not in stats:
             raise KeyError(f"Statistics for dataset '{dataset_name}' not found in {stats_path}")
@@ -104,7 +112,6 @@ class StandardizeTargets:
         self.mean = torch.tensor(stats[dataset_name]['mean'])
         self.std = torch.tensor(stats[dataset_name]['std'])
         self.dataset_name = dataset_name
-
     def __call__(self, data: Data) -> Data:
         target_attr = 'y' if self.dataset_name in ['qm9', 'pfas'] else 'y_graph'
         if hasattr(data, target_attr) and getattr(data, target_attr) is not None:

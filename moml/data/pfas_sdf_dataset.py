@@ -1,12 +1,11 @@
 import os
 import glob
-from itertools import repeat
 from typing import Callable, List, Optional
 import torch
 import numpy as np
 from torch_geometric.data import InMemoryDataset, Data
 from rdkit import Chem
-from rdkit.Chem import Descriptors, rdMolDescriptors
+from rdkit.Chem import Descriptors, Crippen # Added Crippen
 
 # Suppress RDKit warnings
 from rdkit import RDLogger

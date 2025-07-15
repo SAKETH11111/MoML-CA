@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=${USER}@example.com
+#SBATCH --mail-user=${USER}@${MAIL_DOMAIN:-gmail.com}
 
 # Load required modules
 module load cuda/12.2
@@ -21,7 +21,7 @@ export OPENMM_CPU_THREADS=1
 export OPENMM_DEVICE_INDEX=0
 
 # Activate conda environment
-source /path/to/conda/bin/activate moml-ca
+source ${CONDA_ENV_PATH}/bin/activate moml-ca # Use a parameter or environment variable for conda path
 
 # Set up logging
 export STRUCTLOG_LEVEL=INFO

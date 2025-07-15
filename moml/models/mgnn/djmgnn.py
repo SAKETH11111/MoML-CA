@@ -303,12 +303,8 @@ class DJMGNN(nn.Module):
             if edge_attr.numel() > 0:
                 super_e = edge_attr.new_zeros(edge1.size(1) + edge2.size(1), edge_attr.size(1))
                 new_edge_attr = torch.cat([edge_attr, super_e], 0)
-            elif self.processed_edge_attr_dim > 0:
-                super_e = x.new_zeros(edge1.size(1) + edge2.size(1), self.processed_edge_attr_dim)
-                if edge_attr is None:
-                    new_edge_attr = super_e
-                if new_edge_attr is None and self.processed_edge_attr_dim > 0:
-                    pass
+            elif self.processed_edge_attr_dim > 0 and edge_attr is None:
+                new_edge_attr = x.new_zeros(edge1.size(1) + edge2.size(1), self.processed_edge_attr_dim)
 
         batch_for_original_nodes = batch[:num_nodes_original]
         batch_for_super_nodes = torch.arange(num_graphs, device=device)
@@ -377,8 +373,8 @@ class DJMGNN(nn.Module):
              logger.warning(
                 f"DJMGNN: current_edge_attr is None, but processed_edge_attr_dim is {self.processed_edge_attr_dim}. Creating zeros."
              )
-             if num_edges_initial > 0:
-                 current_edge_attr = torch.zeros(num_edges_initial, self.processed_edge_attr_dim, device=x.device)
+            if num_edges_initial > 0:
+                current_edge_attr = torch.zeros(num_edges_initial, self.processed_edge_attr_dim, device=x.device)
 
         current_batch = batch if batch is not None else x.new_zeros(x.size(0), dtype=torch.long)
 

@@ -7,9 +7,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import logging
 
-from openmm import System, Context, VerletIntegrator, Platform, unit
-from openmm import app
-import mlflow
+from openmm import unit
 
 from .config import MDConfig
 from .builder.system_builder import SystemBuilder

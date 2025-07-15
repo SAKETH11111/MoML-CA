@@ -86,21 +86,23 @@ class DensityMonitor(BaseMonitor):
     
     def __init__(self,
                  config: MDConfig,
+                 system: System, # Added system parameter
                  window_size: int = 1000):
         super().__init__(window_size)
+        self.system = system # Store system
         self.target_density = config.monitoring.target_density
         self.density_tolerance = config.monitoring.density_tolerance
         self.density_drift_threshold = config.monitoring.density_drift_threshold
-    
+        
+        # Calculate total system mass dynamically
+        self.total_mass = sum(p.mass for p in system.getDefaultParticles()) # Assuming default particles have mass
+        
     def update(self, state: State):
         """Update with new density state."""
         # Get volume from state
         volume = state.getPeriodicBoxVolume().value_in_unit(unit.nanometers**3)
-        # Calculate density from volume and system mass
-        # For now using 1 amu as test mass, in real usage this should be calculated from system
-        mass = 1.0 * unit.amu
-        # Convert to g/mL: 1 amu/nm³ = 1.66053886e-21 g/mL
-        density = (mass.value_in_unit(unit.amu) / volume) * 1.66053886e-21
+        # Calculate density from volume and total system mass
+        density = (self.total_mass.value_in_unit(unit.amu) / volume) * 1.66053886e-21 # Convert to g/mL
         self._update_history(density)
         
         if abs(density - self.target_density) > self.density_tolerance:
@@ -215,8 +217,6 @@ class Watchdog:
 
             if abs(drift) > self.energy_drift_kj_per_ns:
                 raise SimulationDiverged(f"Energy drift {drift:.2f} kJ/mol/ns exceeds maximum {self.energy_drift_kj_per_ns} kJ/mol/ns")
-                raise SimulationDiverged(
-                    f"Energy drift {drift:.1f} kJ/mol/ns exceeds maximum {self.energy_drift_kj_per_ns}")
         
         self.last_energy = energy
         self.last_step = step 

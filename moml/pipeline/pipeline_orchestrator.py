@@ -23,6 +23,7 @@ import time
 import pickle
 from datetime import datetime
 import concurrent.futures
+import functools # Added for partial
 
 from moml.core import (
     calculate_molecular_descriptors,
@@ -421,7 +422,7 @@ class MOMLPipelineOrchestrator:
                 }
 
                 # Function to process a single molecule
-                def process_single_molecule(mol_file: str, config: Dict[str, Any] = config) -> Optional[str]:
+                def process_single_molecule(mol_file: str) -> Optional[str]:
                     # Instantiate processor inside worker to avoid non-picklable objects
                     processor = create_graph_processor(config)
                     try:
@@ -455,12 +456,14 @@ class MOMLPipelineOrchestrator:
                 if max_workers > 1:
                     logger.info(f"Processing {len(mol_file_paths)} molecules in parallel with {max_workers} workers")
                     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-                        results = list(executor.map(process_single_molecule, mol_file_paths))
+                        # Pass config explicitly to process_single_molecule
+                        partial_process_single_molecule = functools.partial(process_single_molecule, config=config)
+                        results = list(executor.map(partial_process_single_molecule, mol_file_paths))
                         graph_files = [f for f in results if f is not None]
                 else:
                     logger.info(f"Processing {len(mol_file_paths)} molecules sequentially")
                     for mol_file in mol_file_paths:
-                        result = process_single_molecule(mol_file)
+                        result = process_single_molecule(mol_file, config=config)
                         if result:
                             graph_files.append(result)
 

@@ -76,12 +76,12 @@ class SystemBuilder:
         
         # Check for validation errors
         errors = []
-        for category, msgs in validation_results.items():
+        for msgs in validation_results.values():
             if msgs:
                 errors.extend(msgs)
         
         if errors:
-            raise ValueError(f"Force field validation failed:\n" + "\n".join(errors))
+            raise ValueError("Force field validation failed:\n" + "\n".join(errors))
         
         # Load PDB
         pdb = app.PDBFile(str(pdb_path))
@@ -96,7 +96,7 @@ class SystemBuilder:
                 # Add surface to force field using the build module
                 forcefield.registerTemplateGenerator(surface_build.get_xml)
             except Exception as e:
-                raise ValueError(f"Failed to load surface plugin {surface_name}: {e}")
+                raise ValueError(f"Failed to load surface plugin {surface_name}: {e}") from e
         
         # Add solvent if specified
         if solvent_name:
@@ -105,7 +105,7 @@ class SystemBuilder:
                 # Add solvent to force field using the build module
                 forcefield.registerTemplateGenerator(solvent_build.get_xml)
             except Exception as e:
-                raise ValueError(f"Failed to load solvent plugin {solvent_name}: {e}")
+                raise ValueError(f"Failed to load solvent plugin {solvent_name}: {e}") from e
         
         # Create modeller and add ions
         modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -123,20 +123,44 @@ class SystemBuilder:
         
         # Apply HMR if enabled
         if self.config.integration.hmr_enabled:
-            self._apply_hmr(system)
+            self._apply_hmr(system, modeller.topology)
         
         return system
     
-    def _apply_hmr(self, system: System):
+    def _apply_hmr(self, system: System, topology: app.Topology):
         """Apply hydrogen mass repartitioning to the system."""
         factor = self.config.integration.hmr_factor
         
+        # Store original masses to ensure conservation
+        original_masses = [system.getParticleMass(i) for i in range(system.getNumParticles())]
+        
+        # Identify heavy atoms and their bonded hydrogens
+        heavy_atom_to_hydrogens = {}
+        for bond in topology.bonds():
+            atom1 = bond.atom1
+            atom2 = bond.atom2
+            
+            # Check for heavy atom - hydrogen bond
+            if atom1.element.mass.value_in_unit(unit.dalton) > 2.0 and atom2.element.mass.value_in_unit(unit.dalton) < 2.0:
+                heavy_atom_to_hydrogens.setdefault(atom1.index, []).append(atom2.index)
+            elif atom2.element.mass.value_in_unit(unit.dalton) > 2.0 and atom1.element.mass.value_in_unit(unit.dalton) < 2.0:
+                heavy_atom_to_hydrogens.setdefault(atom2.index, []).append(atom1.index)
+        
+        # Apply HMR
         for i in range(system.getNumParticles()):
-            mass = system.getParticleMass(i)
+            mass = original_masses[i]
             if mass.value_in_unit(unit.dalton) < 2.0:  # Hydrogen
                 system.setParticleMass(i, mass * factor)
-            else:  # Heavy atom
-                system.setParticleMass(i, mass - (factor - 1) * unit.dalton)
+            elif i in heavy_atom_to_hydrogens:  # Heavy atom bonded to hydrogens
+                # Calculate total mass transferred to hydrogens from this heavy atom
+                total_transferred_mass = unit.Quantity(0.0, unit.dalton)
+                for h_idx in heavy_atom_to_hydrogens[i]:
+                    h_mass = original_masses[h_idx]
+                    total_transferred_mass += (h_mass * factor) - h_mass
+                
+                # Subtract the total transferred mass from the heavy atom
+                system.setParticleMass(i, mass - total_transferred_mass)
+            # else: heavy atom not bonded to hydrogens, mass remains unchanged
     
     def get_platform(self) -> Platform:
         """Get the OpenMM platform based on configuration."""

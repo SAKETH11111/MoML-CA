@@ -13,8 +13,16 @@ def build(tmp_dir: Path, cfg: dict) -> Tuple[Path, Topology, List[int]]:
     box_x, box_y, slab_z = cfg["slab_dims_nm"]
     a = 0.142  # nm C–C
     # create simple hexagonal sheet – minimal until full pore model arrives
-    nx = int(box_x / (a * np.sqrt(3)))
-    ny = int(box_y / (a * 1.5))
+    # Validate box dimensions to ensure at least one lattice unit
+    min_box_x = a * np.sqrt(3)
+    min_box_y = a * 1.5
+    if box_x < min_box_x:
+        raise ValueError(f"box_x ({box_x:.4f} nm) is too small to produce a lattice unit. Must be at least {min_box_x:.4f} nm.")
+    if box_y < min_box_y:
+        raise ValueError(f"box_y ({box_y:.4f} nm) is too small to produce a lattice unit. Must be at least {min_box_y:.4f} nm.")
+
+    nx = int(box_x / min_box_x)
+    ny = int(box_y / min_box_y)
     positions = []
     topology = Topology()
     chain = topology.addChain()
@@ -30,7 +38,8 @@ def build(tmp_dir: Path, cfg: dict) -> Tuple[Path, Topology, List[int]]:
             idx_list.append(atom.index)
 
     pdb_path = tmp_dir / "gac_slab.pdb"
-    PDBFile.writeFile(topology, positions, open(pdb_path, "w"))
+    with open(pdb_path, "w") as f: # Use context manager for file handling
+        PDBFile.writeFile(topology, positions, f)
     # tag unit cell
     topology.setUnitCellDimensions((box_x, box_y, slab_z))
     return pdb_path, topology, idx_list

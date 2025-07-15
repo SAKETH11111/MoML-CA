@@ -3,7 +3,6 @@ import sys
 import argparse
 import yaml
 import torch
-import numpy as np
 from torch_geometric.loader import DataLoader as GraphDataLoader
 from tqdm import tqdm
 
@@ -14,18 +13,7 @@ from moml.data.dataset import get_dataset
 from moml.models.mgnn.djmgnn import DJMGNN
 from moml.data.feature_transforms import CreateEdges, FeaturizeNodes, StandardizeTargets
 from torchvision.transforms import Compose
-from torch_geometric.data import Dataset
-
-class SubsetWrapper(Dataset):
-    def __init__(self, subset):
-        super().__init__()
-        self.subset = subset
-
-    def __len__(self):
-        return len(self.subset)
-
-    def __getitem__(self, idx):
-        return self.subset[idx]
+from moml.utils.dataset_utils import SubsetWrapper # Import SubsetWrapper
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate DJMGNN on QM9 validation set.')

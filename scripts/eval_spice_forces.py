@@ -3,7 +3,6 @@ import sys
 import argparse
 import yaml
 import torch
-import numpy as np
 from torch_geometric.loader import DataLoader as GraphDataLoader
 from tqdm import tqdm
 

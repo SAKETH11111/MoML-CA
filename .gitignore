@@ -122,5 +122,3 @@ MoML-CA/data/
 data/spice/processed/
 *.pt
 data/*/processed/*.pt
-*.pt
-data/*/processed/*.pt

@@ -100,8 +100,13 @@ class MGNNPredictor:
         # If dimensions are not in config, try to infer from the processor
         if in_dim == 0:
             # Infer from the model's first linear layer weight
-            first_layer_weight = next(iter(model_state.values()))
-            in_dim = first_layer_weight.shape[1]
+            # Infer from the model's first linear layer weight by searching for a key containing 'weight'
+            for key, value in model_state.items():
+                if "weight" in key and value.dim() == 2: # Assuming linear layer weights are 2D
+                    in_dim = value.shape[1]
+                    break
+            if in_dim == 0: # Fallback if no suitable weight found
+                raise ValueError("Could not infer input dimension from model state. Please specify 'in_dim' in config.")
         if edge_attr_dim == 0:
             # This is trickier; may need to be stored in config or checkpoint
             # For now, assume it's 0 if not specified
@@ -109,14 +114,15 @@ class MGNNPredictor:
 
         # Initialize model
         model = DJMGNN(
-            in_dim=in_dim,
+            in_node_dim=in_dim,
             hidden_dim=self.config.get("hidden_dim", 64),
             n_blocks=self.config.get("n_blocks", 3),
             layers_per_block=self.config.get("layers_per_block", 2),
-            edge_attr_dim=edge_attr_dim,
+            in_edge_dim=edge_attr_dim,
             jk_mode=self.config.get("jk_mode", "cat"),
             node_out_dim=self.config.get("node_out_dim", 1),
             graph_out_dim=self.config.get("graph_out_dim", 1),
+            env_dim=self.config.get("env_dim", 0), # Assuming env_dim can be 0 if not specified
             dropout=self.config.get("dropout", 0.2),
         ).to(self.device)
 
@@ -348,6 +354,8 @@ def create_predictor(config: Dict, model_path: Optional[str] = None, model: Opti
         raise ValueError("Either model_path or model must be provided")
     
     if model is None:
+        if model_path is None:
+            raise ValueError("model_path cannot be None when model is not provided.")
         # Load model from checkpoint
         checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
         model = DJMGNN(**checkpoint['model_config'])
@@ -381,7 +389,7 @@ def batch_predict_from_files(
         Dictionary with predictions
     """
     # Create predictor
-    predictor = create_predictor(model_path=model_path, config=config, device=device)
+    predictor = MGNNPredictor(model_path=model_path, config=config, device=device)
 
     # Find all molecule files
     molecule_files = []

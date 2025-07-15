@@ -217,7 +217,6 @@ class HMGNN(nn.Module):
         self.hidden_dim = hidden_dim  # Store hidden_dim
         self.node_out_dim = node_out_dim  # Store node_out_dim
         self.graph_out_dim = graph_out_dim  # Store graph_out_dim
-        self.env_dim = env_dim  # Store env_dim
         edge_attr_dims = edge_attr_dims or [0] * self.S
 
         # backbone per scale
@@ -375,7 +374,8 @@ class HMGNN(nn.Module):
                     -1
                 ].out_features  # Get out_features of last linear layer
                 combined_graph_pred = torch.zeros(
-                    (bs, out_dim_combined_graph_head), device=graph_embeds[0].device if graph_embeds else "cpu"
+                    bs, out_dim_combined_graph_head,
+                    device=graph_embeds[0].device if graph_embeds else torch.device("cpu")
                 )
 
         output_dict["node_pred"] = node_preds[0] if node_preds else None  # atom-level default (finest scale)

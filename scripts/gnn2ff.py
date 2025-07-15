@@ -26,13 +26,50 @@ def main():
 
     # 1.A & 1.B: Load model and molecule
     print("Step 1: Loading model and molecule...")
-    model = DJMGNN(in_node_dim=29, hidden_dim=128, n_blocks=3, layers_per_block=6, in_edge_dim=0, jk_mode="attention", node_output_dims=3, graph_output_dims=19, energy_output_dims=1, dropout=0.2, pool_type="mean", p_dropedge=0.1, use_supernode=True, use_rbf=True, rbf_K=32, env_dim=0, env_mlp=False)
-    model.load_state_dict(torch.load(args.ckpt, map_location=torch.device('cpu'))['model_state_dict'])
+    checkpoint = torch.load(args.ckpt, map_location=torch.device('cpu'))
+    model_config = checkpoint.get('model_config')
+    if model_config is None:
+        print("Warning: 'model_config' not found in checkpoint. Using default hyperparameters.")
+        # Define default hyperparameters or raise an error if defaults are not acceptable
+        model_config = {
+            'in_node_dim': 29, 'hidden_dim': 128, 'n_blocks': 3, 'layers_per_block': 6,
+            'in_edge_dim': 0, 'jk_mode': "attention", 'node_output_dims': 3,
+            'graph_output_dims': 19, 'energy_output_dims': 1, 'dropout': 0.2,
+            'pool_type': "mean", 'p_dropedge': 0.1, 'use_supernode': True,
+            'use_rbf': True, 'rbf_K': 32, 'env_dim': 0, 'env_mlp': False
+        }
+    
+    model = DJMGNN(
+        in_node_dim=model_config.get('in_node_dim', 29),
+        hidden_dim=model_config.get('hidden_dim', 128),
+        n_blocks=model_config.get('n_blocks', 3),
+        layers_per_block=model_config.get('layers_per_block', 6),
+        in_edge_dim=model_config.get('in_edge_dim', 0),
+        jk_mode=model_config.get('jk_mode', "attention"),
+        node_output_dims=model_config.get('node_output_dims', 3),
+        graph_output_dims=model_config.get('graph_output_dims', 19),
+        energy_output_dims=model_config.get('energy_output_dims', 1),
+        dropout=model_config.get('dropout', 0.2),
+        pool_type=model_config.get('pool_type', "mean"),
+        p_dropedge=model_config.get('p_dropedge', 0.1),
+        use_supernode=model_config.get('use_supernode', True),
+        use_rbf=model_config.get('use_rbf', True),
+        rbf_K=model_config.get('rbf_K', 32),
+        env_dim=model_config.get('env_dim', 0),
+        env_mlp=model_config.get('env_mlp', False)
+    )
+    model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
     mol = Chem.MolFromSmiles(args.smiles)
+    if mol is None:
+        print(f"Error: Could not create molecule from SMILES string: {args.smiles}")
+        sys.exit(1)
     mol = Chem.AddHs(mol)
-    AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+    # Attempt to embed the molecule, handling potential failures
+    if AllChem.EmbedMolecule(mol, AllChem.ETKDG()) == -1:
+        print(f"Error: Could not embed molecule from SMILES string: {args.smiles}")
+        sys.exit(1)
 
     # 1.C: Build PyG Data object
     print("Step 2: Featurizing molecule for GNN...")
@@ -55,6 +92,14 @@ def main():
         batch = torch.zeros(data.x.size(0), dtype=torch.long)
         dist = torch.norm(data.pos[data.edge_index[0]] - data.pos[data.edge_index[1]], p=2, dim=-1).view(-1, 1)
         node_preds = model(x=data.x, edge_index=data.edge_index, batch=batch, dist=dist)['node_pred']
+    
+    # Validate that the number of atoms in GNN predictions matches the molecule's atom count
+    if len(node_preds) != mol.GetNumAtoms():
+        raise ValueError(
+            f"Mismatch between GNN node predictions ({len(node_preds)} atoms) "
+            f"and molecule atom count ({mol.GetNumAtoms()} atoms). "
+            "This indicates a problem with the GNN output or molecule processing."
+        )
 
     raw_charges = node_preds[:, 0].numpy()
     # Crucially, neutralize the charges so they sum to the molecule's formal charge (0)
@@ -92,10 +137,16 @@ def main():
     for i in range(mol.GetNumAtoms()):
         charge_i = charges[i]
         # OpenMM sigma is specified as distance, so it must be positive.
-        # The GNN may predict negative values, so we take the absolute value.
-        sigma_i = np.abs(sigmas_angstrom[i]) * NM_PER_ANGSTROM
+        sigma_i_raw = sigmas_angstrom[i]
+        if sigma_i_raw < 0:
+            print(f"Warning: Negative sigma value detected for atom {i}: {sigma_i_raw}. Taking absolute value.")
+        sigma_i = np.abs(sigma_i_raw) * NM_PER_ANGSTROM
+
         # Epsilon must also be positive.
-        epsilon_i = np.abs(epsilons_kcal[i]) * KJ_PER_KCAL
+        epsilon_i_raw = epsilons_kcal[i]
+        if epsilon_i_raw < 0:
+            print(f"Warning: Negative epsilon value detected for atom {i}: {epsilon_i_raw}. Taking absolute value.")
+        epsilon_i = np.abs(epsilon_i_raw) * KJ_PER_KCAL
         
         nonbonded_force.setParticleParameters(i, charge_i, sigma_i, epsilon_i)
 

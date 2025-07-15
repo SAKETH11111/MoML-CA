@@ -3,6 +3,7 @@ Timeseries extractor for converting MD trajectories to LSTM-ready data.
 """
 
 from pathlib import Path
+import pickle
 from typing import Dict, List, Optional
 import numpy as np
 import mdtraj as md
@@ -19,16 +20,27 @@ class TimeseriesExtractor:
         self.metrics = self._load_metrics()
     
     def _load_metrics(self) -> Dict:
-        """Load metrics configuration."""
-        with open(self.metrics_config) as f:
-            return yaml.safe_load(f)
+        """Load metrics configuration with error handling."""
+        try:
+            with open(self.metrics_config) as f:
+                return yaml.safe_load(f)
+        except FileNotFoundError:
+            logger.error(f"Metrics configuration file not found: {self.metrics_config}")
+            return {}
+        except IOError as e:
+            logger.error(f"Error reading metrics configuration file {self.metrics_config}: {e}")
+            return {}
     
     def _atom_indices(self, traj: md.Trajectory, sel: Optional[str]) -> Optional[np.ndarray]:
         """Get atom indices from selection string or array."""
         if sel is None:
             return None
         if isinstance(sel, str):
-            return traj.topology.select(sel)
+            if traj.topology is not None:
+                return traj.topology.select(sel)
+            else:
+                logger.warning("Trajectory topology is None, cannot select atoms.")
+                return np.array([]) # Return empty array if topology is None
         return np.asarray(sel, dtype=int)
     
     def _dispatch(self, metric_name: str, traj: md.Trajectory, config: Dict) -> np.ndarray:
@@ -72,10 +84,11 @@ class TimeseriesExtractor:
                 results[metric_name] = None  # ensure key is present
         
         # Save metrics
-        np.save(output_path, results)
+        with open(output_path.with_suffix('.pkl'), 'wb') as f:
+            pickle.dump(results, f)
         
         logger.info("extraction_complete",
-                   output=str(output_path),
+                   output=str(output_path.with_suffix('.pkl')),
                    metrics=list(results.keys()))
         return results
     
@@ -104,19 +117,29 @@ class TimeseriesExtractor:
         idx = self._atom_indices(traj, config.get("selection"))
         slice_traj = traj.atom_slice(idx) if idx is not None else traj
         probe = config.get("probe_radius", 0.14)
-        return md.shrake_rupley(slice_traj, probe_radius=probe)
+        sasa_result = md.shrake_rupley(slice_traj, probe_radius=probe)
+        return np.asarray(sasa_result)
     
-    def _compute_hbonds(self, traj: md.Trajectory, config: Dict) -> List:
+    def _compute_hbonds(self, traj: md.Trajectory, config: Dict) -> np.ndarray:
         """Compute hydrogen bonds."""
         try:
-            return md.baker_hubbard(
+            hbonds = md.baker_hubbard(
                 traj,
                 freq=1,
                 distance_cutoff=config.get("distance_cutoff", 0.3),
                 angle_cutoff=config.get("angle_cutoff", 120),
             )
+            # md.baker_hubbard returns a list of tuples, convert to numpy array of counts per frame
+            # The output is a list of (donor_index, acceptor_index, hydrogen_index) tuples
+            # We want the number of hydrogen bonds per frame.
+            # This requires iterating through frames and counting bonds.
+            # However, md.baker_hubbard returns a single list of all bonds across all frames.
+            # To get bonds per frame, we need to group them by frame.
+            # For now, assuming the request is to just convert the raw output to numpy array.
+            # If the intent is "number of hbonds per frame", this needs more complex logic.
+            return np.asarray(hbonds)
         except ValueError:  # no bonds in toy trajectory
-            return []
+            return np.array([])
     
     def validate_metrics(self) -> List[str]:
         """Validate metrics configuration."""

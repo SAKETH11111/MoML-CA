@@ -1,6 +1,5 @@
 from typing import Union, Dict, List, Optional, Callable, Any
 import os
-import itertools
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -299,7 +298,7 @@ class MGNNTrainer:
             Training history
         """
         # Set number of epochs
-        epochs = epochs or self.config.get("epochs", 100)
+        epochs = int(epochs or self.config.get("epochs", 100))
 
         # Initialize training
         self.stop_training = False

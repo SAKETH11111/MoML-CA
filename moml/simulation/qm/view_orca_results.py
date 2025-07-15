@@ -191,7 +191,7 @@ def create_molecule_images(data: List[Dict[str, Any]], output_dir: str) -> None:
 
             # Generate 2D coordinates for visualization
             mol = Chem.AddHs(mol)
-            Draw.MolToImage(mol)
+            AllChem.Compute2DCoords(mol) # Compute 2D coordinates
 
             # Draw molecule
             img = Draw.MolToImage(mol, size=(400, 400), kekulize=True)

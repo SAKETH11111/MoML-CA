@@ -76,7 +76,7 @@ class NPTEnsemble(EnsembleStrategy):
         with mlflow.start_run(run_name=f"npt_ensemble_{int(time.time())}"):
             # Log parameters
             mlflow.log_params({
-                **self.config.dict(),
+                **self.config.model_dump(),
                 "num_replicas": self.num_replicas
             })
             
@@ -94,6 +94,7 @@ class NPTEnsemble(EnsembleStrategy):
                             self._run_replica,
                             system,
                             positions,
+                            system.topology, # Pass topology
                             replica_dir,
                             i
                         )
@@ -124,16 +125,17 @@ class NPTEnsemble(EnsembleStrategy):
             logger.info("ensemble_complete", **ensemble_results)
             return ensemble_results
     
-    def _run_replica(self, 
+    def _run_replica(self,
                     system: System,
                     positions: unit.Quantity,
+                    topology: app.Topology, # Add topology parameter
                     output_dir: Path,
                     replica_id: int) -> Dict:
         """Run a single replica."""
         logger.info("starting_replica", replica_id=replica_id)
         
         # Create replica-specific config
-        replica_config = self.config.copy()
+        replica_config = self.config.model_copy()
         if self.config.random_seed is not None:
             replica_config.random_seed = self.config.random_seed + replica_id
         
@@ -145,7 +147,7 @@ class NPTEnsemble(EnsembleStrategy):
         system, positions = equilibration.run(system, positions)
         
         # Run production
-        result = runner.run(system, positions, output_dir)
+        result = runner.run(system, positions, topology, output_dir) # Pass topology
         
         logger.info("replica_complete", replica_id=replica_id, **result)
         return result
@@ -172,7 +174,7 @@ class CpHEnsemble(EnsembleStrategy):
         with mlflow.start_run(run_name=f"cph_ensemble_{int(time.time())}"):
             # Log parameters
             mlflow.log_params({
-                **self.config.dict(),
+                **self.config.model_dump(),
                 "ph_values": self.ph_values
             })
             
@@ -190,6 +192,7 @@ class CpHEnsemble(EnsembleStrategy):
                             self._run_ph_replica,
                             system,
                             positions,
+                            system.topology, # Pass topology
                             ph_dir,
                             ph
                         )
@@ -223,13 +226,14 @@ class CpHEnsemble(EnsembleStrategy):
     def _run_ph_replica(self,
                        system: System,
                        positions: unit.Quantity,
+                       topology: app.Topology, # Add topology parameter
                        output_dir: Path,
                        ph: float) -> Dict:
         """Run a single pH replica."""
         logger.info("starting_ph_replica", ph=ph)
         
         # Create pH-specific config
-        ph_config = self.config.copy()
+        ph_config = self.config.model_copy()
         ph_config.system.ph = ph
         
         # Setup and run
@@ -240,7 +244,7 @@ class CpHEnsemble(EnsembleStrategy):
         system, positions = equilibration.run(system, positions)
         
         # Run production
-        result = runner.run(system, positions, output_dir)
+        result = runner.run(system, positions, topology, output_dir) # Pass topology
         
         logger.info("ph_replica_complete", ph=ph, **result)
         return result

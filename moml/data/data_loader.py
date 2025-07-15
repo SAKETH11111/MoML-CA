@@ -55,6 +55,17 @@ class PFASDataLoader:
 
         # Hierarchical graph support
         self.coarsener: Optional[GraphCoarsener] = None
+    def _assign_labels_to_graph(self, graph, labels_data):
+        """Helper method to assign labels to a graph."""
+        if isinstance(labels_data, dict):
+            if "force_field_params" in labels_data:
+                graph.y_ff = torch.tensor(labels_data["force_field_params"], dtype=torch.float)
+            if "molecular_properties" in labels_data:
+                graph.y_props = torch.tensor(labels_data["molecular_properties"], dtype=torch.float)
+            if "adsorption_potential" in labels_data:
+                graph.y_ads = torch.tensor([labels_data["adsorption_potential"]], dtype=torch.float)
+        elif labels_data is not None:
+            graph.y = torch.tensor([labels_data], dtype=torch.float)
         if self.config.get("hierarchical"):
             self.coarsener = GraphCoarsener(
                 use_3d_coords=graph_cfg.get("use_3d_coords", True),
@@ -216,35 +227,24 @@ class PFASDataLoader:
             graph = self.add_environmental_features(graph, env)
         labels_data = self.labels.get(mol_id)
         label = labels_data
-        if isinstance(labels_data, dict):
-            if "force_field_params" in labels_data:
-                graph.y_ff = torch.tensor(labels_data["force_field_params"], dtype=torch.float)
-            if "molecular_properties" in labels_data:
-                graph.y_props = torch.tensor(labels_data["molecular_properties"], dtype=torch.float)
-            if "adsorption_potential" in labels_data:
-                graph.y_ads = torch.tensor([labels_data["adsorption_potential"]], dtype=torch.float)
-        elif labels_data is not None:
-            graph.y = torch.tensor([labels_data], dtype=torch.float)
+        self._assign_labels_to_graph(graph, labels_data)
 
         result: Any = graph
         if self.coarsener is not None:
             mol = Chem.MolFromMolFile(mol_path, removeHs=False)
-            hier_graphs = self.coarsener.create_hierarchical_graphs(graph, mol)
-            if env:
+            if graph is not None: # Ensure graph is not None before passing to create_hierarchical_graphs
+                hier_graphs = self.coarsener.create_hierarchical_graphs(graph, mol)
+                if env:
+                    for g in hier_graphs.values():
+                        self.add_environmental_features(g, env)
                 for g in hier_graphs.values():
-                    self.add_environmental_features(g, env)
-            if isinstance(labels_data, dict):
-                for g in hier_graphs.values():
-                    if "force_field_params" in labels_data:
-                        g.y_ff = torch.tensor(labels_data["force_field_params"], dtype=torch.float)
-                    if "molecular_properties" in labels_data:
-                        g.y_props = torch.tensor(labels_data["molecular_properties"], dtype=torch.float)
-                    if "adsorption_potential" in labels_data:
-                        g.y_ads = torch.tensor([labels_data["adsorption_potential"]], dtype=torch.float)
-            elif labels_data is not None:
-                for g in hier_graphs.values():
-                    g.y = torch.tensor([labels_data], dtype=torch.float)
-            result = hier_graphs
+                    self._assign_labels_to_graph(g, labels_data)
+                result = hier_graphs
+            else:
+                # Handle the case where graph is None, perhaps log a warning or return an empty dict
+                # For now, let's assume we skip hierarchical graph creation if atom-level graph is None
+                hier_graphs = {}
+                result = graph # Or handle as appropriate for your application
 
         if self.cache_enabled:
             self.cache[mol_id] = (result, label, env)

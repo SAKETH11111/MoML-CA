@@ -4,7 +4,6 @@ import argparse
 import yaml
 import torch
 import glob
-import numpy as np
 from torch_geometric.loader import DataLoader as GraphDataLoader
 from tqdm import tqdm
 
@@ -15,20 +14,9 @@ from moml.data.dataset import get_dataset
 from moml.models.mgnn.djmgnn import DJMGNN
 from moml.data.feature_transforms import CreateEdges, FeaturizeNodes, StandardizeTargets
 from torchvision.transforms import Compose
-from torch_geometric.data import Dataset
+from moml.utils.dataset_utils import SubsetWrapper # Import SubsetWrapper
 
-class SubsetWrapper(Dataset):
-    def __init__(self, subset):
-        super().__init__()
-        self.subset = subset
-
-    def __len__(self):
-        return len(self.subset)
-
-    def __getitem__(self, idx):
-        return self.subset[idx]
-
-def evaluate_checkpoint(ckpt_path, config, device, val_loader, stats):
+def evaluate_checkpoint(ckpt_path, config, device, val_loader):
     """Evaluates a single checkpoint and returns its scaled loss."""
     mgnn_config = config.get('mgnn', {})
     model = DJMGNN(
@@ -80,7 +68,7 @@ def main():
     # --- Load Dataset ---
     print(f"Loading QM9 {args.split} split...")
     transform = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name="qm9")])
-    full_dataset = get_dataset("qm9", root="MoML-CA/data", transform=transform)
+    full_dataset = get_dataset("qm9", root="data", transform=transform) # Changed root path
     torch.manual_seed(42)
     shuffled_indices = torch.randperm(len(full_dataset))
     train_size = int(0.8 * len(full_dataset))
@@ -108,7 +96,7 @@ def main():
     print(f"Found {len(checkpoint_paths)} checkpoints to evaluate.")
     for ckpt_path in tqdm(checkpoint_paths, desc="Evaluating checkpoints"):
         step = int(ckpt_path.split('_')[-1].split('.')[0])
-        loss = evaluate_checkpoint(ckpt_path, config, device, val_loader, stats)
+        loss = evaluate_checkpoint(ckpt_path, config, device, val_loader)
         print(f"  - Step {step:6d}: Scaled Loss (MSE) = {loss:.6f}")
         if loss < best_loss:
             best_loss = loss
