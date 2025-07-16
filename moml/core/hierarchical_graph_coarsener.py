@@ -480,7 +480,7 @@ class GraphCoarsener:
 
         # Create structural motif level graph  
         structural_motif_graph = self.create_structural_motif_graph(
-            data, mol  # Use atom-level data directly
+            functional_group_graph, mol  # Use functional group graph
         )
 
         return {

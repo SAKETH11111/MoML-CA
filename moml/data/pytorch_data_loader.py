@@ -89,15 +89,15 @@ def prepare_dataloaders(
     appropriate configurations for each split. Training data is shuffled by
     default, while validation and test data are not shuffled to ensure
     reproducible evaluation.
-    
+
     Args:
         train_dataset: Training dataset (required)
         val_dataset: Optional validation dataset
-        test_dataset: Optional test dataset  
+        test_dataset: Optional test dataset
         batch_size: Number of samples per batch
         num_workers: Number of worker processes for data loading
         shuffle: Whether to shuffle training data (validation/test never shuffled)
-    
+
     Returns:
         Dictionary containing DataLoader objects for each split:
         - 'train': Training DataLoader (always present)
@@ -142,7 +142,7 @@ def prepare_dataloaders(
     }
     
     logger.debug(f"Created training dataloader with {len(train_dataset)} samples")  # type: ignore
-    
+
     # Create validation dataloader if dataset provided
     if val_dataset is not None:
         dataloaders["val"] = DataLoader(
@@ -153,7 +153,7 @@ def prepare_dataloaders(
             collate_fn=collate_graphs
         )
         logger.debug(f"Created validation dataloader with {len(val_dataset)} samples")  # type: ignore
-    
+
     # Create test dataloader if dataset provided
     if test_dataset is not None:
         dataloaders["test"] = DataLoader(
@@ -163,7 +163,7 @@ def prepare_dataloaders(
             num_workers=num_workers,
             collate_fn=collate_graphs
         )
-                logger.debug(f"Created test dataloader with {len(test_dataset)} samples")  # type: ignore
+        logger.debug(f"Created test dataloader with {len(test_dataset)} samples")  # type: ignore
 
     return dataloaders
 
@@ -182,7 +182,7 @@ def create_dataloaders_from_directory(
 ) -> Dict[str, DataLoader]:
     """
     Create DataLoaders from a directory of molecular files.
-    
+
     This convenience function handles the complete pipeline from directory
     to DataLoaders: loading datasets, splitting data, and creating loaders.
     It supports both pre-split directory structures and automatic splitting.
@@ -190,7 +190,7 @@ def create_dataloaders_from_directory(
     Directory Structure Options:
     1. Pre-split: data_dir/{train,val,test}/ subdirectories
     2. Single directory: All files in data_dir, automatically split
-    
+
     Args:
         data_dir: Directory containing molecule files or train/val/test subdirs
         labels_file: Optional path to file containing molecular labels
@@ -292,7 +292,7 @@ def _create_dataloaders_presplit(
         config: Graph processing configuration
         batch_size: Batch size for dataloaders
         num_workers: Number of worker processes
-        
+
     Returns:
         Dictionary of dataloaders
     """
@@ -302,7 +302,7 @@ def _create_dataloaders_presplit(
     train_dir = os.path.join(data_dir, "train")
     val_dir = os.path.join(data_dir, "val")
     test_dir = os.path.join(data_dir, "test")
-    
+
     # Load training dataset (required)
     train_dataset = load_dataset(train_dir, labels_file, file_pattern, config)
     logger.info(f"Loaded training dataset: {len(train_dataset)} samples")
@@ -312,21 +312,21 @@ def _create_dataloaders_presplit(
     if os.path.isdir(val_dir):
         val_dataset = load_dataset(val_dir, labels_file, file_pattern, config)
         logger.info(f"Loaded validation dataset: {len(val_dataset)} samples")
-    
+
     # Load test dataset if directory exists
     test_dataset = None
     if os.path.isdir(test_dir):
         test_dataset = load_dataset(test_dir, labels_file, file_pattern, config)
         logger.info(f"Loaded test dataset: {len(test_dataset)} samples")
-    
+
     # Create and return dataloaders
     return prepare_dataloaders(
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
-        test_dataset=test_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-    )
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            test_dataset=test_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+        )
 
 
 def _create_dataloaders_with_splitting(
@@ -364,7 +364,7 @@ def _create_dataloaders_with_splitting(
     # Load complete dataset
     dataset = load_dataset(data_dir, labels_file, file_pattern, config)
     logger.info(f"Loaded complete dataset: {len(dataset)} samples")
-    
+
     # Split dataset
     train_dataset, val_dataset, test_dataset = split_dataset(  # type: ignore
         dataset,
@@ -379,16 +379,16 @@ def _create_dataloaders_with_splitting(
         f"Split dataset - Train: {len(train_dataset)}, "
         f"Val: {len(val_dataset) if val_dataset else 0}, "
         f"Test: {len(test_dataset) if test_dataset else 0}"
-    )
-    
+        )
+
     # Create and return dataloaders
     return prepare_dataloaders(
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
-        test_dataset=test_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-    )
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            test_dataset=test_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+        )
 
 
 def create_stratified_dataloaders(
@@ -408,17 +408,17 @@ def create_stratified_dataloaders(
     that the distribution of class labels is preserved across train, validation,
     and test sets. This is particularly important for classification tasks with
     imbalanced datasets.
-    
+
     Args:
         dataset: The complete dataset to split
         labels: List of labels corresponding to dataset samples for stratification
         batch_size: Number of samples per batch
         num_workers: Number of worker processes for data loading
         train_ratio: Fraction of data for training
-        val_ratio: Fraction of data for validation  
+        val_ratio: Fraction of data for validation
         test_ratio: Fraction of data for testing
         random_seed: Random seed for reproducible stratified splitting
-    
+
     Returns:
         Dictionary containing DataLoader objects for each split
     
@@ -481,7 +481,7 @@ def create_stratified_dataloaders(
         f"Val: {len(val_dataset) if val_dataset else 0}, "
         f"Test: {len(test_dataset) if test_dataset else 0}"
     )
-    
+
     # Create and return dataloaders
     return prepare_dataloaders(
         train_dataset=train_dataset,

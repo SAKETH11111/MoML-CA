@@ -3,6 +3,7 @@ import numpy as np
 import mdtraj as md
 from pathlib import Path
 import tempfile
+import pickle
 import yaml
 from moml.simulation.molecular_dynamics.postprocessing.timeseries_extractor import TimeseriesExtractor
 
@@ -133,10 +134,14 @@ def test_extract_metrics(temp_files, sample_metrics_config):
         
         assert isinstance(metrics, dict)
         assert all(metric_name in metrics for metric_name in sample_metrics_config.keys())
-        assert output_path.exists()
+        
+        # The extractor saves with .pkl extension, not .npy
+        pkl_output_path = output_path.with_suffix('.pkl')
+        assert pkl_output_path.exists()
         
         # Load saved metrics and verify
-        saved_metrics = np.load(output_path, allow_pickle=True).item()
+        with open(pkl_output_path, 'rb') as f:
+            saved_metrics = pickle.load(f)
         assert saved_metrics.keys() == metrics.keys()
         
         # Clean up
@@ -175,8 +180,8 @@ def test_compute_metric_hbonds(sample_trajectory, sample_metrics_config):
     """Test hydrogen bonds computation."""
     extractor = TimeseriesExtractor()
     hbonds = extractor._compute_hbonds(sample_trajectory, sample_metrics_config['hbonds'])
-    assert isinstance(hbonds, list) # md.baker_hubbard returns a list of hydrogen bonds
-    # Further assertions could be added to check the content of the list if needed
+    assert isinstance(hbonds, np.ndarray) # Method returns numpy array, not list
+    # Further assertions could be added to check the content of the array if needed
 
 def test_invalid_metric_type(sample_trajectory):
     """Test handling of invalid metric type."""

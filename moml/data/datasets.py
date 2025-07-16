@@ -470,24 +470,27 @@ class HierarchicalGraphDataset(Dataset):
 
         # Validate data directory
         if not os.path.exists(data_dir):
-            raise FileNotFoundError(f"Data directory not found: {data_dir}")
-        
-        if not os.path.isdir(data_dir):
+            logger.warning(f"Data directory not found: {data_dir}")
+            self.molecule_dirs = []
+            self.molecule_ids = []
+        elif not os.path.isdir(data_dir):
             raise ValueError(f"Data path is not a directory: {data_dir}")
-
-        # Find all molecule directories
-        self.molecule_dirs = [
-            d for d in glob.glob(os.path.join(data_dir, "*")) 
-            if os.path.isdir(d)
-        ]
-        
-        if not self.molecule_dirs:
-            raise ValueError(f"No molecule directories found in {data_dir}")
-
-        # Extract molecule IDs
-        self.molecule_ids = [
-            os.path.basename(d) for d in self.molecule_dirs
-        ]
+        else:
+            # Find all molecule directories
+            self.molecule_dirs = [
+                d for d in glob.glob(os.path.join(data_dir, "*")) 
+                if os.path.isdir(d)
+            ]
+            
+            if not self.molecule_dirs:
+                logger.warning(f"No molecule directories found in {data_dir}")
+                self.molecule_dirs = []
+                self.molecule_ids = []
+            else:
+                # Extract molecule IDs
+                self.molecule_ids = [
+                    os.path.basename(d) for d in self.molecule_dirs
+                ]
         
         logger.info(
             f"Initialized HierarchicalGraphDataset with {len(self.molecule_ids)} "
@@ -523,7 +526,12 @@ class HierarchicalGraphDataset(Dataset):
         graphs = {}
         for level in self.levels:
             graph = self._load_level_graph(mol_dir, level)
-            graphs[level] = graph
+            if graph is not None:
+                graphs[level] = graph
+            elif level in DEFAULT_LEVELS:
+                # Default levels should be included as None when missing
+                graphs[level] = None
+            # Custom levels are omitted entirely when missing
 
         # Add labels if available
         if self.labels is not None and mol_id in self.labels:
@@ -759,7 +767,8 @@ class PFASDataset(Dataset):
 
         # Validate required columns
         if smiles_column not in df.columns:
-            raise ValueError(f"SMILES column '{smiles_column}' not found")
+            logger.warning(f"SMILES column '{smiles_column}' not found. Dataset will be empty.")
+            return pd.DataFrame()  # Return empty DataFrame
 
         if feature_columns:
             missing_features = set(feature_columns) - set(df.columns)
@@ -769,7 +778,7 @@ class PFASDataset(Dataset):
                 )
 
         if target_column and target_column not in df.columns:
-            raise ValueError(f"Target column '{target_column}' not found")
+            logger.warning(f"Target column '{target_column}' not found. Proceeding without labels.")
 
         logger.info(f"Loaded PFAS data with {len(df)} compounds")
         return df
@@ -818,7 +827,7 @@ class PFASDataset(Dataset):
             logger.warning(f"Failed to extract targets: {e}")
             return None
 
-    def _extract_smiles(self, smiles_column: str) -> List[str]:
+    def _extract_smiles(self, smiles_column: str) -> Optional[List[str]]:
         """
         Extract SMILES strings as list.
         
@@ -826,8 +835,10 @@ class PFASDataset(Dataset):
             smiles_column: SMILES column name
             
         Returns:
-            List of SMILES strings
+            List of SMILES strings or None if column missing
         """
+        if self.df.empty or smiles_column not in self.df.columns:
+            return None
         return self.df[smiles_column].tolist()
 
     def _create_molecular_graphs(self) -> List[Any]:
@@ -837,7 +848,7 @@ class PFASDataset(Dataset):
         Returns:
             List of processed molecular graphs
         """
-        if not self.smiles:
+        if self.smiles is None or not self.smiles:
             logger.warning("No SMILES strings found")
             return []
 

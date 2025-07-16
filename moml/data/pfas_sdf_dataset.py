@@ -43,7 +43,7 @@ try:
     from rdkit.Chem import Crippen, Descriptors, rdDepictor  # type: ignore
     from rdkit import RDLogger  # type: ignore
     HAS_RDKIT = True
-    
+
     # Suppress RDKit warnings for cleaner output
     RDLogger.DisableLog('rdApp.*')  # type: ignore
     
@@ -169,7 +169,7 @@ class PFASSDFDataset(InMemoryDataset):
         ImportError: If RDKit is not available
         FileNotFoundError: If no SDF files are found in the raw directory
     """
-
+    
     def __init__(
         self,
         root: str,
@@ -227,7 +227,7 @@ class PFASSDFDataset(InMemoryDataset):
         else:
             self.data, self.slices = None, None
             logger.debug("No processed data file found")
-
+        
     @property
     def raw_file_names(self) -> List[str]:
         """
@@ -251,7 +251,7 @@ class PFASSDFDataset(InMemoryDataset):
         except Exception as e:
             logger.error(f"Error finding SDF files in {self.raw_dir}: {e}")
             return []
-
+    
     @property
     def processed_file_names(self) -> List[str]:
         """
@@ -262,7 +262,7 @@ class PFASSDFDataset(InMemoryDataset):
         """
         split_suffix = f"_{self.split}" if self.split else ""
         return [f"pfas_sdf{split_suffix}.pt"]
-
+    
     def download(self) -> None:
         """
         Check for presence of SDF files (no actual download).
@@ -280,7 +280,7 @@ class PFASSDFDataset(InMemoryDataset):
             raise FileNotFoundError(error_msg)
         
         logger.info(f"Found {len(self.raw_file_names)} SDF files in raw directory")
-
+    
     def process(self) -> None:
         """
         Process SDF files into PyTorch Geometric Data objects.
@@ -313,13 +313,13 @@ class PFASSDFDataset(InMemoryDataset):
                 for mol in molecules:
                     if mol is None:
                         continue
-                    
+                        
                     # Convert molecule to Data object
                     data = self._mol_to_data(mol)
                     if data is not None:
                         data_list.append(data)
                         successful_molecules += 1
-                    
+                        
             except Exception as e:
                 logger.error(f"Error processing {sdf_file}: {e}")
                 failed_files += 1
@@ -374,11 +374,11 @@ class PFASSDFDataset(InMemoryDataset):
                 logger.info(
                     f"Pre-filter removed {initial_count - filtered_count} molecules"
                 )
-        
+            
         # Apply pre_transform if specified
         if self.pre_transform is not None:
             try:
-                data_list = [self.pre_transform(data) for data in data_list]
+            data_list = [self.pre_transform(data) for data in data_list]
                 logger.info("Applied pre-transform to all molecules")
             except Exception as e:
                 logger.error(f"Error applying pre-transform: {e}")
@@ -397,11 +397,11 @@ class PFASSDFDataset(InMemoryDataset):
             logger.warning("No valid molecules to save - saving empty dataset")
             torch.save((None, None), self.processed_paths[0])
             return
-        
+
         try:
             # Collate data and save
-            data, slices = self.collate(data_list)
-            torch.save((data, slices), self.processed_paths[0])
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
             logger.info(
                 f"Saved {len(data_list)} processed molecules to "
                 f"{self.processed_paths[0]}"
@@ -491,7 +491,7 @@ class PFASSDFDataset(InMemoryDataset):
                 
             return torch.tensor(positions, dtype=torch.float)
             
-        except (AttributeError, ValueError):
+            except (AttributeError, ValueError):
             # If no 3D conformer, generate 2D coordinates and set z=0
             logger.debug("No 3D conformer found, using 2D coordinates")
             
@@ -521,20 +521,20 @@ class PFASSDFDataset(InMemoryDataset):
         Returns:
             Tensor of edge indices [2, num_edges]
         """
-        edge_indices = []
+            edge_indices = []
         
-        for bond in mol.GetBonds():
-            i = bond.GetBeginAtomIdx()
-            j = bond.GetEndAtomIdx()
+            for bond in mol.GetBonds():
+                i = bond.GetBeginAtomIdx()
+                j = bond.GetEndAtomIdx()
             # Add both directions for undirected graph
             edge_indices.extend([[i, j], [j, i]])
-        
-        if edge_indices:
+            
+            if edge_indices:
             return torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-        else:
+            else:
             # No bonds - return empty edge_index
             return torch.empty((2, 0), dtype=torch.long)
-
+            
     def _compute_molecular_descriptors(self, mol) -> torch.Tensor:
         """
         Compute molecular descriptors as graph-level targets.
@@ -559,7 +559,7 @@ class PFASSDFDataset(InMemoryDataset):
             # Compute comprehensive molecular descriptors
             descriptors = [
                 Descriptors.MolWt(mol),                    # Molecular weight
-                Descriptors.ExactMolWt(mol),               # Exact molecular weight
+                Descriptors.ExactMolWt(mol),               # Exact molecular weight  
                 Crippen.MolLogP(mol),                      # LogP (lipophilicity)
                 Descriptors.TPSA(mol),                     # Topological polar surface area
                 Descriptors.NumHAcceptors(mol),            # H-bond acceptors

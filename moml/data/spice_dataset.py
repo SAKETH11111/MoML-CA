@@ -69,7 +69,7 @@ class SpiceDataset(InMemoryDataset):
     The SPICE dataset provides high-quality quantum mechanical calculations for
     diverse molecular systems, making it ideal for training models on accurate
     energies and forces for molecular property prediction tasks.
-    
+
     Args:
         root: Root directory where the dataset should be saved
         split: Dataset split identifier ('train', 'val', 'test')
@@ -302,7 +302,7 @@ class SpiceDataset(InMemoryDataset):
             # Get number of conformers
             num_conformers = mol_data['dft_total_energy'].shape[0]
             logger.debug(f"Molecule {mol_key}: {num_conformers} conformers")
-            
+
             # Process each conformer
             for conf_idx in range(num_conformers):
                 conformer = self._process_conformer(
@@ -336,9 +336,9 @@ class SpiceDataset(InMemoryDataset):
         try:
             # Extract conformer data
             coordinates = np.array(mol_data['conformations'][conf_idx])
-            forces = np.array(mol_data['dft_total_gradient'][conf_idx])
-            energy = np.array(mol_data['dft_total_energy'][conf_idx]).item()
-            
+                forces = np.array(mol_data['dft_total_gradient'][conf_idx])
+                energy = np.array(mol_data['dft_total_energy'][conf_idx]).item()
+
             # Convert to tensors
             pos_tensor = torch.tensor(coordinates, dtype=torch.float32)
             z_tensor = torch.tensor(atomic_numbers, dtype=torch.long)
@@ -346,16 +346,16 @@ class SpiceDataset(InMemoryDataset):
             energy_tensor = torch.tensor([energy], dtype=torch.float32)
             
             # Generate edge connectivity
-            edge_index = self._get_edge_index(pos_tensor)
-            
+                edge_index = self._get_edge_index(pos_tensor)
+
             # Create Data object
             return Data(
-                pos=pos_tensor,
+                    pos=pos_tensor,
                 z=z_tensor,
                 y_graph=energy_tensor,
                 node_y=forces_tensor,
-                edge_index=edge_index
-            )
+                    edge_index=edge_index
+                )
             
         except Exception as e:
             logger.debug(f"Error processing conformer {conf_idx}: {e}")
@@ -381,7 +381,7 @@ class SpiceDataset(InMemoryDataset):
             Edge index tensor [2, num_edges] defining graph connectivity
         """
         num_atoms = positions.shape[0]
-        
+
         if num_atoms < 2:
             # Single atom - no edges
             return torch.empty((2, 0), dtype=torch.long)
@@ -443,12 +443,12 @@ class SpiceDataset(InMemoryDataset):
             logger.warning("No conformers processed - saving empty dataset")
             torch.save((None, None), self.processed_paths[0])
             return
-        
+
         try:
             # Collate data and save
             data, slices = self.collate(data_list)
-            torch.save((data, slices), self.processed_paths[0])
-            
+        torch.save((data, slices), self.processed_paths[0])
+        
             logger.info(
                 f"Saved {len(data_list)} processed conformers to "
                 f"{self.processed_paths[0]}"

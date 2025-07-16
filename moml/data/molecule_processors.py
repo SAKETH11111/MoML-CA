@@ -124,13 +124,13 @@ def process_mol_file(
     This function converts a molecular structure file (MOL, SDF) into a graph
     representation suitable for machine learning. It can optionally include
     partial charges and other quantum mechanical properties.
-    
+
     Args:
         mol_file: Path to the molecule file (MOL, SDF format)
         processor: Optional molecular graph processor instance. If None,
                   a default processor will be created
         charges_file: Optional path to file containing partial charges
-    
+
     Returns:
         Graph representation of the molecule (PyTorch Geometric Data object)
         Returns None if processing fails
@@ -157,12 +157,12 @@ def process_mol_file(
         except Exception as e:
             logger.error(f"Failed to create graph processor: {e}")
             raise
-    
+
     # Read additional features if charges file provided
     additional_features = None
     if charges_file:
         additional_features = _process_charges_file(mol_file, charges_file)
-    
+
     # Process file using the graph processor
     try:
         graph = processor.file_to_graph(mol_file, additional_features)
@@ -228,14 +228,14 @@ def process_mol_file_to_graph(
     This function processes a molecular structure file and saves the resulting
     graph representation to a PyTorch file. The output path is automatically
     generated if not specified.
-    
+
     Args:
         mol_file: Path to the molecule file
         output_file: Optional path to save the graph. If None, automatically
                     generated based on input filename
         processor: Optional molecular graph processor instance
         charges_file: Optional path to file with partial charges
-    
+
     Returns:
         Path to the saved graph file
     
@@ -253,16 +253,16 @@ def process_mol_file_to_graph(
         error_msg = f"Graph processing failed for {mol_file}"
         logger.error(error_msg)
         raise ValueError(error_msg)
-    
+
     # Determine output path if not provided
     if output_file is None:
         output_file = _generate_output_path(mol_file, DEFAULT_GRAPH_SUFFIX)
-    
+
     # Create output directory if it doesn't exist
     output_dir = os.path.dirname(output_file)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    
+
     # Save graph to file
     try:
         torch.save(graph, output_file)
@@ -303,14 +303,14 @@ def batch_process_molecules(
     in the input directory and saves the resulting graph representations to
     the output directory. It supports various molecular file formats and
     optional partial charges.
-    
+
     Args:
         input_dir: Directory containing molecule files
         output_dir: Directory to save processed graph files
         config: Optional configuration dictionary for graph processing
         charges_dir: Optional directory containing partial charge files
         file_pattern: Comma-separated patterns to match molecule files
-    
+
     Returns:
         List of paths to successfully processed graph files
     
@@ -334,23 +334,23 @@ def batch_process_molecules(
     
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Create processor with config
     try:
         processor = create_graph_processor(config)
     except Exception as e:
         logger.error(f"Failed to create graph processor: {e}")
         raise
-    
+
     # Get list of molecule files
     mol_files = _find_molecule_files(input_dir, file_pattern)
-    
+
     if not mol_files:
         logger.warning(
             f"No files found matching pattern '{file_pattern}' in {input_dir}"
         )
         return []
-    
+
     logger.info(f"Found {len(mol_files)} molecule files to process")
     
     # Process each molecule file
@@ -363,11 +363,11 @@ def batch_process_molecules(
             charges_file = None
             if charges_dir:
                 charges_file = find_charges_file(mol_file, charges_dir)
-            
+
             # Generate output file path
             base_name = os.path.splitext(os.path.basename(mol_file))[0]
             output_file = os.path.join(output_dir, f"{base_name}{DEFAULT_GRAPH_SUFFIX}")
-            
+
             # Process and save the file
             result_path = process_mol_file_to_graph(
                 mol_file=mol_file,
@@ -376,7 +376,7 @@ def batch_process_molecules(
                 charges_file=charges_file
             )
             processed_files.append(result_path)
-            
+
         except Exception as e:
             logger.error(f"Error processing {mol_file}: {e}")
             failed_count += 1
@@ -387,7 +387,7 @@ def batch_process_molecules(
         f"Batch processing complete: {success_count} successful, "
         f"{failed_count} failed"
     )
-    
+
     # Save configuration for reference if provided
     if config:
         _save_config(output_dir, config)
@@ -446,13 +446,13 @@ def graph_batch_process(
     molecule files, specifically designed for use in pipeline contexts.
     It has fewer parameters than batch_process_molecules and uses logging
     instead of print statements.
-    
+
     Args:
         input_dir: Directory containing molecule files
         output_dir: Directory to save processed graph files
         config: Optional configuration for graph processing
         file_pattern: Single file pattern to match molecule files
-    
+
     Returns:
         List of paths to successfully processed graph files
     
@@ -472,25 +472,25 @@ def graph_batch_process(
     
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Create processor with config
     try:
         processor = create_graph_processor(config)
     except Exception as e:
         logger.error(f"Failed to create graph processor: {e}")
         raise
-    
+
     # Get list of molecule files
     mol_files = glob.glob(os.path.join(input_dir, file_pattern))
-    
+
     if not mol_files:
         logger.warning(
             f"No files found matching pattern '{file_pattern}' in {input_dir}"
         )
         return []
-    
+
     logger.info(f"Processing {len(mol_files)} molecule files")
-    
+
     # Process each molecule file
     processed_files = []
     failed_count = 0
@@ -500,7 +500,7 @@ def graph_batch_process(
             # Generate output file path
             base_name = os.path.splitext(os.path.basename(mol_file))[0]
             output_file = os.path.join(output_dir, f"{base_name}{DEFAULT_GRAPH_SUFFIX}")
-            
+
             # Process and save the file
             result_path = process_mol_file_to_graph(
                 mol_file=mol_file,
@@ -508,7 +508,7 @@ def graph_batch_process(
                 processor=processor
             )
             processed_files.append(result_path)
-            
+
         except Exception as e:
             logger.error(f"Error processing {mol_file}: {e}")
             failed_count += 1
@@ -519,11 +519,11 @@ def graph_batch_process(
         f"Processed {success_count} molecules successfully, "
         f"{failed_count} failed"
     )
-    
+
     # Save configuration for reference if provided
     if config:
         _save_config(output_dir, config)
-    
+
     return processed_files
 
 
@@ -538,12 +538,12 @@ def process_dataset(
     This function loads a CSV file containing SMILES strings, validates each
     SMILES, and creates RDKit molecule objects for valid entries. It adds
     several columns with validation results and canonical SMILES.
-    
+
     Args:
         csv_path: Path to CSV file containing molecular data
         smiles_col: Name of column containing SMILES strings
         id_col: Name of column containing molecule IDs (optional)
-    
+
     Returns:
         DataFrame with added validation columns:
         - rdkit_mol: RDKit molecule objects (for valid SMILES)
@@ -567,7 +567,7 @@ def process_dataset(
     # Validate file exists
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
-    
+
     try:
         # Load the CSV file
         df = pd.read_csv(csv_path)
@@ -575,19 +575,19 @@ def process_dataset(
     except Exception as e:
         logger.error(f"Failed to load CSV file {csv_path}: {e}")
         raise
-    
+
     # Check if SMILES column exists
     if smiles_col not in df.columns:
         error_msg = f"Column '{smiles_col}' not found in dataset"
         logger.error(error_msg)
         raise ValueError(error_msg)
-    
+
     # Initialize new columns for validation results
     df["rdkit_mol"] = None
     df["canonical_smiles"] = None
     df["is_valid_smiles"] = False
     df["smiles_error"] = None
-    
+
     # Process each SMILES string
     valid_count = 0
     
@@ -601,16 +601,16 @@ def process_dataset(
         
         # Validate SMILES
         is_valid, canonical_smiles, mol_obj, error = validate_smiles(smiles)
-        
+
         # Store validation results
         df.at[idx, "is_valid_smiles"] = is_valid
         df.at[idx, "smiles_error"] = error
-        
+
         if is_valid:
             df.at[idx, "canonical_smiles"] = canonical_smiles
             df.at[idx, "rdkit_mol"] = mol_obj
             valid_count += 1
-    
+
     # Log summary
     logger.info(
         f"SMILES validation complete: {valid_count}/{len(df)} "
@@ -632,12 +632,12 @@ def save_processed_molecules(
     - CSV file (without RDKit molecule objects)
     - Pickle file with valid molecule objects (if available)
     - Validation issues report (if there are invalid SMILES)
-    
+
     Args:
         df: DataFrame with processed molecular data
         output_dir: Directory to save output files
         base_filename: Base name for output files (without extension)
-    
+
     Returns:
         Dictionary mapping format names to file paths:
         - 'csv': Path to CSV file
@@ -654,12 +654,12 @@ def save_processed_molecules(
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     output_files = {}
-    
+
     # Save as CSV (without RDKit mol objects for compatibility)
     csv_df = df.copy()
     if "rdkit_mol" in csv_df.columns:
         csv_df = csv_df.drop(columns=["rdkit_mol"])
-    
+
     csv_path = os.path.join(output_dir, f"{base_filename}.csv")
     try:
         csv_df.to_csv(csv_path, index=False)
@@ -668,19 +668,19 @@ def save_processed_molecules(
     except Exception as e:
         logger.error(f"Failed to save CSV file: {e}")
         raise
-    
+
     # Save valid molecules as pickle file if available
     if "rdkit_mol" in df.columns and "is_valid_smiles" in df.columns:
         pickle_path = _save_molecule_pickle(df, output_dir, base_filename)
         if pickle_path:
             output_files["pickle"] = pickle_path
-    
+
     # Generate validation issues report if applicable
     if "is_valid_smiles" in df.columns and not bool(df["is_valid_smiles"].all()):
         report_path = _save_validation_report(df, output_dir, base_filename)
         if report_path:
             output_files["issues_report"] = report_path
-    
+
     logger.info(f"Saved processed data to {output_dir}")
     return output_files
 
@@ -813,7 +813,7 @@ def batch_process_molecules_dataset(
     This function provides a complete pipeline for processing molecular
     datasets: loading CSV, validating SMILES, calculating descriptors,
     and saving results in multiple formats.
-    
+
     Args:
         input_file: Path to input CSV file
         output_dir: Directory to save processed files
@@ -821,7 +821,7 @@ def batch_process_molecules_dataset(
         smiles_col: Name of column containing SMILES strings
         id_col: Name of column containing molecule IDs
         calculate_descriptors: Whether to calculate molecular descriptors
-    
+
     Returns:
         Dictionary with paths to saved files
     
@@ -837,10 +837,10 @@ def batch_process_molecules_dataset(
         ImportError: If required dependencies are missing
     """
     logger.info(f"Starting dataset processing for {input_file}")
-    
+
     # Process the dataset (validate SMILES)
     df = process_dataset(input_file, smiles_col, id_col)
-    
+
     # Calculate descriptors if requested
     if calculate_descriptors and HAS_CORE:
         df = _add_molecular_descriptors(df)
@@ -850,7 +850,7 @@ def batch_process_molecules_dataset(
     # Generate output filename
     base_filename = os.path.splitext(os.path.basename(input_file))[0]
     base_filename += DEFAULT_PROCESSED_SUFFIX
-    
+
     # Save processed data
     output_files = save_processed_molecules(df, output_dir, base_filename)
     

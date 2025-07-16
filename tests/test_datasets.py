@@ -227,19 +227,19 @@ class TestMolecularGraphDataset:
 
         # Check for expected log messages
         # MolecularGraphProcessor logs ERROR: "Molecule file not found: {file_path}"
-        # MolecularGraphDataset logs WARNING: "Graph for {file_path} was None..."
+        # MolecularGraphDataset logs WARNING: "Failed to process {file_path}, excluding from dataset"
 
         processor_log_found = any(
             f"Molecule file not found: {non_existent_file}" in record.message and record.levelname == "ERROR"
             for record in caplog.records
         )
         dataset_log_found = any(
-            f"Graph for {non_existent_file}" in record.message and record.levelname == "WARNING"
+            f"Failed to process {non_existent_file}, excluding from dataset" in record.message and record.levelname == "WARNING"
             for record in caplog.records
         )
 
         assert processor_log_found, "Expected 'Molecule file not found' log from processor not found."
-        assert dataset_log_found, "Expected 'Graph for ... was None' log from dataset not found."
+        assert dataset_log_found, "Expected 'Failed to process ... excluding from dataset' log from dataset not found."
 
     def test_error_invalid_mol_file(self, temp_data_dir: str, caplog):
         """Test MolecularGraphDataset with a malformed molecule file."""
@@ -253,19 +253,19 @@ class TestMolecularGraphDataset:
 
         # Check for expected log messages
         # MolecularGraphProcessor logs ERROR: "Failed to read molecule from {file_path}"
-        # MolecularGraphDataset logs WARNING: "Graph for {file_path} was None..."
+        # MolecularGraphDataset logs WARNING: "Failed to process {file_path}, excluding from dataset"
 
         processor_log_found = any(
             f"Failed to read molecule from {invalid_sdf_path}" in record.message and record.levelname == "ERROR"
             for record in caplog.records
         )
         dataset_log_found = any(
-            f"Graph for {invalid_sdf_path} was None" in record.message and record.levelname == "WARNING"
+            f"Failed to process {invalid_sdf_path}, excluding from dataset" in record.message and record.levelname == "WARNING"
             for record in caplog.records
         )
 
         assert processor_log_found, "Expected 'Failed to read molecule' log from processor not found."
-        assert dataset_log_found, "Expected 'Graph for ... was None' log from dataset not found."
+        assert dataset_log_found, "Expected 'Failed to process ... excluding from dataset' log from dataset not found."
 
 
 class TestHierarchicalGraphDataset:
@@ -299,7 +299,7 @@ class TestHierarchicalGraphDataset:
         item_b = dataset[dataset.molecule_ids.index("molB")]
         assert isinstance(item_b, dict)
         assert "atom" in item_b and isinstance(item_b["atom"], Data)
-        assert "functional_group" not in item_b
+        assert "functional_group" in item_b and item_b["functional_group"] is None
         assert "structural_motif" in item_b and (
             isinstance(item_b["structural_motif"], Data) or item_b["structural_motif"] is None
         )

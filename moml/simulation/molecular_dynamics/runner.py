@@ -136,7 +136,7 @@ class MDRunner:
             "final_energy": final_state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole),
             "final_temperature": (2 * final_state.getKineticEnergy() / \
                                   (system.getNumParticles() * 3 - system.getNumConstraints()) / \
-                                  unit.BOLTZMANN_CONSTANT_kB).value_in_unit(unit.kelvin),
+                                  (unit.BOLTZMANN_CONSTANT_kB * unit.AVOGADRO_CONSTANT_NA)).value_in_unit(unit.kelvin),
         }
         try:
             metadata["final_density"] = final_state.getDensity().value_in_unit(unit.gram / unit.milliliter)

@@ -277,6 +277,138 @@ class TestMGNNPredictorMethods:
         results = predictor.batch_predict(dummy_graph_data_list)
         assert len(results) == len(dummy_graph_data_list)
         assert "graph_pred" in results[0]
+        
+    def test_batch_predict_with_node_predictions(self, predictor_fixture, dummy_graph_data_list):
+        """Test that node predictions are properly split in batch processing."""
+        predictor = predictor_fixture
+        results = predictor.batch_predict(dummy_graph_data_list)
+        
+        # Check we have the right number of results
+        assert len(results) == len(dummy_graph_data_list)
+        
+        # Check that each result has both graph and node predictions
+        for i, result in enumerate(results):
+            assert "graph_pred" in result
+            assert "node_pred" in result
+            
+            # Verify node prediction shapes match original graph node counts
+            original_graph = dummy_graph_data_list[i]
+            expected_nodes = original_graph.x.shape[0]
+            actual_nodes = result["node_pred"].shape[0]
+            
+            assert actual_nodes == expected_nodes, (
+                f"Graph {i}: expected {expected_nodes} nodes, got {actual_nodes}"
+            )
+            
+    def test_split_batch_predictions_node_splitting(self):
+        """Test the _split_batch_predictions method directly for node prediction splitting."""
+        from moml.models.mgnn.evaluation.predictor import MGNNPredictor
+        
+        # Create dummy predictor (we only need the method)
+        with patch("moml.models.mgnn.evaluation.predictor.create_graph_processor"):
+            dummy_model = MagicMock()
+            predictor = MGNNPredictor(model=dummy_model, config={})
+        
+        # Create test data: 2 graphs with 3 and 2 nodes respectively
+        node_counts = [3, 2]
+        total_nodes = sum(node_counts)
+        
+        # Dummy predictions
+        batch_predictions = {
+            "graph_pred": torch.randn(2, 1),  # 2 graphs, 1 feature each
+            "node_pred": torch.randn(total_nodes, 2),  # 5 total nodes, 2 features each
+            "node_features": torch.randn(total_nodes, 4),  # 5 total nodes, 4 features each
+        }
+        
+        # Split predictions
+        individual_results = predictor._split_batch_predictions(
+            batch_predictions, num_graphs=2, node_counts=node_counts
+        )
+        
+        # Check results
+        assert len(individual_results) == 2
+        
+        # Check graph 0 (3 nodes)
+        assert individual_results[0]["graph_pred"].shape == (1, 1)
+        assert individual_results[0]["node_pred"].shape == (3, 2)
+        assert individual_results[0]["node_features"].shape == (3, 4)
+        
+        # Check graph 1 (2 nodes)
+        assert individual_results[1]["graph_pred"].shape == (1, 1)
+        assert individual_results[1]["node_pred"].shape == (2, 2)
+        assert individual_results[1]["node_features"].shape == (2, 4)
+        
+        # Verify that the node predictions are correctly sliced
+        # Graph 0 should get nodes 0-2, Graph 1 should get nodes 3-4
+        torch.testing.assert_close(
+            individual_results[0]["node_pred"], 
+            batch_predictions["node_pred"][:3]
+        )
+        torch.testing.assert_close(
+            individual_results[1]["node_pred"], 
+            batch_predictions["node_pred"][3:]
+        )
+        
+    def test_split_batch_predictions_empty_graphs(self):
+        """Test handling of empty graphs in node prediction splitting."""
+        from moml.models.mgnn.evaluation.predictor import MGNNPredictor
+        
+        # Create dummy predictor
+        with patch("moml.models.mgnn.evaluation.predictor.create_graph_processor"):
+            dummy_model = MagicMock()
+            predictor = MGNNPredictor(model=dummy_model, config={})
+        
+        # Test with some empty graphs: [2 nodes, 0 nodes, 3 nodes]
+        node_counts = [2, 0, 3]
+        total_nodes = sum(node_counts)  # 5 nodes total
+        
+        batch_predictions = {
+            "graph_pred": torch.randn(3, 1),
+            "node_pred": torch.randn(total_nodes, 2),
+        }
+        
+        individual_results = predictor._split_batch_predictions(
+            batch_predictions, num_graphs=3, node_counts=node_counts
+        )
+        
+        assert len(individual_results) == 3
+        
+        # Graph 0: 2 nodes
+        assert individual_results[0]["node_pred"].shape == (2, 2)
+        
+        # Graph 1: 0 nodes (empty)
+        assert individual_results[1]["node_pred"].shape == (0, 2)
+        
+        # Graph 2: 3 nodes  
+        assert individual_results[2]["node_pred"].shape == (3, 2)
+        
+    def test_split_batch_predictions_no_node_counts(self):
+        """Test behavior when node counts are not provided."""
+        from moml.models.mgnn.evaluation.predictor import MGNNPredictor
+        
+        # Create dummy predictor
+        with patch("moml.models.mgnn.evaluation.predictor.create_graph_processor"):
+            dummy_model = MagicMock()
+            predictor = MGNNPredictor(model=dummy_model, config={})
+        
+        batch_predictions = {
+            "graph_pred": torch.randn(2, 1),
+            "node_pred": torch.randn(5, 2),
+        }
+        
+        # Call without node counts
+        individual_results = predictor._split_batch_predictions(
+            batch_predictions, num_graphs=2, node_counts=None
+        )
+        
+        # Should still have graph predictions
+        assert len(individual_results) == 2
+        assert "graph_pred" in individual_results[0]
+        assert "graph_pred" in individual_results[1]
+        
+        # Node predictions should be missing (not split)
+        assert "node_pred" not in individual_results[0]
+        assert "node_pred" not in individual_results[1]
 
     def test_predict_from_dataloader(self, predictor_fixture, dummy_graph_data_list):
         from torch_geometric.loader import DataLoader
@@ -317,7 +449,7 @@ class TestCreatePredictorFactory:
             create_predictor(config={})
 
 
-@patch("moml.models.mgnn.evaluation.predictor.create_predictor")
+@patch("moml.models.mgnn.evaluation.predictor.MGNNPredictor")
 class TestBatchPredictFromFiles:
     @pytest.fixture
     def temp_input_dir_for_batch(self, temp_model_files_dir):
@@ -331,11 +463,11 @@ class TestBatchPredictFromFiles:
         return input_dir
 
     def test_batch_predict_files_success(
-        self, mock_create_pred, temp_input_dir_for_batch, dummy_model_path, temp_model_files_dir
+        self, mock_mgnn_predictor, temp_input_dir_for_batch, dummy_model_path, temp_model_files_dir
     ):
         # Create a mock for the MGNNPredictor instance
         mock_predictor_instance = MagicMock(spec=MGNNPredictor)
-        mock_create_pred.return_value = mock_predictor_instance
+        mock_mgnn_predictor.return_value = mock_predictor_instance
 
         # Mock the return value of predict_from_file
         mock_predictor_instance.batch_predict.return_value = [
@@ -362,13 +494,13 @@ class TestBatchPredictFromFiles:
             file_pattern="*.pt",
         )
 
-        assert mock_create_pred.call_count == 1
+        assert mock_mgnn_predictor.call_count == 1
         assert mock_predictor_instance.batch_predict.call_count == 1
         # Check if predictions file is created
         assert os.path.exists(os.path.join(output_dir, "predictions.json"))
 
-    def test_batch_predict_no_files_found(self, mock_create_pred, temp_input_dir_for_batch, dummy_model_path):
-        # mock_create_pred is already active from the class decorator
+    def test_batch_predict_no_files_found(self, mock_mgnn_predictor, temp_input_dir_for_batch, dummy_model_path):
+        # mock_mgnn_predictor is already active from the class decorator
         output_dir = os.path.join(temp_input_dir_for_batch, "no_files_output")
 
         with pytest.raises(ValueError, match="No files found"):

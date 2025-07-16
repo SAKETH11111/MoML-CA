@@ -235,12 +235,13 @@ def test_energy_monitor(md_config):
 
 def test_density_monitor(md_config):
     """Test DensityMonitor."""
-    monitor = DensityMonitor(md_config)
-    
     system = System()
     system.addParticle(1.0 * unit.amu)
     vecs = unit.Quantity(np.eye(3) * 2, unit.nanometers)
     system.setDefaultPeriodicBoxVectors(*vecs)
+    
+    monitor = DensityMonitor(md_config, system)
+    
     integrator = VerletIntegrator(0.001 * unit.picoseconds)
     context = Context(system, integrator)
     context.setPositions(unit.Quantity(np.zeros((1, 3)), unit.nanometers))
@@ -269,6 +270,9 @@ def test_temperature_monitor(md_config):
 def test_watchdog(md_config):
     """Test Watchdog."""
     watchdog = Watchdog(md_config)
+    # Reset watchdog state to avoid interference from other tests
+    watchdog.last_energy = None
+    watchdog.last_step = None
     
     system = System()
     system.addParticle(1.0 * unit.amu)
@@ -279,10 +283,15 @@ def test_watchdog(md_config):
     state = context.getState(getEnergy=True, getVelocities=True)
     watchdog._check_state(0, state, system)
     
-    context.setVelocitiesToTemperature(2000.0 * unit.kelvin)
+    context.setVelocitiesToTemperature(5000.0 * unit.kelvin)  # Use much higher temperature
     integrator.step(1)
     state = context.getState(getEnergy=True, getVelocities=True)
-    watchdog._check_state(1, state, system)
+    # The high temperature should trigger the watchdog to raise an exception
+    try:
+        watchdog._check_state(1, state, system)
+        assert False, "Expected SimulationDiverged exception but none was raised"
+    except SimulationDiverged as e:
+        assert "Temperature" in str(e), f"Expected temperature error but got: {e}"
     
     context.setVelocitiesToTemperature(300.0 * unit.kelvin)
     integrator.step(1)
