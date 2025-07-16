@@ -336,8 +336,8 @@ class SpiceDataset(InMemoryDataset):
         try:
             # Extract conformer data
             coordinates = np.array(mol_data['conformations'][conf_idx])
-                forces = np.array(mol_data['dft_total_gradient'][conf_idx])
-                energy = np.array(mol_data['dft_total_energy'][conf_idx]).item()
+            forces = np.array(mol_data['dft_total_gradient'][conf_idx])
+            energy = np.array(mol_data['dft_total_energy'][conf_idx]).item()
 
             # Convert to tensors
             pos_tensor = torch.tensor(coordinates, dtype=torch.float32)
@@ -346,16 +346,16 @@ class SpiceDataset(InMemoryDataset):
             energy_tensor = torch.tensor([energy], dtype=torch.float32)
             
             # Generate edge connectivity
-                edge_index = self._get_edge_index(pos_tensor)
+            edge_index = self._get_edge_index(pos_tensor)
 
             # Create Data object
             return Data(
-                    pos=pos_tensor,
+                pos=pos_tensor,
                 z=z_tensor,
                 y_graph=energy_tensor,
                 node_y=forces_tensor,
-                    edge_index=edge_index
-                )
+                edge_index=edge_index
+            )
             
         except Exception as e:
             logger.debug(f"Error processing conformer {conf_idx}: {e}")
@@ -447,8 +447,8 @@ class SpiceDataset(InMemoryDataset):
         try:
             # Collate data and save
             data, slices = self.collate(data_list)
-        torch.save((data, slices), self.processed_paths[0])
-        
+            torch.save((data, slices), self.processed_paths[0])
+            
             logger.info(
                 f"Saved {len(data_list)} processed conformers to "
                 f"{self.processed_paths[0]}"

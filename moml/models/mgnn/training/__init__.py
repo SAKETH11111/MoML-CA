@@ -1,20 +1,39 @@
 """
-Training module for DJMGNN.
+__init__.py
 
-This module provides utilities for training and evaluating models on
-molecular graph datasets.
+MGNN Training Module
+
+This module provides comprehensive tools for training Molecular Graph Neural 
+Network (MGNN) models. It includes training orchestration, callback systems,
+and utilities for model training workflows.
+
+Main Components:
+    - MGNNTrainer: Main trainer class for MGNN model training and validation
+    - Callbacks: Training control utilities (early stopping, checkpoints, scheduling)
+    - Training utilities: Helper functions for creating trainers and training loops
 """
 
-from moml.models.mgnn.training.trainer import MGNNTrainer, train_epoch, create_trainer
+# Import trainer functionality
+from moml.models.mgnn.training.trainer import (
+    MGNNTrainer, 
+    train_epoch, 
+    create_trainer,
+)
 
-from moml.models.mgnn.training.callbacks import EarlyStopping, ModelCheckpoint, LearningRateScheduler
+# Import callback functionality
+from moml.models.mgnn.training.callbacks import (
+    EarlyStopping, 
+    ModelCheckpoint, 
+    LearningRateScheduler,
+)
 
+# Define public API
 __all__ = [
-    # Training classes
+    # Training classes and functions
     "MGNNTrainer",
-    "train_epoch",
+    "train_epoch", 
     "create_trainer",
-    # Callbacks
+    # Callback classes
     "EarlyStopping",
     "ModelCheckpoint",
     "LearningRateScheduler",

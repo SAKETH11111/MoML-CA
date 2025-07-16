@@ -1,5 +1,22 @@
-from typing import Union, Dict, List, Optional, Callable, Any
+"""
+trainer.py
+
+Trainer module for molecular graph neural networks.
+
+This module provides a comprehensive trainer class for handling the training 
+and evaluation of molecular graph neural network models. It includes support
+for various loss functions, optimizers, callbacks, and both graph-level and 
+node-level predictions.
+
+Main Components:
+    - MGNNTrainer: Main trainer class for MGNN model training and validation
+    - Training utilities: Helper functions for model creation and training loops
+    - Support for custom callbacks and training monitoring
+"""
+
 import os
+from typing import Union, Dict, List, Optional, Callable, Any
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,13 +27,6 @@ from tqdm import tqdm
 from moml.core import create_graph_processor
 from moml.models.mgnn import DJMGNN
 from moml.models.mgnn.evaluation import MGNNPredictor
-
-"""
-Trainer module for molecular graph neural networks.
-
-This module provides a trainer class to handle the training and evaluation of
-molecular graph neural network models.
-"""
 
 class MGNNTrainer:
     """
@@ -118,51 +128,44 @@ class MGNNTrainer:
         targets: Union[torch.Tensor, Dict[str, torch.Tensor]],
     ) -> torch.Tensor:
         """
-        Compute loss, handling dict or tensor outputs/targets.
+        Compute loss for model outputs and targets.
+        
+        Supports both tensor and dictionary formats for multi-task learning.
+        
+        Args:
+            outputs: Model predictions (tensor or dict with 'graph_pred'/'node_pred')
+            targets: Target values (tensor or dict with 'graph_targets'/'node_targets')
+            
+        Returns:
+            torch.Tensor: Computed loss value
+            
+        Raises:
+            TypeError: If outputs and targets have mismatched types
         """
         if isinstance(outputs, dict) and isinstance(targets, dict):
             total_loss = torch.tensor(0.0, device=self.device)
             num_loss_components = 0
+            
+            # Compute graph-level loss if available
             if "graph_pred" in outputs and "graph_targets" in targets:
                 total_loss += self.loss_fn(outputs["graph_pred"], targets["graph_targets"])
                 num_loss_components += 1
+                
+            # Compute node-level loss if available  
             if "node_pred" in outputs and "node_targets" in targets:
                 total_loss += self.loss_fn(outputs["node_pred"], targets["node_targets"])
                 num_loss_components += 1
 
-            if num_loss_components == 0:  # Should not happen if model and data are aligned
-                # Fallback or error if no matching keys found but both are dicts
-                # This might indicate a mismatch in expected output/target structure.
-                # For now, try a direct call if no components were matched,
-                # though this is unlikely to succeed if they are dicts without common keys.
-                # A more robust solution might be to raise an error or log a warning.
-                # Consider if a model is guaranteed to output 'graph_pred' or 'node_pred' if it outputs a dict.
-                # If the model outputs a dict, but targets is a tensor (or vice-versa), this logic also needs adjustment.
-                # The current target preparation logic tries to align them.
-
-                # If no specific components matched, and if the loss_fn can somehow handle these dicts directly
-                # (unlikely for standard nn.MSELoss), this would be the place.
-                # Otherwise, this indicates a configuration/data issue.
-                # For safety, if no components, and they are dicts, this will likely fail if passed to standard loss_fn.
-                # Let's assume if both are dicts, at least one component should match.
-                # If not, we might return total_loss (0.0) or raise error.
-                # For now, if num_loss_components is 0 but they are dicts, it implies an issue.
-                # Let's log a warning and return 0 loss to prevent crash, but this needs review.
-                if isinstance(outputs, dict) and isinstance(targets, dict) and num_loss_components == 0:
-                    # This state (both dicts, no common keys for loss) is problematic.
-                    # Returning 0 for now to avoid crash, but indicates an issue.
-                    # print("Warning: _compute_loss received dicts for outputs and targets, but no common loss components found.")
-                    return torch.tensor(
-                        0.0, device=self.device, requires_grad=True
-                    )  # Ensure it's a tensor that can be backpropped (if 0)
+            # Handle case where no matching components found
+            if num_loss_components == 0:
+                return torch.tensor(0.0, device=self.device, requires_grad=True)
 
             return total_loss / num_loss_components if num_loss_components > 0 else total_loss
+            
         elif isinstance(outputs, torch.Tensor) and isinstance(targets, torch.Tensor):
             return self.loss_fn(outputs, targets)
+            
         else:
-            # This case handles mismatched types (e.g. output is dict, target is tensor)
-            # which should ideally be caught by target preparation logic.
-            # If it reaches here, it's an unexpected state.
             raise TypeError(
                 f"Outputs and targets must both be dicts or both be tensors. "
                 f"Got outputs type: {type(outputs)}, targets type: {type(targets)}"
@@ -504,18 +507,7 @@ def train_epoch(
             if isinstance(outputs, dict) and "node_pred" in outputs:
                 targets["node_targets"] = batch.node_y
 
-        # Compute loss
-        # Assuming standalone train_epoch will be updated or used with models/targets that align
-        # For simplicity, if outputs/targets are dicts, this standalone might need its own _compute_loss
-        # or the main loss_fn passed should handle dicts.
-        # For now, let's assume it's called with tensor outputs/targets or a loss_fn that can handle dicts.
-        # To make it consistent with the class method, we'd need a similar _compute_loss logic here.
-        # However, this function is not directly tested by the failing test_mgnn_trainer.py tests.
-        # The class methods are. So, focusing on class methods first.
-        # If this standalone function needs to support dicts, it would need its own _compute_loss_standalone.
-
-        # Replicating the logic for the standalone function for consistency,
-        # assuming loss_fn is a simple PyTorch loss function.
+        # Compute loss with support for dict/tensor formats
         current_loss: torch.Tensor
         if isinstance(outputs, dict) and isinstance(targets, dict):
             total_loss_val = torch.tensor(0.0, device=device)
@@ -606,7 +598,7 @@ def create_trainer(
         "edge_attr_dim": config.get("edge_attr_dim", 0),
     }
 
-    # Decide the input feature dimension --------------------------------
+    # Set input feature dimension
     if "in_dim" in config:
         model_kwargs["in_dim"] = config["in_dim"]
     else:
@@ -622,9 +614,7 @@ def create_trainer(
 
     model = DJMGNN(**model_kwargs)
 
-    # ------------------------------------------------------------------
-    # 2) Optimiser & loss
-    # ------------------------------------------------------------------
+    # Setup optimizer and loss function
     optimizer_type = config.get("optimizer", "adam").lower()
     lr = config.get("learning_rate", 0.001)
     weight_decay = config.get("weight_decay", 0)
