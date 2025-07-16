@@ -523,6 +523,60 @@ class TestMolecularGraphProcessor:
             assert "nodes" in json_data  # Changed from "atoms" to "nodes"
             assert len(json_data["nodes"]) == methane_mol_3d.GetNumAtoms()  # Changed from "atoms"
 
+    def test_mol_to_json_graph_with_charges(self, graph_processor: MolecularGraphProcessor, methane_mol_3d: Chem.Mol):
+        """Test mol_to_json_graph method with partial charges."""
+        num_atoms = methane_mol_3d.GetNumAtoms()
+        partial_charges = [0.1 * i for i in range(num_atoms)]
+        
+        json_graph = graph_processor.mol_to_json_graph(methane_mol_3d, partial_charges)
+        assert isinstance(json_graph, dict)
+        assert "nodes" in json_graph
+        assert len(json_graph["nodes"]) == num_atoms
+        
+        # Check that partial charges are included in each node
+        for i, node in enumerate(json_graph["nodes"]):
+            assert "partial_charge" in node
+            assert node["partial_charge"] == partial_charges[i]
+
+    def test_mol_to_json_graph_without_charges(self, graph_processor: MolecularGraphProcessor, methane_mol_3d: Chem.Mol):
+        """Test mol_to_json_graph method without partial charges."""
+        json_graph = graph_processor.mol_to_json_graph(methane_mol_3d)
+        assert isinstance(json_graph, dict)
+        assert "nodes" in json_graph
+        
+        # Check that partial charges are NOT included when not provided
+        for node in json_graph["nodes"]:
+            assert "partial_charge" not in node
+
+    def test_file_to_json_graph_with_charges(self, graph_processor: MolecularGraphProcessor, methane_mol_3d: Chem.Mol):
+        """Test file_to_json_graph method with partial charges."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mol_filepath = os.path.join(tmpdir, "methane.mol")
+            with open(mol_filepath, "w") as f:
+                f.write(Chem.MolToMolBlock(methane_mol_3d))
+
+            num_atoms = methane_mol_3d.GetNumAtoms()
+            partial_charges = [0.2 * i for i in range(num_atoms)]
+            
+            output_filename = "methane_graph_with_charges.json"
+            json_output_path = graph_processor.file_to_json_graph(
+                mol_filepath, output_dir=tmpdir, output_filename=output_filename, partial_charges=partial_charges
+            )
+
+            assert json_output_path is not None
+            assert os.path.exists(json_output_path)
+
+            with open(json_output_path, "r") as f_json:
+                json_data = json.load(f_json)
+
+            assert "nodes" in json_data
+            assert len(json_data["nodes"]) == num_atoms
+            
+            # Check that partial charges are included
+            for i, node in enumerate(json_data["nodes"]):
+                assert "partial_charge" in node
+                assert node["partial_charge"] == partial_charges[i]
+
     def test_get_atom_features_instance_method(
         self, graph_processor: MolecularGraphProcessor, methane_mol_3d: Chem.Mol
     ):
@@ -721,6 +775,67 @@ class TestUtilityFunctions:
             # mol_to_json_graph method in the processor uses the key "nodes"
             assert "nodes" in json_data, "The key 'nodes' should be in the output JSON from create_molecular_graph_json"
             assert len(json_data["nodes"]) == methane_mol_3d.GetNumAtoms()
+
+    def test_create_molecular_graph_json_with_charges_file(self, methane_mol_3d: Chem.Mol):
+        """Test create_molecular_graph_json utility function with charges file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mol_filepath = os.path.join(tmpdir, "methane_util.mol")
+            with open(mol_filepath, "w") as f:
+                f.write(Chem.MolToMolBlock(methane_mol_3d))
+
+            # Create a charges file
+            num_atoms = methane_mol_3d.GetNumAtoms()
+            charges = [0.05 * i for i in range(num_atoms)]
+            charges_filepath = os.path.join(tmpdir, "methane_util.chg")
+            with open(charges_filepath, "w") as f:
+                for i, charge in enumerate(charges):
+                    f.write(f"{i+1}  C    {charge}\n")
+
+            test_config = {"use_pfas_specific_features": True, "use_3d_coords": True}
+            json_output_path = create_molecular_graph_json(
+                mol_filepath, output_dir=tmpdir, config=test_config, charges_file=charges_filepath
+            )
+
+            assert json_output_path is not None
+            assert os.path.exists(json_output_path)
+
+            with open(json_output_path, "r") as f_json:
+                json_data = json.load(f_json)
+            
+            assert "nodes" in json_data
+            assert len(json_data["nodes"]) == num_atoms
+            
+            # Check that partial charges are included from the charges file
+            for i, node in enumerate(json_data["nodes"]):
+                assert "partial_charge" in node
+                assert node["partial_charge"] == charges[i]
+
+    def test_create_molecular_graph_json_with_invalid_charges_file(self, methane_mol_3d: Chem.Mol):
+        """Test create_molecular_graph_json utility function with invalid charges file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mol_filepath = os.path.join(tmpdir, "methane_util.mol")
+            with open(mol_filepath, "w") as f:
+                f.write(Chem.MolToMolBlock(methane_mol_3d))
+
+            # Use non-existent charges file
+            invalid_charges_filepath = os.path.join(tmpdir, "non_existent.chg")
+
+            test_config = {"use_pfas_specific_features": True, "use_3d_coords": True}
+            json_output_path = create_molecular_graph_json(
+                mol_filepath, output_dir=tmpdir, config=test_config, charges_file=invalid_charges_filepath
+            )
+
+            # Should still succeed even with invalid charges file (graceful error handling)
+            assert json_output_path is not None
+            assert os.path.exists(json_output_path)
+
+            with open(json_output_path, "r") as f_json:
+                json_data = json.load(f_json)
+            
+            assert "nodes" in json_data
+            # Check that partial charges are NOT included when charges file is invalid
+            for node in json_data["nodes"]:
+                assert "partial_charge" not in node
 
     def test_batch_create_graphs_from_molecules(self, methane_mol_3d: Chem.Mol, ethanol_mol_3d: Chem.Mol):
         """Test batch_create_graphs_from_molecules utility function."""

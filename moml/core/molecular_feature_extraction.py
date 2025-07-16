@@ -1,16 +1,24 @@
 """
-Molecular Descriptors for PFAS Analysis
+molecular_feature_extraction.py
 
-This module provides shared functionality for analyzing PFAS molecular structures,
-including functional group detection, feature extraction, and chemical property
-calculations used across the MGNN package.
+Molecular descriptors and feature extraction for PFAS analysis and machine learning.
 """
 
-from rdkit import Chem
-from typing import Dict, List, Tuple, Set, Any
-import numpy as np
 import logging
+from typing import Any, Dict, List, Set, Tuple
 
+import numpy as np
+# RDKit imports
+from rdkit import Chem
+from typing import Any
+
+# Suppress stub attribute errors: treat these modules as Any
+from rdkit.Chem import Descriptors as _Descriptors, Lipinski as _Lipinski, QED as _QED
+Descriptors: Any = _Descriptors
+Lipinski: Any = _Lipinski
+QED: Any = _QED
+
+# Configure logging
 logger = logging.getLogger(__name__)
 
 
@@ -19,16 +27,23 @@ class FunctionalGroupDetector:
     Class for detecting functional groups in molecules.
 
     This is the single source of truth for functional group detection in the MoML library.
-    All functional group detection should use this class to maintain consistency.
+    All functional group detection should use this class to maintain consistency across
+    the codebase and ensure reproducible results.
+    
+    The class provides methods for identifying common PFAS functional groups including:
+    - CF, CF2, CF3 groups (fluorinated carbons)
+    - Carboxylic acid groups (COOH)
+    - Sulfonic acid groups (SO3H) 
+    - Phosphonic acid groups (PO3H2)
     """
 
-    # Define functional group types
+    # Define functional group types with consistent identifiers
     FUNCTIONAL_GROUPS = {
-        "CF": 1,  # Carbon with one fluorine
-        "CF2": 2,  # Carbon with two fluorines
-        "CF3": 3,  # Trifluoromethyl group
-        "COOH": 4,  # Carboxylic acid group
-        "SO3H": 5,  # Sulfonic acid group
+        "CF": 1,     # Carbon with one fluorine
+        "CF2": 2,    # Carbon with two fluorines
+        "CF3": 3,    # Trifluoromethyl group
+        "COOH": 4,   # Carboxylic acid group
+        "SO3H": 5,   # Sulfonic acid group
         "PO3H2": 6,  # Phosphonic acid group
         "OTHER": 0,  # Other atoms/groups
     }
@@ -38,8 +53,11 @@ class FunctionalGroupDetector:
         """
         Check if atom is part of a carboxylic acid group (COOH).
 
+        This method identifies carbon atoms that are part of the characteristic
+        C=O and C-OH pattern of carboxylic acids.
+
         Args:
-            atom: RDKit Atom object
+            atom: RDKit Atom object to analyze
 
         Returns:
             True if atom is part of a carboxylic acid group, False otherwise
@@ -47,7 +65,7 @@ class FunctionalGroupDetector:
         if atom.GetAtomicNum() != 6:  # Must be carbon
             return False
 
-        # Check for C=O and C-O pattern
+        # Check for C=O and C-O pattern characteristic of carboxylic acids
         o_double_bond = False
         o_single_bond = False
 
@@ -57,11 +75,9 @@ class FunctionalGroupDetector:
                 if bond.GetBondType() == Chem.rdchem.BondType.DOUBLE:
                     o_double_bond = True
                 elif bond.GetBondType() == Chem.rdchem.BondType.SINGLE:
-                    # Check if this O is bonded to H
+                    # Check if this O is bonded to H (making it OH)
                     for o_bond in other_atom.GetBonds():
-                        if (
-                            o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1
-                        ):  # Hydrogen
+                        if o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1:  # Hydrogen
                             o_single_bond = True
                             break
 
@@ -72,8 +88,11 @@ class FunctionalGroupDetector:
         """
         Check if atom is part of a sulfonic acid group (SO3H).
 
+        This method identifies sulfur atoms that are part of the characteristic
+        SO3H pattern with the sulfur bonded to three oxygens, at least one with OH.
+
         Args:
-            atom: RDKit Atom object
+            atom: RDKit Atom object to analyze
 
         Returns:
             True if atom is part of a sulfonic acid group, False otherwise
@@ -89,7 +108,7 @@ class FunctionalGroupDetector:
             other_atom = bond.GetOtherAtom(atom)
             if other_atom.GetAtomicNum() == 8:  # Oxygen
                 o_count += 1
-                # Check if this O is bonded to H
+                # Check if this O is bonded to H (making it OH)
                 for o_bond in other_atom.GetBonds():
                     if o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1:  # Hydrogen
                         oh_count += 1
@@ -102,8 +121,11 @@ class FunctionalGroupDetector:
         """
         Check if atom is part of a phosphonic acid group (PO3H2).
 
+        This method identifies phosphorus atoms that are part of the characteristic
+        PO3H2 pattern with the phosphorus bonded to oxygens with OH groups.
+
         Args:
-            atom: RDKit Atom object
+            atom: RDKit Atom object to analyze
 
         Returns:
             True if atom is part of a phosphonic acid group, False otherwise
@@ -111,7 +133,7 @@ class FunctionalGroupDetector:
         if atom.GetAtomicNum() != 15:  # Must be phosphorus
             return False
 
-        # Similar to sulfonic acid check
+        # Similar pattern to sulfonic acid - P bonded to oxygens with OH groups
         o_count = 0
         oh_count = 0
 
@@ -119,7 +141,7 @@ class FunctionalGroupDetector:
             other_atom = bond.GetOtherAtom(atom)
             if other_atom.GetAtomicNum() == 8:  # Oxygen
                 o_count += 1
-                # Check if this O is bonded to H
+                # Check if this O is bonded to H (making it OH)
                 for o_bond in other_atom.GetBonds():
                     if o_bond.GetOtherAtom(other_atom).GetAtomicNum() == 1:  # Hydrogen
                         oh_count += 1
@@ -132,11 +154,14 @@ class FunctionalGroupDetector:
         """
         Identify CF, CF2, and CF3 groups in the molecule.
 
+        This method analyzes carbon atoms and counts their fluorine neighbors
+        to classify them into CF, CF2, or CF3 groups.
+
         Args:
-            mol: RDKit molecule
+            mol: RDKit molecule to analyze
 
         Returns:
-            Dictionary mapping atom indices to group types
+            Dictionary mapping carbon atom indices to group types ('CF', 'CF2', 'CF3')
         """
         group_assignments = {}
 
@@ -420,9 +445,19 @@ class FunctionalGroupDetector:
 
 class MolecularFeatureExtractor:
     """
-    Extracts features from molecular structures for graph representation.
+    Extracts comprehensive molecular features for graph representation and machine learning.
 
-    Provides common feature extraction methods used across the MGNN package.
+    This class provides a comprehensive suite of feature extraction methods for
+    molecular structures, with special emphasis on PFAS molecules. It includes:
+    
+    - Distance-based features for structural analysis
+    - Bond length calculations from 3D coordinates  
+    - Common molecular descriptors (MW, LogP, TPSA, etc.)
+    - Fingerprint generation for similarity analysis
+    - PFAS-specific structural features
+    
+    Methods are designed to work seamlessly with graph neural networks and other
+    machine learning models in the MoML-CA package.
     """
 
     # Common atom and bond features mapping
@@ -477,12 +512,20 @@ class MolecularFeatureExtractor:
     def calculate_distance_features(cls, mol: Chem.Mol) -> Dict[int, Dict[str, float]]:
         """
         Calculate distance-based features for PFAS structure analysis.
+        
+        This method computes structural features based on distances within the molecule:
+        - Distance to nearest CF3 group (fluorinated tail analysis)
+        - Distance to nearest functional group (head group analysis)  
+        - Head group classification (closer to functional group than CF3)
 
         Args:
-            mol: RDKit molecule
+            mol: RDKit molecule with valid structure
 
         Returns:
-            Dictionary mapping atom indices to distance-based features
+            Dictionary mapping atom indices to distance-based features:
+            - 'dist_to_cf3': Distance to nearest CF3 group
+            - 'dist_to_functional': Distance to nearest functional group
+            - 'is_head_group': Boolean indicator for head group membership
         """
         # Find CF3 groups and functional groups
         detector = FunctionalGroupDetector()
@@ -588,8 +631,7 @@ def calculate_molecular_descriptors(mol) -> dict:
     Returns:
         Dictionary of molecular descriptors
     """
-    from rdkit.Chem import Descriptors, Lipinski, QED
-
+    # Use module-level Descriptors, Lipinski, QED
     if mol is None:
         return {  # Return a dictionary with NaN or default values
             "molecular_weight": np.nan,

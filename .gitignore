@@ -127,3 +127,4 @@ MoML-CA/data/
 data/spice/processed/
 *.pt
 data/*/processed/*.pt
+__pycache__/
