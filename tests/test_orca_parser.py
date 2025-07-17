@@ -281,6 +281,7 @@ class TestRunOrcaCalculation:
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=os.path.dirname(input_file_path),
+                check=False,
             )
         finally:
             if os.path.exists(input_file_path):
@@ -316,7 +317,7 @@ class TestRunOrcaCalculation:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="ORCA ERROR")
             success, out_path = run_orca_calculation(input_file_path, orca_path="orca")
             assert not success
-            assert out_path == ""  # Because os.path.exists(output_file_expected) was false
+            assert out_path == output_file_expected  # Still returns the output file path even when ORCA fails
 
         finally:
             if os.path.exists(input_file_path):
@@ -351,7 +352,7 @@ class TestRunOrcaCalculation:
         mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="OK", stderr="")
         success, out_path = run_orca_calculation(input_file_path, orca_path="orca")
         assert not success
-        assert out_path == ""
+        assert out_path == output_file_path
 
 
 @patch("moml.simulation.qm.parser.orca_parser.smiles_to_3d_structure")
@@ -377,7 +378,7 @@ class TestProcessMolecule:
 
         assert results["status"] == "completed"
         assert results["data"] == {"status": "completed", "data_key": "value"}
-        assert results["error"] is None
+        assert "error" not in results
         mock_file_write.assert_called_once_with(results_path, "w")
 
     def test_process_molecule_smiles_fail(

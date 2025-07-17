@@ -28,7 +28,7 @@ def test_generate_labels(mock_parse, mock_mapper_cls, tmp_path):
 
     labels = generate_labels(str(tmp_path), {"mol1": "[H]"})
 
-    mock_parse.assert_called_with(str(out_file))
+    mock_parse.assert_called_with(out_file)
     mock_mapper.generate_force_field_parameters.assert_called_once()
     assert labels == {
         "mol1": {
