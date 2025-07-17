@@ -140,8 +140,8 @@ class EquilibrationProtocol:
         """
         logger.info("starting_nvt", steps=self.config.equilibration.nvt_steps)
         
-        # Create NVT system with restraints
-        nvt_system = self._add_position_restraints(system, positions)
+        # Create a deep copy of the system so we don't modify the caller's system object.
+        nvt_system = self._add_position_restraints(deepcopy(system), positions)
         
         # Setup NVT simulation
         integrator = VerletIntegrator(self.config.integration.timestep * unit.femtoseconds)  # type: ignore

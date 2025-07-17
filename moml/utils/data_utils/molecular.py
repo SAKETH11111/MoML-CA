@@ -119,6 +119,12 @@ def calculate_molecular_properties(df: pd.DataFrame, mol_col: str = "ROMol") -> 
         lambda row: row["F_Count"] / row["C_Count"] if row["C_Count"] > 0 else 0, axis=1
     )
 
+    # Lower-case variant expected by unit tests
+    df["f_to_c_ratio"] = df["F_to_C_Ratio"]
+
+    # Average F per carbon (alias for ratio)
+    df["avg_f_per_c"] = df["F_to_C_Ratio"]
+
     logger.info("Successfully added molecular property columns.")
     return df
 
@@ -156,6 +162,9 @@ def categorize_molecular_features(df: pd.DataFrame, mol_col: str = "ROMol") -> p
     df["has_fluorine"] = df[mol_col].apply(
         lambda m: has_feature(m, lambda mol: any(a.GetSymbol() == 'F' for a in mol.GetAtoms()))
     )
+
+    # Provide uppercase-friendly alias expected by some downstream code/tests
+    df["Has_Fluorine"] = df["has_fluorine"]
     logger.info("Successfully added feature categorization flags.")
     return df
 
@@ -179,16 +188,17 @@ def add_fluorinated_group_counts(df: pd.DataFrame, mol_col: str = "ROMol") -> pd
     logger.info("Adding fluorinated functional group counts...")
     detector = FunctionalGroupDetector()
 
-    def get_group_count(mol: Chem.Mol, group_name: str) -> int:
-        """Helper to get the count of a specific functional group."""
-        if not mol:
+    def get_group_count(mol: Chem.Mol, key: str) -> int:
+        """Helper to get the count of a specific functional group list inside the detector output."""
+        if mol is None:
             return 0
         groups = detector.get_all_functional_groups(mol)
-        return len(groups.get(group_name, []))
+        return len(groups.get(key, []))
 
-    df["num_cf3_groups"] = df[mol_col].apply(lambda m: get_group_count(m, "trifluoromethyl"))
-    df["num_cf2_groups"] = df[mol_col].apply(lambda m: get_group_count(m, "difluoromethyl"))
-    df["num_cf_groups"] = df[mol_col].apply(lambda m: get_group_count(m, "fluoromethyl"))
+    # Use canonical keys produced by FunctionalGroupDetector.get_all_functional_groups
+    df["num_cf3_groups"] = df[mol_col].apply(lambda m: get_group_count(m, "cf3_groups"))
+    df["num_cf2_groups"] = df[mol_col].apply(lambda m: get_group_count(m, "cf2_groups"))
+    df["num_cf_groups"] = df[mol_col].apply(lambda m: get_group_count(m, "cf_groups"))
 
     logger.info("Successfully added fluorinated group counts.")
     return df
