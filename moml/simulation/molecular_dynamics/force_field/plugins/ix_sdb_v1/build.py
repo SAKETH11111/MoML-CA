@@ -31,7 +31,7 @@ import random
 __all__ = ["build"]
 
 
-def build(tmp_dir: Path, cfg: dict):
+def build(tmp_dir: Path, cfg: dict):  # type: ignore[invalid-type]
     """Build a coarse-grained IX-SDB polymer bead.
 
     Args
