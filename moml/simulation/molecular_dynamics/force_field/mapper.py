@@ -1,5 +1,5 @@
 """
-mapper.py
+moml/simulation/molecular_dynamics/force_field/mapper.py
 
 Force Field Parameter Mapper Module for Molecular Dynamics Simulations
 

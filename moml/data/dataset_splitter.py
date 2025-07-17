@@ -1,5 +1,5 @@
 """
-dataset_splitter.py
+moml/data/dataset_splitter.py
 
 Dataset splitting utilities for molecular machine learning applications.
 

@@ -1,5 +1,5 @@
 """
-orca_parser.py
+moml/simulation/qm/parser/orca_parser.py
 
 This module provides a comprehensive suite of tools for managing quantum
 mechanical calculations using ORCA. It handles the entire workflow, from

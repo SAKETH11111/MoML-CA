@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/simulation/molecular_dynamics/__init__.py
 
 MoML-CA Molecular Dynamics Engine.
 

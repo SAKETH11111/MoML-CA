@@ -1,5 +1,5 @@
 """
-pipeline_orchestrator.py
+moml/pipeline/pipeline_orchestrator.py
 
 Molecular analysis pipeline orchestration for MoML-CA.
 
@@ -372,8 +372,8 @@ class MOMLPipelineOrchestrator:
             functional=qm_config["functional"],
             basis_set=qm_config["basis_set"],
             num_procs=qm_config["num_procs"],
-            memory=qm_config["memory"],
-            orca_path=self.config["orca_path"],
+            memory_mb=qm_config["memory"],
+            orca_executable=self.config["orca_path"],
             max_workers=parallel_config["max_workers"] if parallel_config["enabled"] else 1,
             smiles_col=smiles_col,
             id_col=id_col,

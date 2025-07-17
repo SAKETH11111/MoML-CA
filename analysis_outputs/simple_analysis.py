@@ -1,5 +1,5 @@
 """
-simple_analysis.py
+analysis_outputs/simple_analysis.py
 
 A lightweight molecular dynamics simulation analysis tool for PFAS compounds that provides energy drift analysis and temperature validation without pandas dependency.
 """

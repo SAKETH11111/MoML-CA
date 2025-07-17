@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/models/mgnn/training/__init__.py
 
 MGNN Training Module
 

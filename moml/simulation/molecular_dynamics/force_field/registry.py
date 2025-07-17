@@ -1,5 +1,5 @@
 """
-registry.py
+moml/simulation/molecular_dynamics/force_field/registry.py
 
 Force Field Plugin Registry Module
 

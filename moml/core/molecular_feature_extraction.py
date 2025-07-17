@@ -1,5 +1,5 @@
 """
-molecular_feature_extraction.py
+moml/core/molecular_feature_extraction.py
 
 Molecular descriptors and feature extraction for PFAS analysis and machine learning.
 """

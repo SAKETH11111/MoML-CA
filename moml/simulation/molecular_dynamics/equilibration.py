@@ -1,5 +1,5 @@
 """
-equilibration.py
+moml/simulation/molecular_dynamics/equilibration.py
 
 System equilibration module for molecular dynamics simulations.
 

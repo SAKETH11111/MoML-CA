@@ -1,5 +1,5 @@
 """
-run_predict.py
+examples/prediction_examples/run_predict.py
 
 A command-line interface for making molecular property predictions using trained MGNN models with support for both single molecule and batch processing modes.
 """

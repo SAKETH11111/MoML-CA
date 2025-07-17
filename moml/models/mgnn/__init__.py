@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/models/mgnn/__init__.py
 
 MoML MGNN Models Package
 

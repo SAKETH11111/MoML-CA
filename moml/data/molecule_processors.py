@@ -1,5 +1,5 @@
 """
-molecule_processors.py
+moml/data/molecule_processors.py
 
 Molecular data processing utilities for graph representation conversion.
 
@@ -35,7 +35,7 @@ import json
 import logging
 import os
 import pickle
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import torch
@@ -108,8 +108,8 @@ except ImportError:
     HAS_VALIDATION = False
     logger.warning("SMILES validation not available.")
     
-    def validate_smiles(smiles):  # type: ignore
-        """Dummy validation function."""
+    def validate_smiles(smiles: str) -> Tuple[bool, Optional[str], Optional[Any], Optional[str]]:  # type: ignore
+        """Dummy validation function matching real signature."""
         return False, None, None, "Validation not available"
 
 
@@ -600,7 +600,7 @@ def process_dataset(
             continue
         
         # Validate SMILES
-        is_valid, canonical_smiles, mol_obj, error = validate_smiles(smiles)
+        is_valid, canonical_smiles, mol_obj, error = validate_smiles(smiles)  # type: ignore[arg-type]
 
         # Store validation results
         df.at[idx, "is_valid_smiles"] = is_valid

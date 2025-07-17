@@ -1,5 +1,5 @@
 """
-pfas_sdf_dataset.py
+moml/data/pfas_sdf_dataset.py
 
 PFAS (Per- and Polyfluoroalkyl Substances) dataset from SDF files.
 
@@ -378,7 +378,7 @@ class PFASSDFDataset(InMemoryDataset):
         # Apply pre_transform if specified
         if self.pre_transform is not None:
             try:
-            data_list = [self.pre_transform(data) for data in data_list]
+                data_list = [self.pre_transform(data) for data in data_list]
                 logger.info("Applied pre-transform to all molecules")
             except Exception as e:
                 logger.error(f"Error applying pre-transform: {e}")
@@ -400,8 +400,8 @@ class PFASSDFDataset(InMemoryDataset):
 
         try:
             # Collate data and save
-        data, slices = self.collate(data_list)
-        torch.save((data, slices), self.processed_paths[0])
+            data, slices = self.collate(data_list)
+            torch.save((data, slices), self.processed_paths[0])  # type: ignore[arg-type]
             logger.info(
                 f"Saved {len(data_list)} processed molecules to "
                 f"{self.processed_paths[0]}"
@@ -491,25 +491,25 @@ class PFASSDFDataset(InMemoryDataset):
                 
             return torch.tensor(positions, dtype=torch.float)
             
-            except (AttributeError, ValueError):
+        except (AttributeError, ValueError):
             # If no 3D conformer, generate 2D coordinates and set z=0
             logger.debug("No 3D conformer found, using 2D coordinates")
+        
+        try:
+            rdDepictor.Compute2DCoords(mol)
+            conf = mol.GetConformer()
+            positions = []
             
-            try:
-                rdDepictor.Compute2DCoords(mol)
-                conf = mol.GetConformer()
-                positions = []
-                
-                for i in range(num_atoms):
-                    atom_pos = conf.GetAtomPosition(i)
-                    positions.append([atom_pos.x, atom_pos.y, 0.0])
-                
-                return torch.tensor(positions, dtype=torch.float)
-                
-            except Exception as e:
-                logger.warning(f"Failed to generate coordinates: {e}")
-                # Return zero coordinates as fallback
-                return torch.zeros((num_atoms, 3), dtype=torch.float)
+            for i in range(num_atoms):
+                atom_pos = conf.GetAtomPosition(i)
+                positions.append([atom_pos.x, atom_pos.y, 0.0])
+            
+            return torch.tensor(positions, dtype=torch.float)
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate coordinates: {e}")
+            # Return zero coordinates as fallback
+            return torch.zeros((num_atoms, 3), dtype=torch.float)
 
     def _extract_edges(self, mol) -> torch.Tensor:
         """
@@ -521,17 +521,17 @@ class PFASSDFDataset(InMemoryDataset):
         Returns:
             Tensor of edge indices [2, num_edges]
         """
-            edge_indices = []
+        edge_indices = []
+    
+        for bond in mol.GetBonds():
+            i = bond.GetBeginAtomIdx()
+            j = bond.GetEndAtomIdx()
+        # Add both directions for undirected graph
+        edge_indices.extend([[i, j], [j, i]])
         
-            for bond in mol.GetBonds():
-                i = bond.GetBeginAtomIdx()
-                j = bond.GetEndAtomIdx()
-            # Add both directions for undirected graph
-            edge_indices.extend([[i, j], [j, i]])
-            
-            if edge_indices:
+        if edge_indices:
             return torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-            else:
+        else:
             # No bonds - return empty edge_index
             return torch.empty((2, 0), dtype=torch.long)
             

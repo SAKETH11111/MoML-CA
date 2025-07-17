@@ -1,6 +1,6 @@
 
 """
-hmgnn.py
+moml/models/mgnn/hmgnn.py
 
 Hierarchical Molecular Graph Neural Network (HMGNN)
 

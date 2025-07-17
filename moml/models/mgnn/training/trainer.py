@@ -1,5 +1,5 @@
 """
-trainer.py
+moml/models/mgnn/training/trainer.py
 
 Trainer module for molecular graph neural networks.
 

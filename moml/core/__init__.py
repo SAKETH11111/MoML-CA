@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/core/__init__.py
 
 Core package for molecular graph processing and feature extraction in MoML-CA.
 """

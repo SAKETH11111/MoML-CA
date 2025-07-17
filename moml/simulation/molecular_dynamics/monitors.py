@@ -1,5 +1,5 @@
 """
-monitors.py
+moml/simulation/molecular_dynamics/monitors.py
 
 Monitoring module for tracking system stability during molecular dynamics simulations.
 

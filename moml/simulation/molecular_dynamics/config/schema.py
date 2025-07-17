@@ -1,5 +1,5 @@
 """
-schema.py
+moml/simulation/molecular_dynamics/config/schema.py
 
 Configuration schema for Molecular Dynamics simulations.
 

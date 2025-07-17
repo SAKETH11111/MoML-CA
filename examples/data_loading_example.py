@@ -1,5 +1,5 @@
 """
-data_loading_example.py
+examples/data_loading_example.py
 
 Demonstration script for using PFASDataLoader to load and batch molecular graph data for MGNN training workflows.
 """
@@ -69,14 +69,14 @@ def demonstrate_single_molecule_loading(
         print(f'✓ Successfully loaded {molecule_id}')
         print(f'  Labels: {label}')
         print(f'  Environmental features: {env}')
-        print(f'  Number of nodes: {graph.num_nodes}')
+        print(f'  Number of nodes: {graph.num_nodes}')  # type: ignore
         
-        if hasattr(graph, 'edge_index') and graph.edge_index is not None:
-            num_edges = graph.edge_index.shape[1] if graph.edge_index.numel() > 0 else 0
+        if hasattr(graph, 'edge_index') and graph.edge_index is not None:  # type: ignore
+            num_edges = graph.edge_index.shape[1] if graph.edge_index.numel() > 0 else 0  # type: ignore
             print(f'  Number of edges: {num_edges}')
         
-        if hasattr(graph, 'x') and graph.x is not None:
-            print(f'  Node feature dimension: {graph.x.shape[1]}')
+        if hasattr(graph, 'x') and graph.x is not None:  # type: ignore
+            print(f'  Node feature dimension: {graph.x.shape[1]}')  # type: ignore
         
         return True
         

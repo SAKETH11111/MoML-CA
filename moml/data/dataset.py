@@ -1,5 +1,5 @@
 """
-dataset.py
+moml/data/dataset.py
 
 Unified dataset interface for molecular machine learning applications.
 

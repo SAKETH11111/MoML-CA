@@ -1,5 +1,5 @@
 """
-callbacks.py
+moml/models/mgnn/training/callbacks.py
 
 Callbacks for training graph neural networks.
 

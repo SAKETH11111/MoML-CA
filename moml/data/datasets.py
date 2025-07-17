@@ -1,5 +1,5 @@
 """
-datasets.py
+moml/data/datasets.py
 
 Dataset classes for working with molecular data.
 
@@ -729,7 +729,7 @@ class PFASDataset(Dataset):
         # Extract features and targets
         self.features = self._extract_features(feature_columns)
         self.targets = self._extract_targets(target_column)
-        self.smiles = self._extract_smiles(smiles_column)
+        self.smiles: List[str] = self._extract_smiles(smiles_column) or []
 
         # Create molecular graphs
         self.graphs = self._create_molecular_graphs()

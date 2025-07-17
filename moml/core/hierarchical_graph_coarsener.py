@@ -1,5 +1,5 @@
 """
-hierarchical_graph_coarsener.py
+moml/core/hierarchical_graph_coarsener.py
 
 Graph coarsening for PFAS molecular structures using hierarchical representations.
 """

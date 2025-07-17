@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/simulation/molecular_dynamics/config/__init__.py
 
 Configuration module for Molecular Dynamics simulations.
 

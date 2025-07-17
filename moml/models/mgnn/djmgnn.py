@@ -1,5 +1,5 @@
 """
-djmgnn.py
+moml/models/mgnn/djmgnn.py
 
 Dense Jumping Knowledge Molecular Graph Neural Network (DJMGNN)
 

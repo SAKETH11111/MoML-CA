@@ -1,5 +1,5 @@
 """
-process_chemical_data.py
+moml/data/processors/process_chemical_data.py
 
 PFAS chemical list data processing module for cleaning and feature engineering.
 
@@ -191,7 +191,7 @@ def clean_data() -> pd.DataFrame:
     df = handle_missing_values(df)
 
     # Standardize text data
-    df = standardize_text_data(df, TEXT_COLUMNS, special_char_cols=[])
+    df = standardize_text_data(df, TEXT_COLUMNS)
 
     # Create basic derived features
     df = create_basic_derived_features(df)

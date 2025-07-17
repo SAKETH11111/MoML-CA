@@ -1,5 +1,5 @@
 """
-molecular.py
+moml/utils/data_utils/molecular.py
 
 This module provides utility functions for molecular data processing, primarily
 focused on feature extraction and analysis from RDKit molecule objects within
@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 def create_rdkit_mols(
-    df: pd.DataFrame, smiles_col: str = "SMILES", mol_col: str = "ROMol"
+    df: pd.DataFrame,
+    smiles_col: str = "SMILES",
+    mol_col: str = "ROMol",
+    mol_cache_col: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Create RDKit molecule objects from a DataFrame column of SMILES strings.
@@ -45,21 +48,28 @@ def create_rdkit_mols(
         ValueError: If the specified SMILES column is not found.
     """
     logger.info("Creating RDKit molecule objects from SMILES...")
-    if smiles_col not in df.columns:
-        raise ValueError(f"SMILES column '{smiles_col}' not found in DataFrame.")
 
-    def smiles_to_mol(smiles: str) -> Optional[Chem.Mol]:
-        """Safely convert a single SMILES string to an RDKit molecule."""
-        if pd.notna(smiles):
-            try:
-                mol = Chem.MolFromSmiles(str(smiles))
-                if mol:
-                    return Chem.AddHs(mol)
-            except Exception as e:
-                logger.debug(f"Failed to parse SMILES '{smiles}': {e}")
-        return None
+    # If a cache column is provided and exists, use it to avoid re-parsing.
+    if mol_cache_col and mol_cache_col in df.columns:
+        logger.info(f"Using pre-parsed molecules from column '{mol_cache_col}'.")
+        df[mol_col] = df[mol_cache_col].apply(lambda m: Chem.AddHs(m) if m is not None else None)
+    else:
+        if smiles_col not in df.columns:
+            raise ValueError(f"SMILES column '{smiles_col}' not found in DataFrame.")
 
-    df[mol_col] = df[smiles_col].apply(smiles_to_mol)
+        def smiles_to_mol(smiles: str) -> Optional[Chem.Mol]:
+            """Safely convert a single SMILES string to an RDKit molecule."""
+            if pd.notna(smiles):
+                try:
+                    mol = Chem.MolFromSmiles(str(smiles))
+                    if mol:
+                        return Chem.AddHs(mol)
+                except Exception as e:
+                    logger.debug(f"Failed to parse SMILES '{smiles}': {e}")
+            return None
+
+        df[mol_col] = df[smiles_col].apply(smiles_to_mol)
+
     validity_col = f"is_valid_{smiles_col}"
     df[validity_col] = df[mol_col].notna()
 

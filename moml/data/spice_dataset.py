@@ -1,5 +1,5 @@
 """
-spice_dataset.py
+moml/data/spice_dataset.py
 
 SPICE dataset for quantum mechanical molecular property prediction.
 

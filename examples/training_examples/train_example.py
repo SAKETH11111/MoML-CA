@@ -1,5 +1,5 @@
 """
-train_example.py
+examples/training_examples/train_example.py
 
 A command-line tool for training MGNN models on molecular graph data with comprehensive configuration options and checkpoint management.
 """

@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/simulation/__init__.py
 
 This package exposes the main interfaces for the simulation tools, including
 utilities for both molecular dynamics (MD) and quantum mechanics (QM).

@@ -1,5 +1,5 @@
 """
-molecular_graph_processor.py
+moml/core/molecular_graph_processor.py
 
 Molecular graph representation for PFAS molecules using PyTorch Geometric.
 """

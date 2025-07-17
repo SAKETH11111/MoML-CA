@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/utils/__init__.py
 
 This package provides utility functions for data processing, validation,
 and molecular analysis in the MoML-CA framework.

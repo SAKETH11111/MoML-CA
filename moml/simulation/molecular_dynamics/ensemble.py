@@ -1,5 +1,5 @@
 """
-ensemble.py
+moml/simulation/molecular_dynamics/ensemble.py
 
 Ensemble module for managing multiple MD replicas and parameter sweeps.
 

@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/simulation/qm/parser/__init__.py
 
 This package provides tools for interacting with quantum chemistry software,
 primarily focused on parsing output files and managing calculation workflows.

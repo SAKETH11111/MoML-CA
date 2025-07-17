@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/models/__init__.py
 
 MoML Models Package - Comprehensive Machine Learning Models for Molecular Data
 

@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/pipeline/__init__.py
 
 Pipeline orchestration module for MoML-CA.
 

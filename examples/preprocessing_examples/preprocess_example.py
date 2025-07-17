@@ -1,5 +1,5 @@
 """
-preprocess_example.py
+examples/preprocessing_examples/preprocess_example.py
 
 Command-line tool for preprocessing molecular structures into graph representations suitable for machine learning with comprehensive feature statistics generation.
 """

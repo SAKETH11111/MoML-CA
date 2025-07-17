@@ -1,5 +1,5 @@
 """
-__init__.py
+moml/data/__init__.py
 
 MoML Data Package - Molecular data processing and dataset utilities.
 

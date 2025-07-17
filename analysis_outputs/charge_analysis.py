@@ -1,5 +1,5 @@
 """
-charge_analysis.py
+analysis_outputs/charge_analysis.py
 
 This module provides functionality to analyze partial charges in GNN-generated
 force field XML files. It extracts charge information from OpenMM XML force

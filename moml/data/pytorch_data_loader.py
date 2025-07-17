@@ -1,5 +1,5 @@
 """
-pytorch_data_loader.py
+moml/data/pytorch_data_loader.py
 
 PyTorch DataLoader utilities for molecular graph data.
 

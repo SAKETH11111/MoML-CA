@@ -1,5 +1,5 @@
 """
-predictor.py
+moml/models/mgnn/evaluation/predictor.py
 
 MGNN Model Predictor Module
 
