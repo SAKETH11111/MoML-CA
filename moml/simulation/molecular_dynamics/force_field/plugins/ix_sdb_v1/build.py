@@ -78,7 +78,7 @@ def build(tmp_dir: Path, cfg: dict):  # type: ignore[invalid-type]
     return pdb_out, topology, list(range(topology.getNumAtoms()))
 
 
-def _pack_bead(monomer: "Molecule", radius_nm: float, count: int):
+def _pack_bead(monomer: Any, radius_nm: float, count: int):
     """Pack monomers into a spherical bead with basic geometric arrangement.
     
     This implementation provides real functionality by:

@@ -1,11 +1,8 @@
 """
-MoML Simulation Package
+__init__.py
 
-Public API:
-- ForceFieldMapper, create_force_field_mapper: MD force field mapping
-- parse_orca_output, extract_partial_charges_from_orca, extract_orbital_contributions_from_orca, extract_electrostatic_potential_from_orca: ORCA parser functions
-- smiles_to_3d_structure, create_orca_input, run_orca_calculation: ORCA input/output utilities
-- process_molecule, batch_process_molecules: high-level QM workflows
+This package exposes the main interfaces for the simulation tools, including
+utilities for both molecular dynamics (MD) and quantum mechanics (QM).
 """
 
 # Molecular dynamics helpers
@@ -15,11 +12,9 @@ from .molecular_dynamics.force_field.mapper import (
 )
 
 # Quantum mechanics (ORCA) parsers and I/O
-from .qm.parser.orca_parser import ( # Updated import path
+from .qm.parser import (
     parse_orca_output,
     extract_partial_charges_from_orca,
-    extract_orbital_contributions_from_orca,
-    extract_electrostatic_potential_from_orca,
     smiles_to_3d_structure,
     create_orca_input,
     run_orca_calculation,
@@ -28,12 +23,12 @@ from .qm.parser.orca_parser import ( # Updated import path
 )
 
 __all__ = [
+    # MD exports
     "ForceFieldMapper",
     "create_force_field_mapper",
+    # QM exports
     "parse_orca_output",
     "extract_partial_charges_from_orca",
-    "extract_orbital_contributions_from_orca",
-    "extract_electrostatic_potential_from_orca",
     "smiles_to_3d_structure",
     "create_orca_input",
     "run_orca_calculation",

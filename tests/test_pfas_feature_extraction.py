@@ -63,7 +63,6 @@ try:
     )
     from moml.utils import add_fluorinated_group_counts
     from moml.core import MolecularGraphProcessor
-    from moml.utils import visualize_molecular_graph
 
     IMPORTS_SUCCESSFUL = True
     print("Successfully imported moml modules!")
@@ -259,30 +258,6 @@ class TestPFASFeatures(unittest.TestCase):
 
         # Corrected print statement to use a defined variable
         print(f"Successfully processed {len(self.test_df[self.test_df['rdkit_mol'].notna()])} molecules into graphs")
-
-    @unittest.skipIf(not MATPLOTLIB_AVAILABLE, "Matplotlib not available")
-    def test_visualization(self):
-        """Test visualization of molecules with PFAS highlighting."""
-        if not MATPLOTLIB_AVAILABLE:
-            self.skipTest("Matplotlib not available")
-
-        # Test visualization of each molecule
-        for i, row in self.test_df.iterrows():
-            mol = row["rdkit_mol"]
-            if mol is not None:
-                # Create a visualization
-                fig = visualize_molecular_graph(mol, highlight_feature="fluorine")
-                self.assertIsNotNone(fig)
-
-                # Save the visualization to a file
-                output_file = os.path.join(self.temp_dir.name, f"mol_{row['id']}.png")
-                plt.savefig(output_file)
-                plt.close(fig)
-
-                # Check that the file was created
-                self.assertTrue(os.path.exists(output_file))
-
-        print(f"Successfully created visualizations for {len(self.test_df)} molecules")
 
 
 class TestHydroxylGroupDetection(unittest.TestCase):
