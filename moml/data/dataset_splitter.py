@@ -10,7 +10,7 @@ molecular property prediction models.
 """
 
 import logging
-from typing import Any, List, Tuple, cast
+from typing import Any, List, Tuple
 
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, Subset

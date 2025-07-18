@@ -142,8 +142,8 @@ class PFASDataLoader:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            # Log error in production code
+        except (json.JSONDecodeError, OSError):
+            # TODO: Log error in production code
             return {}
 
     def _find_molecule_files(self) -> Dict[str, str]:

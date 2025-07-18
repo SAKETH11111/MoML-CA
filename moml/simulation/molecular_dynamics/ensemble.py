@@ -238,8 +238,10 @@ class NPTEnsemble(EnsembleStrategy):
             }
 
             # Log ensemble metrics
+            failed_count = self.num_replicas - len(results)
             mlflow.log_metrics({
-                "completed_replicas": len(results), 
+                "completed_replicas": len(results),
+                "failed_replicas": failed_count,
                 "success_rate": len(results) / self.num_replicas
             })
 

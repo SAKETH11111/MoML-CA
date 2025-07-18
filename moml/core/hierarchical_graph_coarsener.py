@@ -46,7 +46,7 @@ class GraphCoarsener:
     graph algorithms, ensuring that the resulting super-nodes have chemical meaning
     (e.g., CF3 groups, carboxylic acid groups) specific to PFAS structures.
     """
-    UNMAPPED_MOTIF = 99  # Identifier for unclassified structural motifs
+    UNMAPPED_MOTIF = -1  # Identifier for unclassified structural motifs
 
     def __init__(self, use_3d_coords: bool = True, use_pfas_features: bool = True) -> None:
         """

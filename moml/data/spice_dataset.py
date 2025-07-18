@@ -253,10 +253,7 @@ class SpiceDataset(InMemoryDataset):
         data_list = []
         
         # Determine the structure of the HDF5 file
-        if 'molecules' in h5_file:
-            mol_container = h5_file['molecules']
-        else:
-            mol_container = h5_file
+        mol_container = h5_file['molecules'] if 'molecules' in h5_file else h5_file
         
         mol_keys = list(mol_container.keys())
         logger.info(f"Found {len(mol_keys)} molecules in dataset")

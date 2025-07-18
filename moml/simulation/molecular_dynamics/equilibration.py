@@ -12,7 +12,7 @@ The protocol ensures proper system preparation before production simulations
 and helps prevent simulation instabilities.
 """
 
-from typing import Tuple, List
+from typing import Tuple
 from copy import deepcopy
 
 import structlog
@@ -25,9 +25,7 @@ from openmm import (
     System,
     VerletIntegrator,
     unit,
-    LangevinIntegrator,
 )
-from openmm import app
 
 from .builder.system_builder import SystemBuilder
 from .config.schema import MDConfig
@@ -247,10 +245,13 @@ class EquilibrationProtocol:
         Returns:
             Modified system with barostat
         """
+        barostat_frequency = getattr(
+            getattr(self.config, "equilibration", None), "barostat_frequency", 25
+        )
         barostat = MonteCarloBarostat(
             self.config.system.pressure * unit.atmospheres,  # type: ignore
             self.config.system.temperature * unit.kelvin,  # type: ignore
-            25,  # Frequency
+            barostat_frequency,  # Frequency
         )
         system.addForce(barostat)
         return system 
