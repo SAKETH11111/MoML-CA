@@ -8,12 +8,12 @@ EquilibrationProtocol, and various monitoring components.
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 
 import numpy as np
 import pytest
 from openmm import Context, NonbondedForce, Platform, System, VerletIntegrator, app, unit
-from openmm import MonteCarloBarostat
+from openmm import MonteCarloBarostat # Import MonteCarloBarostat explicitly
 
 from moml.simulation.molecular_dynamics.config import (
     MDConfig,

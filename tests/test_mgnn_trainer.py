@@ -653,7 +653,7 @@ class TestStandaloneTrainEpoch:
 
         avg_loss = standalone_train_epoch(mock_model, optimizer, mock_train_loader, loss_fn, dummy_config["device"])
         assert isinstance(avg_loss, float)
-        assert mock_model.train.assert_called_once() is None 
+        assert mock_model.train.assert_called_once() is None # Added None check
         assert optimizer.zero_grad.call_count == len(mock_train_loader)
         assert optimizer.step.call_count == len(mock_train_loader)
 
@@ -686,7 +686,7 @@ class TestCreateTrainerFactory:
             in_dim=dummy_config["in_dim"],
             edge_attr_dim=dummy_config["edge_attr_dim"],
         )
-        assert MockMGNNTrainer.assert_called_once() is None 
+        assert MockMGNNTrainer.assert_called_once() is None # Added None check
         args, kwargs = MockMGNNTrainer.call_args
         assert kwargs["model"] == MockDJMGNN.return_value
         assert kwargs["config"] == dummy_config
@@ -702,7 +702,7 @@ class TestCreateTrainerFactory:
         MockDJMGNN.return_value = my_model
 
         MGNNTrainer(model=my_model, config=dummy_config)
-        assert MockDJMGNN.assert_not_called() is None 
+        assert MockDJMGNN.assert_not_called() is None # Added None check
 
         create_trainer(config=dummy_config)
 
@@ -728,7 +728,7 @@ class TestCreateTrainerFactory:
 
         create_trainer(config=config_no_dims, train_loader=mock_train_loader)
 
-        assert MockDJMGNN.assert_called_once() is None 
+        assert MockDJMGNN.assert_called_once() is None # Added None check
         args, kwargs = MockDJMGNN.call_args
         assert kwargs["in_dim"] == 16
         assert kwargs["hidden_dim"] == config_no_dims["hidden_dim"]
@@ -740,7 +740,7 @@ class TestCreateTrainerFactory:
         assert kwargs["graph_out_dim"] == config_no_dims["graph_out_dim"]
         assert kwargs["dropout"] == config_no_dims.get("dropout", 0.2)
 
-        assert MockMGNNTrainer.assert_called_once() is None 
+        assert MockMGNNTrainer.assert_called_once() is None # Added None check
         args, kwargs = MockMGNNTrainer.call_args
         assert kwargs["model"] == MockDJMGNN.return_value
         assert kwargs["config"] == config_no_dims

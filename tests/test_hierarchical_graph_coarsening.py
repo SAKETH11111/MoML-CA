@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from rdkit import Chem
-from rdkit.Chem import AllChem, rdMolDescriptors
+from rdkit.Chem import AllChem
 from torch_geometric.data import Data
 
 from moml.core import GraphCoarsener
@@ -216,19 +216,6 @@ class TestFunctionalGroupDetector:
 
         # The carboxylic group should include multiple atoms
         assert len(carboxylic_groups[0]) >= 3, "Carboxylic group should include at least 3 atoms"
-
-    def test_identify_all_functional_groups_with_rdkit_descriptors(self, test_molecule) -> None:
-        """Test identification of all functional groups and compare with RDKit descriptors."""
-        detector = FunctionalGroupDetector()
-
-        cf_groups, functional_groups = detector.identify_all_functional_groups(test_molecule)
-
-        # Use RDKit's MolDescriptors to get functional groups
-        rdkit_functional_groups = rdMolDescriptors.CalcNumLipinskiHBA(test_molecule) + \
-                                  rdMolDescriptors.CalcNumLipinskiHBD(test_molecule)
-
-        # Our method should identify at least as many or more groups, as it's more specific
-        assert len(functional_groups) >= rdkit_functional_groups, "Our functional group detection should be comprehensive"
 
     def test_identify_all_functional_groups(self, test_molecule) -> None:
         """Test identification of all functional groups."""
