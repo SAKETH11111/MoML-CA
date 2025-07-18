@@ -864,7 +864,7 @@ class TestUtilityFunctions:
 
             for i, node in enumerate(json_data["nodes"]):
                 assert "partial_charge" in node
-                assert node["partial_charge"] == partial_charges[i]
+                assert node["partial_charge"] == charges[i]
 
     def test_create_molecular_graph_json_with_invalid_charges_file(self, methane_mol_3d: Chem.Mol) -> None:
         """

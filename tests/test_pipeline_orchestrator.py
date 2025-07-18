@@ -14,10 +14,11 @@ This script tests the optimized pipeline stages, verifying that:
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import time
 import unittest
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 

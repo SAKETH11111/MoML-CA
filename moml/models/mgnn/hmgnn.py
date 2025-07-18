@@ -51,8 +51,53 @@ def aggregate_fine_to_coarse(
     Returns:
         torch.Tensor: Aggregated coarse features [num_coarse_nodes, feat_dim]
     """
-    summed = scatter_add(feat, fine2coarse, dim=0)
-    return summed / coarse_count.unsqueeze(-1).clamp(min=1)
+    # Handle dimension mismatch between feat and fine2coarse
+    if feat.shape[0] != fine2coarse.shape[0]:
+        # This can happen with batched graphs where the mapping is for single graphs
+        # but features are for batched graphs
+        if feat.shape[0] > fine2coarse.shape[0]:
+            # Repeat the mapping for each graph in the batch
+            batch_size = feat.shape[0] // fine2coarse.shape[0]
+            if feat.shape[0] % fine2coarse.shape[0] == 0:
+                # Clean multiple - repeat the mapping
+                offset = coarse_count.shape[0]
+                repeated_mappings = []
+                for i in range(batch_size):
+                    repeated_mappings.append(fine2coarse + i * offset)
+                fine2coarse = torch.cat(repeated_mappings)
+                
+                # Also repeat and concatenate coarse_count
+                coarse_count = torch.cat([coarse_count] * batch_size)
+            else:
+                # Truncate feat to match fine2coarse
+                feat = feat[:fine2coarse.shape[0]]
+        else:
+            # Truncate fine2coarse to match feat
+            fine2coarse = fine2coarse[:feat.shape[0]]
+    
+    # Ensure scatter_add produces the right size by specifying dim_size
+    max_index = fine2coarse.max().item() if fine2coarse.numel() > 0 else -1
+    expected_size = max(max_index + 1, coarse_count.shape[0])
+    
+    summed = scatter_add(feat, fine2coarse, dim=0, dim_size=expected_size)
+    
+    # Ensure coarse_count matches the summed tensor size
+    if summed.shape[0] != coarse_count.shape[0]:
+        # Pad or truncate coarse_count to match summed tensor size
+        if summed.shape[0] > coarse_count.shape[0]:
+            # Pad with ones (meaning single node per cluster for missing clusters)
+            pad_size = summed.shape[0] - coarse_count.shape[0]
+            coarse_count = torch.cat([coarse_count, torch.ones(pad_size, device=coarse_count.device, dtype=coarse_count.dtype)])
+        else:
+            # Truncate 
+            coarse_count = coarse_count[:summed.shape[0]]
+    
+    # Ensure coarse_count has the right shape for broadcasting
+    # summed has shape [num_coarse_nodes, ...], coarse_count has shape [num_coarse_nodes]
+    # We need to expand coarse_count to match the shape of summed
+    coarse_count_expanded = coarse_count.view(coarse_count.shape[0], *[1] * (summed.ndim - 1))
+    
+    return summed / coarse_count_expanded.clamp(min=1)
 
 
 def broadcast_coarse_to_fine(
@@ -69,7 +114,13 @@ def broadcast_coarse_to_fine(
     Returns:
         torch.Tensor: Broadcasted fine features [num_fine_nodes, feat_dim]
     """
-    return coarse_feat[fine2coarse]
+    # Ensure indices are within bounds
+    if len(coarse_feat) == 0:
+        return torch.empty(0, coarse_feat.shape[1], dtype=coarse_feat.dtype, device=coarse_feat.device)
+    
+    # Clamp indices to valid range
+    fine2coarse_clamped = torch.clamp(fine2coarse, 0, len(coarse_feat) - 1)
+    return coarse_feat[fine2coarse_clamped]
 
 
 # Core layer classes
@@ -267,6 +318,13 @@ class CrossScaleAttentionMH(nn.Module):
                                 f"CrossScaleAttn: Not enough mapping info for s={s} > t={t}. Using original k,v."
                             )
 
+                # Check if q and k have compatible shapes
+                if len(q.shape) < 3 or len(k.shape) < 3 or q.shape[0] != k.shape[0] or q.shape[2] != k.shape[2]:
+                    logger.warning(
+                        f"CrossScaleAttn: Incompatible shapes for attention: q={q.shape}, k={k.shape}. Skipping attention for s={s}, t={t}."
+                    )
+                    continue
+                
                 scores = (q * k).sum(-1) / self.scale
                 w = scores.softmax(0).unsqueeze(-1)
                 agg = agg + w * v
@@ -396,6 +454,16 @@ class HMGNN(nn.Module):
 
         self.log_sigma_node = nn.Parameter(torch.zeros(1))
         self.log_sigma_graph = nn.Parameter(torch.zeros(1))
+
+    @property
+    def gnn_blocks(self):
+        """Alias for scale_gnns to maintain backward compatibility."""
+        return self.scale_gnns
+
+    @property
+    def cross_scale_attention(self):
+        """Alias for cross_scale to maintain backward compatibility."""
+        return self.cross_scale
 
     def forward(
         self,

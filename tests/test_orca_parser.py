@@ -359,7 +359,10 @@ class TestRunOrcaCalculation:
 
         try:
             if os.path.exists(output_file_expected):
-                os.remove(output_file_expected)
+                try:
+                    os.remove(output_file_expected)
+                except FileNotFoundError:
+                    pass
 
             mock_exists.side_effect = lambda p: p == "orca" or p == input_file_path
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="ORCA ERROR")
@@ -368,10 +371,16 @@ class TestRunOrcaCalculation:
             assert out_path == output_file_expected
 
         finally:
-            if os.path.exists(input_file_path):
-                os.remove(input_file_path)
-            if os.path.exists(output_file_expected):
-                os.remove(output_file_expected)
+            try:
+                if os.path.exists(input_file_path):
+                    os.remove(input_file_path)
+            except FileNotFoundError:
+                pass
+            try:
+                if os.path.exists(output_file_expected):
+                    os.remove(output_file_expected)
+            except FileNotFoundError:
+                pass
 
     def test_run_output_not_created(self, mock_exists: MagicMock, mock_run: MagicMock) -> None:
         """

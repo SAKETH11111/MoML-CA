@@ -109,8 +109,6 @@ logs/
 *.hdf5
 
 config/pipeline_config.json
-.roo
-.roomodes
 
 /docs/
 /memory-bank/data/qm9/processed/data_v3.pt
@@ -122,6 +120,7 @@ memory-bank/systemPatterns.md
 docs/
 
 CLAUDE.md
+.kilocode/
 *.pt
 MoML-CA/data/
 data/spice/processed/

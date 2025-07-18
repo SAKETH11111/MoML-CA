@@ -233,8 +233,8 @@ class TestPFASFeatures(unittest.TestCase):
         df = pd.DataFrame(
             {
                 "smiles": self.test_smiles,
-                "name": ["Ethane", "Trifluoromethane", "GenX"],
-                "id": ["TEST-001", "TEST-002", "TEST-003"],
+                "name": ["Trifluoromethane", "Hexafluoroethane", "GenX", "Ethane"],
+                "id": ["TEST-001", "TEST-002", "TEST-003", "TEST-004"],
             }
         )
 

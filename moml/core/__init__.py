@@ -6,6 +6,20 @@ Core package for molecular graph processing and feature extraction in MoML-CA.
 
 from typing import Any
 
+
+def _create_dummy_class(name: str, error_msg: str) -> type:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise ImportError(f"{name} requires additional dependencies: {error_msg}")
+    
+    return type(name, (), {"__init__": __init__})
+
+
+def _create_dummy_function(name: str, error_msg: str) -> Any:
+    def dummy(*args: Any, **kwargs: Any) -> Any:
+        raise ImportError(f"{name} requires additional dependencies: {error_msg}")
+    return dummy
+
+
 try:
     from .molecular_graph_processor import (
         MolecularGraphProcessor,
@@ -19,17 +33,6 @@ try:
         read_charges_from_file,
     )
 except ImportError:
-    def _create_dummy_class(name: str, error_msg: str) -> type:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            raise ImportError(f"{name} requires additional dependencies: {error_msg}")
-        
-        return type(name, (), {"__init__": __init__})
-    
-    def _create_dummy_function(name: str, error_msg: str) -> Any:
-        def dummy(*args: Any, **kwargs: Any) -> Any:
-            raise ImportError(f"{name} requires additional dependencies: {error_msg}")
-        return dummy
-    
     # Create dummy implementations
     MolecularGraphProcessor = _create_dummy_class("MolecularGraphProcessor", "torch_geometric, rdkit")  # type: ignore
     create_graph_processor = _create_dummy_function("create_graph_processor", "torch_geometric, rdkit")

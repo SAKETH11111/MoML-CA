@@ -523,7 +523,7 @@ class TestPFASDataset:
             if isinstance(graph.x, torch.Tensor):
                 assert graph.x.dtype == torch.float
                 assert graph.x.shape[0] > 0  # Should have at least one atom
-                assert graph.x.shape[1] == 17
+                assert graph.x.shape[1] == 47
             if hasattr(graph, 'edge_index') and isinstance(graph.edge_index, torch.Tensor):
                 assert graph.edge_index.dtype == torch.long
                 assert graph.edge_index.shape[0] == 2

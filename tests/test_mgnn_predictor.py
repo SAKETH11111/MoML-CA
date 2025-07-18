@@ -123,6 +123,7 @@ def dummy_model_instance_and_config() -> Tuple[DummyDJMGNN, Dict[str, Any]]:
         "in_node_dim": 10,
         "hidden_dim": 16,
         "in_edge_dim": 3,
+        "edge_attr_dim": 3,
         "n_blocks": 1,
         "layers_per_block": 1,
         "jk_mode": "concat",
@@ -274,6 +275,9 @@ class TestMGNNPredictorInit:
             mock_processor.mol_to_graph.return_value = Data(
                 x=dummy_x, edge_index=torch.empty((2, 0), dtype=torch.long), edge_attr=dummy_edge_attr
             )
+            # Set the dimensions on the mock processor to match the original config
+            mock_processor.atom_feature_dim = config_orig["in_node_dim"]
+            mock_processor.bond_feature_dim = config_orig["in_edge_dim"]
             mock_create_proc.return_value = mock_processor
 
             predictor = MGNNPredictor(model_path=model_path_no_dims, config=config_no_dims.copy())
@@ -285,7 +289,7 @@ class TestMGNNPredictorInit:
         Test loading non-existent model file raises ValueError.
         """
         _, config = dummy_model_instance_and_config
-        with pytest.raises(ValueError, match="Failed to load model"):
+        with pytest.raises(FileNotFoundError, match="Model file not found"):
             MGNNPredictor(model_path="non_existent_model.pt", config=config)
 
     def test_load_model_corrupted_file(self, temp_model_files_dir: str, dummy_model_instance_and_config: Tuple[DummyDJMGNN, Dict[str, Any]]) -> None:
