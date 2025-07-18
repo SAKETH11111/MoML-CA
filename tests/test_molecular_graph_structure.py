@@ -1,48 +1,56 @@
 """
-Tests for the MolecularGraphProcessor class.
+tests/test_molecular_graph_structure.py
 
-This file originally tested the deprecated MolecularGraphBuilder class
-and has been updated to use the modern MolecularGraphProcessor.
+Unit tests for the MolecularGraphProcessor class, focusing on graph structure
+and feature generation.
 """
 
 import os
 import sys
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 import pytest
 import torch
-import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-# Add parent directory to path
+# Add parent directory to path to enable imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
 
-from moml.core import create_graph_processor
+from moml.core import MolecularGraphProcessor, create_graph_processor
 
 
-def create_test_molecule():
-    """Create a simple test molecule (PFOA - Perfluorooctanoic acid)."""
+def create_test_molecule() -> Chem.Mol:
+    """
+    Create a simple test molecule (PFOA - Perfluorooctanoic acid) with 3D coordinates.
+
+    Returns:
+        Chem.Mol: The RDKit molecule object.
+    """
     mol = Chem.MolFromSmiles("C(C(F)(F)F)(C(C(C(C(=O)O)(F)F)(F)F)(F)F)(F)F")
     mol = Chem.AddHs(mol)
 
-    # Generate 3D coordinates
-    AllChem.EmbedMolecule(mol, randomSeed=42)
-    AllChem.UFFOptimizeMolecule(mol)
+    AllChem.EmbedMolecule(mol, randomSeed=42)  # type: ignore
+    AllChem.UFFOptimizeMolecule(mol)  # type: ignore
 
     return mol
 
 
 class TestMolecularGraphProcessor:
-    """Test the MolecularGraphProcessor class."""
+    """
+    Test suite for the MolecularGraphProcessor class.
+    """
 
-    def test_initialization(self):
-        """Test processor initialization with different options."""
-        # Default initialization
+    def test_initialization(self) -> None:
+        """
+        Test processor initialization with different options.
+        """
         processor = create_graph_processor()
         assert processor.use_partial_charges is True
         assert processor.use_3d_coords is True
         assert processor.use_pfas_specific_features is True
 
-        # Custom initialization
         processor = create_graph_processor(
             {"use_partial_charges": False, "use_3d_coords": False, "use_pfas_specific_features": False}
         )
@@ -50,24 +58,25 @@ class TestMolecularGraphProcessor:
         assert processor.use_3d_coords is False
         assert processor.use_pfas_specific_features is False
 
-    def test_one_hot_encoding(self):
-        """Test the one_hot_encoding function."""
+    def test_one_hot_encoding(self) -> None:
+        """
+        Test the one_hot_encoding function.
+        """
         processor = create_graph_processor()
 
-        # Test with value in choices
         encoding = processor._one_hot_encoding(1, [0, 1, 2])
         assert encoding == [0, 1, 0]
 
-        # Test with value not in choices
         encoding = processor._one_hot_encoding(3, [0, 1, 2])
         assert encoding == [0, 0, 0]
 
-    def test_functional_group_detection(self):
-        """Test functional group detection methods."""
+    def test_functional_group_detection(self) -> None:
+        """
+        Test functional group detection methods.
+        """
         processor = create_graph_processor()
         mol = create_test_molecule()
 
-        # Find COOH group in PFOA
         found_carboxylic = False
         for atom in mol.GetAtoms():
             if processor._is_in_carboxylic_group(atom):
@@ -76,58 +85,58 @@ class TestMolecularGraphProcessor:
 
         assert found_carboxylic, "Carboxylic group not detected in PFOA"
 
-        # Find CF3 groups
         cf3_groups = processor.functional_group_detector.find_cf3_groups(mol)
         assert len(cf3_groups) > 0, "CF3 groups not detected in PFOA"
 
-    def test_mol_to_graph_basic(self):
-        """Test basic graph conversion without partial charges."""
+    def test_mol_to_graph_basic(self) -> None:
+        """
+        Test basic graph conversion without partial charges.
+        """
         processor = create_graph_processor({"use_partial_charges": False})
         mol = create_test_molecule()
 
         graph = processor.mol_to_graph(mol)
 
-        # Check that the graph has the right structure
         assert isinstance(graph.x, torch.Tensor)
         assert isinstance(graph.edge_index, torch.Tensor)
         assert isinstance(graph.edge_attr, torch.Tensor)
         assert graph.num_nodes == mol.GetNumAtoms()
 
-    def test_mol_to_graph_with_pfas_features(self):
-        """Test graph conversion with PFAS-specific features."""
+    def test_mol_to_graph_with_pfas_features(self) -> None:
+        """
+        Test graph conversion with PFAS-specific features.
+        """
         processor = create_graph_processor({"use_partial_charges": False, "use_pfas_specific_features": True})
         mol = create_test_molecule()
 
         graph = processor.mol_to_graph(mol)
 
-        # Check that the feature dimension is larger with PFAS features
-        # Basic features + PFAS-specific features
         assert graph.x.shape[1] > 10
 
-    def test_mol_to_graph_with_partial_charges(self):
-        """Test graph conversion with partial charges."""
+    def test_mol_to_graph_with_partial_charges(self) -> None:
+        """
+        Test graph conversion with partial charges.
+        """
         processor = create_graph_processor({"use_partial_charges": True})
         mol = create_test_molecule()
 
-        # Create mock partial charges
         num_atoms = mol.GetNumAtoms()
         partial_charges = np.random.uniform(-1, 1, num_atoms).tolist()
 
         graph = processor.mol_to_graph(mol, {"partial_charges": partial_charges})
 
-        # Check that the feature dimension includes partial charges
         assert graph.x.shape[1] > 10
 
-    def test_mol_to_graph_with_homo_lumo(self):
-        """Test graph conversion with HOMO/LUMO contributions."""
+    def test_mol_to_graph_with_homo_lumo(self) -> None:
+        """
+        Test graph conversion with HOMO/LUMO contributions.
+        """
         processor = create_graph_processor({"use_partial_charges": True})
         mol = create_test_molecule()
 
-        # Create mock partial charges and HOMO/LUMO contributions
         num_atoms = mol.GetNumAtoms()
         partial_charges = np.random.uniform(-1, 1, num_atoms).tolist()
 
-        # Mock HOMO/LUMO contributions
         homo_contributions = np.random.uniform(0, 0.2, num_atoms).tolist()
         lumo_contributions = np.random.uniform(0, 0.2, num_atoms).tolist()
 
@@ -139,36 +148,35 @@ class TestMolecularGraphProcessor:
 
         graph = processor.mol_to_graph(mol, additional_features)
 
-        # Check that the feature dimension includes HOMO/LUMO contributions
-        # Basic features + PFAS features + partial charge + homo + lumo
-        expected_dim = 15 + 2  # Base features + HOMO/LUMO
+        expected_dim = 15 + 2
         assert graph.x.shape[1] >= expected_dim
 
-    def test_global_features(self):
-        """Test that global features are correctly calculated."""
+    def test_global_features(self) -> None:
+        """
+        Test that global features are correctly calculated.
+        """
         processor = create_graph_processor()
         mol = create_test_molecule()
 
         graph = processor.mol_to_graph(mol)
 
-        # Check that global features exist and have the right shape
         assert hasattr(graph, "y")
         assert graph.y is not None
-        assert graph.y.shape[0] >= 7  # At least the basic global features
+        assert graph.y.shape[0] >= 7
 
-    def test_smiles_to_graph(self):
-        """Test creating a graph from a SMILES string."""
+    def test_smiles_to_graph(self) -> None:
+        """
+        Test creating a graph from a SMILES string.
+        """
         processor = create_graph_processor()
 
-        # PFOA SMILES
         smiles = "C(C(F)(F)F)(C(C(C(C(=O)O)(F)F)(F)F)(F)F)(F)F"
 
         graph = processor.smiles_to_graph(smiles)
 
-        # Basic checks
         assert graph is not None
         assert graph.num_nodes > 0
-        assert graph.edge_index.shape[0] == 2  # [2, num_edges]
+        assert graph.edge_index.shape[0] == 2
 
 
 if __name__ == "__main__":

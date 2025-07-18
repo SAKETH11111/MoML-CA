@@ -1,6 +1,7 @@
-#!python
 """
-Test script for the Unified Graph Generator
+tests/test_molecular_graph_generation.py
+
+Unit tests for the molecular graph generation utilities.
 
 This script tests the functionality of the molecular graph generation utilities:
 1. Creating molecular graphs from SMILES strings
@@ -8,12 +9,15 @@ This script tests the functionality of the molecular graph generation utilities:
 3. Testing batch processing capabilities
 """
 
+import logging
 import os
 import sys
-import pytest
-import unittest
 import tempfile
-import logging
+import unittest
+from typing import Any, Dict, List, Optional, Tuple
+
+import pandas as pd
+import pytest
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -28,132 +32,120 @@ try:
     from rdkit import Chem
     from rdkit.Chem import AllChem
 
-    print("RDKit import successful!")
+    RDKIT_AVAILABLE = True
 except ImportError:
+    RDKIT_AVAILABLE = False
     pytest.skip("RDKit not installed, skipping molecular graph generation tests", allow_module_level=True)
 
 # Try to import torch and torch_geometric
 try:
-    import pandas as pd
     from torch_geometric.data import Data as PyGData
 
     TORCH_AVAILABLE = True
-    print("PyTorch and PyTorch Geometric import successful!")
 except ImportError:
     TORCH_AVAILABLE = False
-    print(f"Failed to import PyTorch or PyTorch Geometric")
+    pytest.skip("PyTorch or PyTorch Geometric not available, skipping molecular graph generation tests", allow_module_level=True)
 
 # Import from consolidated moml modules
 try:
-    from moml.utils import validate_smiles
-    from moml.data.processors.process_chemical_data import create_rdkit_mols
     from moml.core import MolecularGraphProcessor
+    from moml.data.processors.process_chemical_data import create_rdkit_mols
+    from moml.utils import validate_smiles
 
-    IMPORTS_SUCCESSFUL = True
-    print("Successfully imported moml modules!")
+    MOML_IMPORTS_SUCCESSFUL = True
 except ImportError:
-    print(f"Failed to import required moml modules")
-    IMPORTS_SUCCESSFUL = False
+    MOML_IMPORTS_SUCCESSFUL = False
+    pytest.skip("Failed to import required moml modules, skipping molecular graph generation tests", allow_module_level=True)
 
 
 class TestMolecularGraphGenerator(unittest.TestCase):
-    """Test the molecular graph generation functionality."""
+    """
+    Test suite for the molecular graph generation functionality.
+    """
 
-    def setUp(self):
-        """Set up test molecules."""
-        if not TORCH_AVAILABLE or not IMPORTS_SUCCESSFUL:
+    def setUp(self) -> None:
+        """
+        Set up test molecules and initialize MolecularGraphProcessor.
+        """
+        if not TORCH_AVAILABLE or not MOML_IMPORTS_SUCCESSFUL:
             self.skipTest("Required dependencies not available")
 
         self.temp_dir = tempfile.TemporaryDirectory()
 
-        # Create a few example SMILES strings
-        self.test_smiles = [
-            "CC",  # Ethane (simple hydrocarbon)
-            "CC(F)(F)F",  # Trifluoromethane (simple PFAS)
-            "O=C(O)C(F)(OC(F)(F)C(F)(F)F)C(F)(F)F",  # GenX (complex PFAS)
+        self.test_smiles: List[str] = [
+            "CC",
+            "CC(F)(F)F",
+            "O=C(O)C(F)(OC(F)(F)C(F)(F)F)C(F)(F)F",
         ]
 
-        # Convert to RDKit molecules and generate 3D coordinates
-        self.mols = []
-        self.mol_files = []
+        self.mols: List[Chem.Mol] = []
+        self.mol_files: List[str] = []
 
         for i, smiles in enumerate(self.test_smiles):
-            is_valid, canonical_smi, mol_obj, error_msg = validate_smiles(smiles)  # Unpack 4
-            if is_valid and mol_obj is not None:  # Check if valid and mol_obj is created
-                mol = mol_obj  # Use the mol_obj directly
-                # mol = Chem.MolFromSmiles(canonical_smi) # Or recreate if preferred, but mol_obj should be fine
-                if mol is not None:  # This check might be redundant if mol_obj is already checked
-                    mol = Chem.AddHs(mol)
-                    AllChem.EmbedMolecule(mol, randomSeed=42)
-                    AllChem.MMFFOptimizeMolecule(mol)
+            is_valid, canonical_smi, mol_obj, error_msg = validate_smiles(smiles)
+            if is_valid and mol_obj is not None:
+                mol = mol_obj
+                mol = Chem.AddHs(mol)
+                AllChem.EmbedMolecule(mol, randomSeed=42)  # type: ignore
+                AllChem.MMFFOptimizeMolecule(mol)  # type: ignore
 
-                    self.mols.append(mol)
+                self.mols.append(mol)
 
-                    # Save as MOL file
-                    mol_file = os.path.join(self.temp_dir.name, f"test_mol_{i}.mol")
-                    Chem.MolToMolFile(mol, mol_file)
-                    self.mol_files.append(mol_file)
-                else:
-                    logger.warning(
-                        f"Could not create RDKit mol from canonical SMILES '{canonical_smi}' for original '{smiles}'"
-                    )
+                mol_file = os.path.join(self.temp_dir.name, f"test_mol_{i}.mol")
+                Chem.MolToMolFile(mol, mol_file)
+                self.mol_files.append(mol_file)
             else:
                 logger.warning(f"SMILES validation failed for '{smiles}': {error_msg}")
 
-        # Initialize MolecularGraphProcessor
         self.graph_processor = MolecularGraphProcessor()
 
-    def tearDown(self):
-        """Clean up temporary files."""
+    def tearDown(self) -> None:
+        """
+        Clean up temporary files after tests.
+        """
         if hasattr(self, "temp_dir"):
             self.temp_dir.cleanup()
 
-    def test_mol_to_graph_basic(self):
-        """Test basic conversion of molecule to graph."""
-        if not TORCH_AVAILABLE or not IMPORTS_SUCCESSFUL:
+    def test_mol_to_graph_basic(self) -> None:
+        """
+        Test basic conversion of a simple molecule (ethane) to a graph.
+        """
+        if not TORCH_AVAILABLE or not MOML_IMPORTS_SUCCESSFUL:
             self.skipTest("PyTorch, PyTorch Geometric, or MOML modules not available")
 
-        # Test with ethane (simplest case)
         mol = self.mols[0]
 
-        # Convert molecule to graph
         graph = self.graph_processor.mol_to_graph(mol)
         self.assertIsInstance(graph, PyGData)
 
-        # Check basic properties
         self.assertEqual(graph.num_nodes, mol.GetNumAtoms())
-        self.assertTrue(hasattr(graph, "x"))  # Node features
+        self.assertTrue(hasattr(graph, "x"))
         self.assertTrue(hasattr(graph, "edge_index"))
 
-        # Check feature dimensions
         self.assertEqual(graph.x.shape[0], mol.GetNumAtoms())
         self.assertEqual(graph.x.shape[1], self.graph_processor.atom_feature_dim)
 
-        # Check edge_index (basic check, assumes undirected edges are added by mol_to_graph)
         self.assertEqual(graph.edge_index.shape[0], 2)
-        self.assertGreaterEqual(graph.edge_index.shape[1], mol.GetNumBonds())  # Can be 2*num_bonds for undirected
+        self.assertGreaterEqual(graph.edge_index.shape[1], mol.GetNumBonds())
 
         if mol.GetNumBonds() > 0:
             self.assertTrue(hasattr(graph, "edge_attr"))
             self.assertEqual(graph.edge_attr.shape[1], self.graph_processor.bond_feature_dim)
             self.assertEqual(graph.edge_attr.shape[0], graph.edge_index.shape[1])
 
-        print("Basic graph conversion test passed for ethane")
-
-    def test_mol_to_graph_with_trifluoromethane(self):
-        """Test conversion with trifluoromethane molecule."""
-        if not TORCH_AVAILABLE or not IMPORTS_SUCCESSFUL:
+    def test_mol_to_graph_with_trifluoromethane(self) -> None:
+        """
+        Test conversion of trifluoromethane molecule to a graph.
+        """
+        if not TORCH_AVAILABLE or not MOML_IMPORTS_SUCCESSFUL:
             self.skipTest("PyTorch, PyTorch Geometric, or MOML modules not available")
 
-        # Test with TFM (trifluoromethane)
         mol = self.mols[1]
         num_atoms = mol.GetNumAtoms()
 
-        # Convert molecule to graph
         graph = self.graph_processor.mol_to_graph(mol)
         self.assertIsInstance(graph, PyGData)
 
-        # Check basic properties
         self.assertEqual(graph.num_nodes, num_atoms)
         self.assertTrue(hasattr(graph, "x"))
         self.assertEqual(graph.x.shape[0], num_atoms)
@@ -167,35 +159,28 @@ class TestMolecularGraphGenerator(unittest.TestCase):
             self.assertEqual(graph.edge_attr.shape[1], self.graph_processor.bond_feature_dim)
             self.assertEqual(graph.edge_attr.shape[0], graph.edge_index.shape[1])
 
-        # Check for 3D coordinates if expected by processor config
         if self.graph_processor.use_3d_coords:
             self.assertTrue(hasattr(graph, "pos"))
             self.assertEqual(graph.pos.shape, (num_atoms, 3))
 
-        print("Graph conversion passed for trifluoromethane")
-
-    def test_mol_from_file_to_graph(self):
-        """Test loading molecule from file and converting to graph."""
-        if not TORCH_AVAILABLE or not IMPORTS_SUCCESSFUL:
+    def test_mol_from_file_to_graph(self) -> None:
+        """
+        Test loading a molecule from a file and converting it to a graph.
+        """
+        if not TORCH_AVAILABLE or not MOML_IMPORTS_SUCCESSFUL:
             self.skipTest("PyTorch, PyTorch Geometric, or MOML modules not available")
 
-        # Use the first mol file (ethane)
         mol_file = self.mol_files[0]
         self.assertTrue(os.path.exists(mol_file), f"Mol file not found: {mol_file}")
 
-        # Load the molecule from file
         mol_from_file_raw = Chem.MolFromMolFile(mol_file, removeHs=False)
         self.assertIsNotNone(mol_from_file_raw, "Failed to load molecule from MOL file")
 
-        # Ensure the comparison molecule also has explicit hydrogens for GetNumAtoms(),
-        # consistent with how graph_processor.mol_to_graph would process it (it calls AddHs).
         mol_for_comparison = Chem.AddHs(mol_from_file_raw)
 
-        # Convert molecule to graph using the processor's file_to_graph method
         graph = self.graph_processor.file_to_graph(mol_file)
         self.assertIsInstance(graph, PyGData)
 
-        # Check basic properties
         self.assertEqual(graph.num_nodes, mol_for_comparison.GetNumAtoms())
         self.assertTrue(hasattr(graph, "x"))
         self.assertEqual(graph.x.shape[0], mol_for_comparison.GetNumAtoms())
@@ -207,14 +192,13 @@ class TestMolecularGraphGenerator(unittest.TestCase):
             self.assertEqual(graph.edge_attr.shape[1], self.graph_processor.bond_feature_dim)
             self.assertEqual(graph.edge_attr.shape[0], graph.edge_index.shape[1])
 
-        print("Successfully created graph from mol file")
-
-    def test_process_dataframe(self):
-        """Test processing a dataframe of molecules."""
-        if not TORCH_AVAILABLE or not IMPORTS_SUCCESSFUL:
+    def test_process_dataframe(self) -> None:
+        """
+        Test processing a pandas DataFrame of molecules into graphs.
+        """
+        if not TORCH_AVAILABLE or not MOML_IMPORTS_SUCCESSFUL:
             self.skipTest("PyTorch, PyTorch Geometric, or MOML modules not available")
 
-        # Create a dataframe with SMILES and convert to RDKit molecules
         df = pd.DataFrame(
             {
                 "smiles": self.test_smiles,
@@ -223,45 +207,44 @@ class TestMolecularGraphGenerator(unittest.TestCase):
             }
         )
 
-        # Convert SMILES to RDKit molecules
         df = create_rdkit_mols(df, smiles_col="smiles", mol_col="rdkit_mol")
 
-        # Simulate processing dataframe row by row
-        processed_graphs = []
-        num_atoms_list = []
+        processed_graphs: List[Optional[PyGData]] = []
+        num_atoms_list: List[int] = []
         for idx, row in df.iterrows():
-            mol = row["rdkit_mol"]
-            if mol:
+            mol: Optional[Chem.Mol] = row["rdkit_mol"] # Explicitly type as Optional[Chem.Mol]
+            if mol is not None: # Check if mol is not None
                 graph = self.graph_processor.mol_to_graph(mol)
-                if graph:
+                if graph is not None: # Check if graph is not None
                     processed_graphs.append(graph)
                     num_atoms_list.append(mol.GetNumAtoms())
-            else:  # Handle cases where mol might be None if SMILES was invalid
+            else:
                 processed_graphs.append(None)
                 num_atoms_list.append(0)
 
         self.assertEqual(len(processed_graphs), len(df))
 
-        # Check that all valid rows have graph objects
         for i, graph_obj in enumerate(processed_graphs):
-            original_mol = df.iloc[i]["rdkit_mol"]
-            if original_mol:  # Only check if original mol was valid
+            original_mol: Optional[Chem.Mol] = df.iloc[i]["rdkit_mol"] # Explicitly type as Optional[Chem.Mol]
+            if original_mol is not None: # Check if original_mol is not None
                 self.assertIsInstance(graph_obj, PyGData)
-                self.assertEqual(graph_obj.num_nodes, num_atoms_list[i])
-                self.assertTrue(hasattr(graph_obj, "x"))
-                self.assertEqual(graph_obj.x.shape[0], num_atoms_list[i])
-                self.assertEqual(graph_obj.x.shape[1], self.graph_processor.atom_feature_dim)
+                if graph_obj is not None: # Check if graph_obj is not None
+                    self.assertEqual(graph_obj.num_nodes, num_atoms_list[i])
+                    self.assertTrue(hasattr(graph_obj, "x"))
+                    self.assertEqual(graph_obj.x.shape[0], num_atoms_list[i])
+                    self.assertEqual(graph_obj.x.shape[1], self.graph_processor.atom_feature_dim)
             else:
-                self.assertIsNone(graph_obj)  # Expect None if original mol was None
+                self.assertIsNone(graph_obj)
 
-        print(f"Successfully processed dataframe with {len(df[df['rdkit_mol'].notna()])} valid molecules into graphs")
+        logger.info(f"Successfully processed dataframe with {len(df[df['rdkit_mol'].notna()])} valid molecules into graphs")
 
-    def test_save_processed_data(self):
-        """Test saving processed molecular graph data."""
-        if not TORCH_AVAILABLE or not IMPORTS_SUCCESSFUL:
+    def test_save_processed_data(self) -> None:
+        """
+        Test saving processed molecular graph data properties to a CSV file.
+        """
+        if not TORCH_AVAILABLE or not MOML_IMPORTS_SUCCESSFUL:
             self.skipTest("PyTorch, PyTorch Geometric, or MOML modules not available")
 
-        # Create a dataframe with SMILES and convert to RDKit molecules
         df = pd.DataFrame(
             {
                 "smiles": self.test_smiles,
@@ -270,16 +253,14 @@ class TestMolecularGraphGenerator(unittest.TestCase):
             }
         )
 
-        # Convert SMILES to RDKit molecules
         df = create_rdkit_mols(df, smiles_col="smiles", mol_col="rdkit_mol")
 
-        # Simulate processing dataframe row by row and collecting graph properties
-        processed_graphs_data = []
+        processed_graphs_data: List[Dict[str, Any]] = []
         for idx, row in df.iterrows():
-            mol = row["rdkit_mol"]
-            if mol:
+            mol: Optional[Chem.Mol] = row["rdkit_mol"] # Explicitly type as Optional[Chem.Mol]
+            if mol is not None: # Check if mol is not None
                 graph = self.graph_processor.mol_to_graph(mol)
-                if graph:
+                if graph is not None: # Check if graph is not None
                     processed_graphs_data.append(
                         {
                             "id": row["id"],
@@ -287,39 +268,37 @@ class TestMolecularGraphGenerator(unittest.TestCase):
                             "smiles": row["smiles"],
                             "num_nodes": graph.num_nodes,
                             "num_edges": graph.num_edges,
-                            # Storing paths to individual .pt files would be another option
                         }
                     )
 
-        # Create a DataFrame from the collected graph properties
         save_df = pd.DataFrame(processed_graphs_data)
 
-        # Save processed data (now a DataFrame of graph properties)
         output_dir = os.path.join(self.temp_dir.name, "output")
         os.makedirs(output_dir, exist_ok=True)
 
         output_file = os.path.join(output_dir, "molecular_graph_properties.csv")
         save_df.to_csv(output_file, index=False)
 
-        # Check that the file was created
         self.assertTrue(os.path.exists(output_file), f"Output file not created: {output_file}")
 
-        # Verify content (optional, basic check)
         loaded_df = pd.read_csv(output_file)
         self.assertEqual(len(loaded_df), len(df[df["rdkit_mol"].notna()]))
         self.assertIn("num_nodes", loaded_df.columns)
         self.assertIn("id", loaded_df.columns)
 
-        print(f"Successfully saved processed graph properties to {output_file}")
+        logger.info(f"Successfully saved processed graph properties to {output_file}")
 
 
-def run_graph_generation_tests():
-    """Run all graph generation tests."""
-    # Create test suite
+def run_graph_generation_tests() -> bool:
+    """
+    Run all molecular graph generation tests.
+
+    Returns:
+        bool: True if all tests pass, False otherwise.
+    """
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestMolecularGraphGenerator)
 
-    # Run tests
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
 
@@ -327,17 +306,6 @@ def run_graph_generation_tests():
 
 
 if __name__ == "__main__":
-    print("RDKit import successful!")
-
-    if TORCH_AVAILABLE:
-        print("PyTorch and PyTorch Geometric import successful!")
-    else:
-        print("PyTorch or PyTorch Geometric not available")
-
-    if IMPORTS_SUCCESSFUL:
-        print("Successfully imported moml modules!")
-    else:
-        print("Failed to import required modules")
-
-    # Exit with appropriate status code
-    sys.exit(0)
+    logger.info("Starting molecular graph generation tests...")
+    success = run_graph_generation_tests()
+    sys.exit(0 if success else 1)

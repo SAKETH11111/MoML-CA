@@ -1,5 +1,4 @@
-"""
-Tests for the graph coarsening functionality.
+"""Tests for the graph coarsening functionality.
 
 This file serves as the primary test suite for graph coarsening, covering:
 1. Functional group identification
@@ -7,32 +6,33 @@ This file serves as the primary test suite for graph coarsening, covering:
 3. Hierarchical graph creation
 """
 
+from typing import Dict, Any
+from unittest.mock import patch
+
 import pytest
 import torch
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, rdMolDescriptors
 from torch_geometric.data import Data
-from unittest.mock import patch
 
 from moml.core import GraphCoarsener
 from moml.core.molecular_feature_extraction import FunctionalGroupDetector
 
 
-# Create a custom Data class for testing that handles the keys attribute properly
-class CustomGraphData(Data): # Renamed from TestData
+class CustomGraphData(Data):
     """Custom PyTorch Geometric Data class for testing with a proper keys property."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         # Store all original attributes
         self._stored_keys = list(kwargs.keys())
 
     @property
-    def keys(self):
+    def keys(self) -> list:
         """Return list of attribute keys, compatible with GraphCoarsener."""
         return self._stored_keys
 
-    def __setattr__(self, key, value):
+    def __setattr__(self, key: str, value: Any) -> None:
         """Override to track keys when attributes are set."""
         super().__setattr__(key, value)
         if not key.startswith("_") and key != "keys" and hasattr(self, "_stored_keys"):
@@ -55,9 +55,7 @@ def test_molecule():
 
 @pytest.fixture
 def mock_atom_graph(test_molecule):
-    """
-    Create a mock atom-level graph for testing.
-    """
+    """Create a mock atom-level graph for testing."""
     mol = test_molecule
     num_atoms = mol.GetNumAtoms()
 
@@ -69,11 +67,10 @@ def mock_atom_graph(test_molecule):
         positions.append([pos.x, pos.y, pos.z])
 
     # Pre-calculate max possible edges
-    # Each atom connects to at most 3 others, and each edge is counted twice (i→j and j→i)
     max_edges = min(num_atoms * 6, num_atoms * (num_atoms - 1))
 
     # Create a CustomGraphData object with necessary attributes
-    data = CustomGraphData( # Renamed from TestData
+    data = CustomGraphData(
         x=torch.randn(num_atoms, 16),  # Node features
         edge_index=torch.zeros(2, max_edges, dtype=torch.long),
         edge_attr=torch.randn(max_edges, 8),
@@ -86,7 +83,7 @@ def mock_atom_graph(test_molecule):
     edge_count = 0
     for i in range(num_atoms):
         for j in range(num_atoms):
-            if i != j and edge_count < max_edges - 1:  # Avoid self-loops and check bounds
+            if i != j and edge_count < max_edges - 1:
                 data.edge_index[0, edge_count] = i
                 data.edge_index[1, edge_count] = j
                 edge_count += 1
@@ -123,7 +120,7 @@ def mock_torch_geometric_data(test_molecule):
     edge_count = 0
     for i in range(num_atoms):
         for j in range(i + 1, min(i + 2, num_atoms)):
-            if i != j and edge_count < max_edges - 1:  # Avoid self-loops
+            if i != j and edge_count < max_edges - 1:
                 edge_index[0, edge_count] = i
                 edge_index[1, edge_count] = j
                 edge_count += 1
@@ -140,7 +137,7 @@ def mock_torch_geometric_data(test_molecule):
         positions.append([pos.x, pos.y, pos.z])
 
     # Create CustomGraphData object
-    data = CustomGraphData( # Renamed from TestData
+    data = CustomGraphData(
         x=x,
         edge_index=edge_index[:, :edge_count],
         edge_attr=edge_attr[:edge_count],
@@ -156,20 +153,20 @@ def mock_torch_geometric_data(test_molecule):
 def mock_functional_group_graph():
     """Create a mock functional group level graph for testing."""
     # Create a smaller graph to represent functional groups
-    num_groups = 5  # A small number of functional groups
+    num_groups = 5
 
-    # Calculate max edges for a fully connected graph (n*(n-1) since no self-loops)
+    # Calculate max edges for a fully connected graph
     max_edges = num_groups * (num_groups - 1)
 
     # Create a Data object for the functional group graph
-    data = CustomGraphData( # Renamed from TestData
+    data = CustomGraphData(
         x=torch.randn(num_groups, 16),  # Node features
         edge_index=torch.zeros(2, max_edges, dtype=torch.long),
         edge_attr=torch.randn(max_edges, 8),
         pos=torch.randn(num_groups, 3),
         num_nodes=num_groups,
         y=torch.randn(5),  # Global features
-        cluster_mapping={0: 0, 1: 1, 2: 2, 3: 3, 4: 4},  # Simple 1:1 mapping for testing
+        cluster_mapping={0: 0, 1: 1, 2: 2, 3: 3, 4: 4},
     )
 
     # Create a simple fully connected graph
@@ -185,7 +182,7 @@ def mock_functional_group_graph():
         if edge_count >= max_edges:
             break
 
-    # Trim edges to actual count (although should be the same as max_edges)
+    # Trim edges to actual count
     data.edge_index = data.edge_index[:, :edge_count]
     data.edge_attr = data.edge_attr[:edge_count]
 
@@ -195,7 +192,7 @@ def mock_functional_group_graph():
 class TestFunctionalGroupDetector:
     """Test the FunctionalGroupDetector class."""
 
-    def test_identify_cf_groups(self, test_molecule):
+    def test_identify_cf_groups(self, test_molecule) -> None:
         """Test identification of CF groups."""
         detector = FunctionalGroupDetector()
 
@@ -208,7 +205,7 @@ class TestFunctionalGroupDetector:
         group_types = set(cf_groups.values())
         assert "CF3" in group_types, "CF3 group not identified in PFOA"
 
-    def test_identify_carboxylic_groups(self, test_molecule):
+    def test_identify_carboxylic_groups(self, test_molecule) -> None:
         """Test identification of carboxylic groups."""
         detector = FunctionalGroupDetector()
 
@@ -220,7 +217,20 @@ class TestFunctionalGroupDetector:
         # The carboxylic group should include multiple atoms
         assert len(carboxylic_groups[0]) >= 3, "Carboxylic group should include at least 3 atoms"
 
-    def test_identify_all_functional_groups(self, test_molecule):
+    def test_identify_all_functional_groups_with_rdkit_descriptors(self, test_molecule) -> None:
+        """Test identification of all functional groups and compare with RDKit descriptors."""
+        detector = FunctionalGroupDetector()
+
+        cf_groups, functional_groups = detector.identify_all_functional_groups(test_molecule)
+
+        # Use RDKit's MolDescriptors to get functional groups
+        rdkit_functional_groups = rdMolDescriptors.CalcNumLipinskiHBA(test_molecule) + \
+                                  rdMolDescriptors.CalcNumLipinskiHBD(test_molecule)
+
+        # Our method should identify at least as many or more groups, as it's more specific
+        assert len(functional_groups) >= rdkit_functional_groups, "Our functional group detection should be comprehensive"
+
+    def test_identify_all_functional_groups(self, test_molecule) -> None:
         """Test identification of all functional groups."""
         detector = FunctionalGroupDetector()
 
@@ -236,7 +246,7 @@ class TestFunctionalGroupDetector:
 class TestGraphCoarsener:
     """Test the GraphCoarsener class."""
 
-    def test_initialization(self):
+    def test_initialization(self) -> None:
         """Test initialization of the GraphCoarsener."""
         coarsener = GraphCoarsener()
         assert coarsener.use_3d_coords is True
@@ -244,7 +254,7 @@ class TestGraphCoarsener:
         coarsener = GraphCoarsener(use_3d_coords=False)
         assert coarsener.use_3d_coords is False
 
-    def test_create_functional_group_graph(self, mock_atom_graph, test_molecule):
+    def test_create_functional_group_graph(self, mock_atom_graph, test_molecule) -> None:
         """Test creation of functional group level graph."""
         # Create functional group level graph
         coarsener = GraphCoarsener()
@@ -260,7 +270,7 @@ class TestGraphCoarsener:
         assert functional_group_graph.num_nodes <= mock_atom_graph.num_nodes
 
     @patch("moml.core.molecular_feature_extraction.MolecularFeatureExtractor.calculate_distance_features")
-    def test_create_structural_motif_graph(self, mock_calc_dist, mock_functional_group_graph, test_molecule):
+    def test_create_structural_motif_graph(self, mock_calc_dist, mock_functional_group_graph, test_molecule) -> None:
         """Test creation of structural motif level graph.
 
         This test uses mocking to avoid RDKit issues with GetShortestPath.
@@ -276,55 +286,29 @@ class TestGraphCoarsener:
 
         # Patch the _create_structural_mapping method to return a simple mapping
         with patch.object(coarsener, "_create_structural_mapping") as mock_create_mapping:
-            # To make the mock for _create_structural_mapping robust, we need to know
-            # what fg_cluster_ids it will receive. These come from atom_to_fg_mapping.
-            # Let's compute atom_to_fg_mapping first.
-            # This requires atom_level_graph_for_test_molecule to be defined before this block,
-            # or compute it inside here just for determining the mock.
-
-            # Create atom_level_graph_for_test_molecule once before the patch context
-            # This is already done outside and before this 'with' block in the refactored code.
-            # Let's assume atom_level_graph_for_test_molecule is available here.
-            # No, it's better to calculate it inside the test function scope before this patch.
-            # The current structure of the test has atom_level_graph_for_test_molecule defined *after* this mock setup.
-            # This needs to be reordered.
-
-            # Reordering: Define atom_level_graph_for_test_molecule first.
-            # This change is already part of the previous diff for this file.
-            # Assuming atom_level_graph_for_test_molecule is defined from the previous diff.
-
-            # For the mock, we need the set of unique FG cluster IDs that _create_structural_mapping will see.
-            # These are the values in the atom_to_fg_mapping.
-            # The atom_to_fg_mapping is created inside create_functional_group_graph.
-            # So, we need to call it to get the mapping.
+            # Get an actual atom-level graph for test_molecule
             temp_fg_graph = coarsener.create_functional_group_graph(
-                coarsener.graph_processor.mol_to_graph(test_molecule), test_molecule  # Ensure fresh atom graph
+                coarsener.graph_processor.mol_to_graph(test_molecule), test_molecule
             )
             actual_atom_to_fg_mapping = temp_fg_graph.cluster_mapping
             unique_fg_cluster_ids = sorted(list(set(actual_atom_to_fg_mapping.values())))
 
             # Create a mock return value for _create_structural_mapping
-            # This mock should map the actual unique_fg_cluster_ids to motif_ids (e.g., 0 or 1)
             mock_map_val = {}
             if unique_fg_cluster_ids:
-                # Ensure at least two motifs if possible for the test's later assertion (num_nodes == 2)
-                # Simple strategy: map first half to 0, second half to 1
-                # Or, more simply, map all but one to 0, and one to 1 if there are at least two.
-                # If only one fg_cluster_id, map it to 0. The test might need adjustment if it expects 2 motifs.
                 split_point = len(unique_fg_cluster_ids) // 2
-                if len(unique_fg_cluster_ids) == 1:  # Only one FG type
+                if len(unique_fg_cluster_ids) == 1:
                     mock_map_val = {uid: 0 for uid in unique_fg_cluster_ids}
-                else:  # At least two FG types
+                else:
                     for i, fg_id in enumerate(unique_fg_cluster_ids):
                         mock_map_val[fg_id] = 0 if i < split_point or split_point == 0 else 1
-                    # Ensure at least one '1' if there are multiple unique_fg_cluster_ids and split_point was 0
+                    # Ensure at least one '1' if there are multiple unique_fg_cluster_ids
                     if len(unique_fg_cluster_ids) > 1 and all(v == 0 for v in mock_map_val.values()):
                         mock_map_val[unique_fg_cluster_ids[-1]] = 1
 
             mock_create_mapping.return_value = mock_map_val
 
             # First, get an actual atom-level graph for test_molecule
-            # The coarsener has a graph_processor instance initialized within it.
             atom_level_graph_for_test_molecule = coarsener.graph_processor.mol_to_graph(test_molecule)
             assert (
                 atom_level_graph_for_test_molecule is not None
@@ -354,13 +338,13 @@ class TestGraphCoarsener:
         mock_atom_graph,
         mock_functional_group_graph,
         test_molecule,
-    ):
+    ) -> None:
         """Test creation of hierarchical graphs with comprehensive mocking."""
         # Create mock functional group graph
         fg_graph = mock_functional_group_graph
 
         # Create mock structural motif graph
-        motif_graph = CustomGraphData( # Renamed from TestData
+        motif_graph = CustomGraphData(
             x=torch.randn(2, 16),  # Node features for head and tail
             edge_index=torch.tensor([[0, 1], [1, 0]], dtype=torch.long),
             edge_attr=torch.randn(2, 8),
@@ -391,7 +375,7 @@ class TestGraphCoarsener:
         mock_fg_graph.assert_called_once_with(mock_atom_graph, test_molecule)
         mock_motif_graph.assert_called_once_with(fg_graph, test_molecule)
 
-    def test_with_mock_data(self, mock_torch_geometric_data, test_molecule):
+    def test_with_mock_data(self, mock_torch_geometric_data, test_molecule) -> None:
         """Test graph coarsening with mock data."""
         coarsener = GraphCoarsener(use_3d_coords=True)
 

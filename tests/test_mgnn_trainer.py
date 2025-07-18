@@ -1,54 +1,89 @@
 """
+tests/test_mgnn_trainer.py
+
 Unit tests for the MGNNTrainer class and related functions
 in moml.models.mgnn.training.trainer.
 """
+
+import os
+import shutil
+import tempfile
+from typing import Any, Dict, Generator, List, Optional, Tuple
+from unittest.mock import MagicMock, patch
+
+import matplotlib
+import matplotlib.pyplot as plt
 import pytest
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset as TorchDataset
-import os
-import tempfile
-import shutil
-from unittest.mock import MagicMock, patch
-from torch_geometric.data import Data, Batch
-import matplotlib
-import matplotlib.pyplot as plt
+from torch_geometric.data import Batch, Data
 
-from moml.models.mgnn.training.trainer import (
-    MGNNTrainer,
-    train_epoch as standalone_train_epoch,  # Alias to avoid conflict
-    create_trainer,
-)
 from moml.models.mgnn.evaluation.predictor import MGNNPredictor
 from moml.models.mgnn.training.callbacks import Callback
+from moml.models.mgnn.training.trainer import (
+    MGNNTrainer,
+    create_trainer,
+    train_epoch as standalone_train_epoch,
+)
 
 # Use a non-interactive backend for matplotlib
 matplotlib.use("Agg")
 
 
-# --- Mock Components ---
 class MockSimpleModel(nn.Module):
-    def __init__(self, in_features=5, out_features_node=1, out_features_graph=1):
+    """
+    A simple mock PyTorch model for testing the trainer.
+    """
+
+    def __init__(self, in_features: int = 5, out_features_node: int = 1, out_features_graph: int = 1) -> None:
+        """
+        Initializes the MockSimpleModel.
+
+        Args:
+            in_features (int, optional): Input feature dimension. Defaults to 5.
+            out_features_node (int, optional): Output dimension for node predictions. Defaults to 1.
+            out_features_graph (int, optional): Output dimension for graph predictions. Defaults to 1.
+        """
         super().__init__()
         self.linear_node = nn.Linear(in_features, out_features_node)
         self.linear_graph = nn.Linear(in_features, out_features_graph)
         self.out_features_node = out_features_node
         self.out_features_graph = out_features_graph
 
-    def forward(self, x, edge_index, edge_attr=None, batch=None):
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_attr: Optional[torch.Tensor] = None,
+        batch: Optional[torch.Tensor] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass of the mock model.
+
+        Args:
+            x (torch.Tensor): Node features.
+            edge_index (torch.Tensor): Edge connectivity.
+            edge_attr (Optional[torch.Tensor], optional): Edge features. Defaults to None.
+            batch (Optional[torch.Tensor], optional): Batch assignment vector. Defaults to None.
+
+        Returns:
+            Dict[str, torch.Tensor]: Dictionary containing node and graph predictions.
+        """
         node_pred = self.linear_node(x)
 
         if batch is None:
-            # If no batch attribute, assume a single graph
-            if x.numel() == 0:  # Handle empty input tensor
-                graph_x = torch.zeros((0, x.size(1) if x.dim() > 1 else self.linear_graph.in_features), device=x.device)
+            if x.numel() == 0:
+                graph_x = torch.zeros(
+                    (0, x.size(1) if x.dim() > 1 else self.linear_graph.in_features), device=x.device
+                )
             else:
                 graph_x = x.mean(dim=0, keepdim=True)
 
         else:
             graph_x_list = []
-            if x.numel() > 0:  # Ensure x is not empty
+            if x.numel() > 0:
                 for i in range(batch.max().item() + 1):
                     graph_x_list.append(x[batch == i].mean(dim=0))
 
@@ -59,11 +94,9 @@ class MockSimpleModel(nn.Module):
             else:
                 graph_x = torch.stack(graph_x_list)
 
-        if (
-            graph_x.numel() == 0 and self.out_features_graph > 0
-        ):  # Handle case where graph_x is empty but output is expected
+        if graph_x.numel() == 0 and self.out_features_graph > 0:
             graph_pred = torch.zeros((0, self.out_features_graph), device=x.device)
-        elif self.out_features_graph == 0:  # Handle case where no graph output is expected
+        elif self.out_features_graph == 0:
             graph_pred = torch.empty((graph_x.shape[0], 0), device=x.device)
         else:
             graph_pred = self.linear_graph(graph_x)
@@ -72,22 +105,61 @@ class MockSimpleModel(nn.Module):
 
 
 class MockPyGDataset(TorchDataset):
-    def __init__(self, num_samples=10, in_features=5, num_nodes=3, node_out_dim=1, graph_out_dim=1, is_empty=False):
+    """
+    A mock PyTorch Geometric Dataset for testing.
+    """
+
+    def __init__(
+        self,
+        num_samples: int = 10,
+        in_features: int = 5,
+        num_nodes: int = 3,
+        node_out_dim: int = 1,
+        graph_out_dim: int = 1,
+        is_empty: bool = False,
+    ) -> None:
+        """
+        Initializes the MockPyGDataset.
+
+        Args:
+            num_samples (int, optional): Number of samples in the dataset. Defaults to 10.
+            in_features (int, optional): Input feature dimension for nodes. Defaults to 5.
+            num_nodes (int, optional): Number of nodes per graph. Defaults to 3.
+            node_out_dim (int, optional): Output dimension for node-level targets. Defaults to 1.
+            graph_out_dim (int, optional): Output dimension for graph-level targets. Defaults to 1.
+            is_empty (bool, optional): If True, creates an empty dataset. Defaults to False.
+        """
         self.num_samples = 0 if is_empty else num_samples
         self.in_features = in_features
         self.num_nodes = num_nodes
         self.node_out_dim = node_out_dim
         self.graph_out_dim = graph_out_dim
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """
+        Returns the number of samples in the dataset.
+        """
         return self.num_samples
 
-    def __getitem__(self, idx):
-        if self.num_nodes == 0:  # Special case for graph with no nodes
+    def __getitem__(self, idx: int) -> Data:
+        """
+        Returns a single data sample (graph).
+
+        Args:
+            idx (int): Index of the sample.
+
+        Returns:
+            Data: A PyTorch Geometric Data object.
+        """
+        if self.num_nodes == 0:
             x = torch.empty(0, self.in_features)
             edge_index = torch.empty((2, 0), dtype=torch.long)
             if self.graph_out_dim > 0:
-                y_graph = torch.randn(self.graph_out_dim).unsqueeze(0) if self.graph_out_dim == 1 else torch.randn(self.graph_out_dim)
+                y_graph = (
+                    torch.randn(int(self.graph_out_dim)).unsqueeze(0)
+                    if self.graph_out_dim == 1
+                    else torch.randn(int(self.graph_out_dim))
+                )
             else:
                 y_graph = torch.empty(0)
             y_node = torch.empty(0, self.node_out_dim)
@@ -101,33 +173,41 @@ class MockPyGDataset(TorchDataset):
                 edge_index = torch.empty((2, 0), dtype=torch.long)
 
             if self.graph_out_dim > 0:
-                # Ensure y_graph is (1, graph_out_dim) for single graph prediction if graph_out_dim is 1
-                # Or just (graph_out_dim) if > 1. For batching, PyG handles it.
-                # The warning is often about (N) vs (N,1).
-                y_g = torch.randn(self.graph_out_dim)
-                y_graph = y_g.unsqueeze(0) if self.graph_out_dim == 1 and y_g.ndim == 0 else y_g # make it [1] or [1,1] if needed
-                if y_graph.ndim == 1 and self.graph_out_dim == 1 : # if it became [1], make it [1,1]
+                y_g = torch.randn(int(self.graph_out_dim))
+                y_graph = y_g.unsqueeze(0) if self.graph_out_dim == 1 and y_g.ndim == 0 else y_g
+                if y_graph.ndim == 1 and self.graph_out_dim == 1:
                     y_graph = y_graph.unsqueeze(0)
 
             else:
                 y_graph = torch.empty(0)
 
             if self.node_out_dim > 0:
-                y_n = torch.randn(self.num_nodes, self.node_out_dim)
-                # Ensure y_node is (num_nodes, 1) if node_out_dim is 1
-                y_node = y_n # if self.node_out_dim > 1 else y_n.view(self.num_nodes, 1) # Already correct shape
+                y_n = torch.randn(self.num_nodes, int(self.node_out_dim))
+                y_node = y_n
             else:
                 y_node = torch.empty(self.num_nodes, 0)
 
         return Data(x=x, edge_index=edge_index, y=y_graph, node_y=y_node)
 
 
-def mock_collate_fn(batch_list):
-    return Batch.from_data_list(batch_list)
+def mock_collate_fn(batch_list: List[Data]) -> Batch:
+    """
+    A mock collate function for PyTorch Geometric Data objects.
+
+    Args:
+        batch_list (List[Data]): List of Data objects.
+
+    Returns:
+        Batch: A PyTorch Geometric Batch object.
+    """
+    return Batch.from_data_list(batch_list)  # type: ignore
 
 
 @pytest.fixture
-def dummy_config():
+def dummy_config() -> Dict[str, Any]:
+    """
+    Provides a dummy configuration dictionary for the trainer.
+    """
     return {
         "optimizer": "adam",
         "learning_rate": 0.001,
@@ -144,7 +224,10 @@ def dummy_config():
 
 
 @pytest.fixture
-def mock_model(dummy_config):
+def mock_model(dummy_config: Dict[str, Any]) -> MockSimpleModel:
+    """
+    Provides a mock model instance.
+    """
     return MockSimpleModel(
         in_features=dummy_config["in_dim"],
         out_features_node=dummy_config["node_out_dim"],
@@ -153,7 +236,10 @@ def mock_model(dummy_config):
 
 
 @pytest.fixture
-def mock_train_loader(dummy_config):
+def mock_train_loader(dummy_config: Dict[str, Any]) -> DataLoader:
+    """
+    Provides a mock training DataLoader.
+    """
     dataset = MockPyGDataset(
         num_samples=4,
         in_features=dummy_config["in_dim"],
@@ -164,7 +250,10 @@ def mock_train_loader(dummy_config):
 
 
 @pytest.fixture
-def mock_val_loader(dummy_config):
+def mock_val_loader(dummy_config: Dict[str, Any]) -> DataLoader:
+    """
+    Provides a mock validation DataLoader.
+    """
     dataset = MockPyGDataset(
         num_samples=2,
         in_features=dummy_config["in_dim"],
@@ -175,15 +264,31 @@ def mock_val_loader(dummy_config):
 
 
 @pytest.fixture(scope="module")
-def temp_trainer_files_dir():
+def temp_trainer_files_dir() -> Generator[str, None, None]:
+    """
+    Creates a temporary directory for trainer-related files.
+    """
     dir_path = tempfile.mkdtemp()
     yield dir_path
     shutil.rmtree(dir_path)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestMGNNTrainerInit:
-    def test_init_all_provided(self, mock_model, dummy_config, mock_train_loader, mock_val_loader):
+    """
+    Test suite for MGNNTrainer initialization.
+    """
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
+    def test_init_all_provided(
+        self,
+        mock_model: MockSimpleModel,
+        dummy_config: Dict[str, Any],
+        mock_train_loader: DataLoader,
+        mock_val_loader: DataLoader,
+    ) -> None:
+        """
+        Test initialization when all parameters are explicitly provided.
+        """
         optimizer = optim.Adam(mock_model.parameters(), lr=0.01)
         loss_fn = nn.L1Loss()
         callback = MagicMock(spec=Callback)
@@ -203,66 +308,104 @@ class TestMGNNTrainerInit:
         assert trainer.loss_fn == loss_fn
         assert trainer.callbacks == [callback]
 
-    def test_init_default_optimizer_adam(self, mock_model, dummy_config):
+    def test_init_default_optimizer_adam(self, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test default Adam optimizer initialization.
+        """
         trainer = MGNNTrainer(model=mock_model, config=dummy_config)
         assert isinstance(trainer.optimizer, optim.Adam)
         assert trainer.optimizer.defaults["lr"] == dummy_config["learning_rate"]
 
-    def test_init_default_optimizer_sgd(self, mock_model, dummy_config):
+    def test_init_default_optimizer_sgd(self, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test default SGD optimizer initialization.
+        """
         config_sgd = dummy_config.copy()
         config_sgd["optimizer"] = "sgd"
         trainer = MGNNTrainer(model=mock_model, config=config_sgd)
         assert isinstance(trainer.optimizer, optim.SGD)
 
-    def test_init_default_optimizer_adamw(self, mock_model, dummy_config):
+    def test_init_default_optimizer_adamw(self, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test default AdamW optimizer initialization.
+        """
         config_adamw = dummy_config.copy()
         config_adamw["optimizer"] = "adamw"
         trainer = MGNNTrainer(model=mock_model, config=config_adamw)
         assert isinstance(trainer.optimizer, optim.AdamW)
 
-    def test_init_default_loss_regression(self, mock_model, dummy_config):
+    def test_init_default_loss_regression(self, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test default MSELoss for regression task.
+        """
         trainer = MGNNTrainer(model=mock_model, config=dummy_config)
         assert isinstance(trainer.loss_fn, nn.MSELoss)
 
-    def test_init_default_loss_classification(self, mock_model, dummy_config):
+    def test_init_default_loss_classification(self, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test default BCEWithLogitsLoss for classification task.
+        """
         config_clf = dummy_config.copy()
         config_clf["task_type"] = "classification"
         trainer = MGNNTrainer(model=mock_model, config=config_clf)
         assert isinstance(trainer.loss_fn, nn.BCEWithLogitsLoss)
 
-    def test_init_unsupported_optimizer(self, mock_model, dummy_config):
+    def test_init_unsupported_optimizer(self, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test unsupported optimizer raises ValueError.
+        """
         config_err = dummy_config.copy()
         config_err["optimizer"] = "unknown_opt"
         with pytest.raises(ValueError, match="Unsupported optimizer"):
             MGNNTrainer(model=mock_model, config=config_err)
 
-    def test_init_unsupported_task_type_for_loss(self, mock_model, dummy_config):
+    def test_init_unsupported_task_type_for_loss(self, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test unsupported task type for loss function raises ValueError.
+        """
         config_err = dummy_config.copy()
         config_err["task_type"] = "unknown_task"
         with pytest.raises(ValueError, match="Unsupported task type"):
             MGNNTrainer(model=mock_model, config=config_err)
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available for this specific test")
-    @patch("torch.cuda.is_available", return_value=True)  # Keep patch to simulate for logic if test runs
-    def test_init_device_auto_cuda(self, mock_cuda_available, mock_model, dummy_config):
+    @patch("torch.cuda.is_available", return_value=True)
+    def test_init_device_auto_cuda(self, mock_cuda_available: MagicMock, mock_model: MockSimpleModel, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test auto-detection of CUDA device.
+        """
         config_no_device = dummy_config.copy()
         if "device" in config_no_device:
-            del config_no_device["device"]  # Ensure device is not in config for auto-detection
+            del config_no_device["device"]
 
-        # This line will raise an error if CUDA is not actually available
         trainer = MGNNTrainer(model=mock_model, config=config_no_device)
         assert trainer.device == "cuda"
-        # mock_cuda_available.assert_called() # This might be called multiple times internally by PyTorch
 
 
 class TestMGNNTrainerExecution:
+    """
+    Test suite for MGNNTrainer execution methods.
+    """
+
     @pytest.fixture
-    def trainer(self, mock_model, dummy_config, mock_train_loader, mock_val_loader):
+    def trainer(
+        self,
+        mock_model: MockSimpleModel,
+        dummy_config: Dict[str, Any],
+        mock_train_loader: DataLoader,
+        mock_val_loader: DataLoader,
+    ) -> MGNNTrainer:
+        """
+        Provides a configured MGNNTrainer instance.
+        """
         return MGNNTrainer(
             model=mock_model, config=dummy_config, train_loader=mock_train_loader, val_loader=mock_val_loader
         )
 
-    def test_train_epoch(self, trainer):
+    def test_train_epoch(self, trainer: MGNNTrainer) -> None:
+        """
+        Test a single training epoch.
+        """
         trainer.callbacks = [MagicMock(spec=Callback)]
         trainer.model.train = MagicMock(wraps=trainer.model.train)
         trainer.optimizer.zero_grad = MagicMock(wraps=trainer.optimizer.zero_grad)
@@ -278,40 +421,50 @@ class TestMGNNTrainerExecution:
         trainer.callbacks[0].on_batch_begin.assert_called()
         trainer.callbacks[0].on_batch_end.assert_called()
 
-    def test_train_epoch_no_batch_attr(self, trainer, dummy_config):
-        # Create a dataset with single graphs (no batch attribute after collate if batch_size=1)
+    def test_train_epoch_no_batch_attr(self, trainer: MGNNTrainer, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test a single training epoch with graphs that don't have a batch attribute.
+        """
         single_graph_dataset = MockPyGDataset(num_samples=2, in_features=dummy_config["in_dim"], num_nodes=1)
-        single_graph_loader = DataLoader(
-            single_graph_dataset, batch_size=1, collate_fn=lambda x: x[0]
-        )  # Returns single Data
+        single_graph_loader = DataLoader(single_graph_dataset, batch_size=1, collate_fn=lambda x: x[0])
         trainer.train_loader = single_graph_loader
 
-        # Ensure model can handle no batch attribute (or it's added by trainer)
-        # The trainer's model call includes getattr(batch, 'batch', None)
         avg_loss = trainer.train_epoch()
         assert isinstance(avg_loss, float)
 
-    def test_validate(self, trainer):
+    def test_validate(self, trainer: MGNNTrainer) -> None:
+        """
+        Test the validation step.
+        """
         trainer.model.eval = MagicMock(wraps=trainer.model.eval)
         avg_loss = trainer.validate()
         assert isinstance(avg_loss, float)
         trainer.model.eval.assert_called_once()
 
-    def test_validate_no_loader(self, trainer):
+    def test_validate_no_loader(self, trainer: MGNNTrainer) -> None:
+        """
+        Test validation when no validation loader is provided.
+        """
         trainer.val_loader = None
         avg_loss = trainer.validate()
         assert avg_loss == 0.0
 
-    def test_validate_empty_loader(self, trainer, dummy_config):
-        empty_dataset = MockPyGDataset(num_samples=0, is_empty=True)  # Ensure it's empty
+    def test_validate_empty_loader(self, trainer: MGNNTrainer, dummy_config: Dict[str, Any]) -> None:
+        """
+        Test validation with an empty validation loader.
+        """
+        empty_dataset = MockPyGDataset(num_samples=0, is_empty=True)
         empty_loader = DataLoader(empty_dataset, batch_size=2, collate_fn=mock_collate_fn)
         trainer.val_loader = empty_loader
         avg_loss = trainer.validate()
-        assert avg_loss == 0.0  # Should handle empty loader gracefully
+        assert avg_loss == 0.0
 
     @patch.object(MGNNTrainer, "train_epoch", return_value=0.5)
     @patch.object(MGNNTrainer, "validate", return_value=0.4)
-    def test_train_loop(self, mock_validate, mock_train_epoch, trainer, capsys):
+    def test_train_loop(self, mock_validate: MagicMock, mock_train_epoch: MagicMock, trainer: MGNNTrainer, capsys: Any) -> None:
+        """
+        Test the main training loop.
+        """
         trainer.callbacks = [MagicMock(spec=Callback)]
         epochs = 2
         trainer.config["epochs"] = epochs
@@ -334,9 +487,13 @@ class TestMGNNTrainerExecution:
         assert f"Epoch 1/{epochs}" in captured.out
         assert f"Epoch {epochs}/{epochs}" in captured.out
 
-    def test_train_loop_stop_training(self, trainer):
+    def test_train_loop_stop_training(self, trainer: MGNNTrainer) -> None:
+        """
+        Test that the training loop stops when `stop_training` flag is set.
+        """
+
         class StopperCallback(Callback):
-            def on_epoch_end(self, trainer_instance, epoch, logs=None):
+            def on_epoch_end(self, trainer_instance: MGNNTrainer, epoch: int, logs: Optional[Dict[str, float]] = None) -> None:
                 if epoch == 0:
                     trainer_instance.stop_training = True
 
@@ -347,7 +504,10 @@ class TestMGNNTrainerExecution:
         assert len(history["train_loss"]) == 1
 
     @patch("torch.save")
-    def test_save_model(self, mock_torch_save, trainer, temp_trainer_files_dir):
+    def test_save_model(self, mock_torch_save: MagicMock, trainer: MGNNTrainer, temp_trainer_files_dir: str) -> None:
+        """
+        Test saving the model state dictionary.
+        """
         filepath = os.path.join(temp_trainer_files_dir, "model.pt")
         trainer.save_model(filepath)
 
@@ -362,7 +522,10 @@ class TestMGNNTrainerExecution:
             assert torch.equal(saved_state_dict[key], trainer.model.state_dict()[key])
 
     @patch("torch.save")
-    def test_save_checkpoint(self, mock_torch_save, trainer, temp_trainer_files_dir):
+    def test_save_checkpoint(self, mock_torch_save: MagicMock, trainer: MGNNTrainer, temp_trainer_files_dir: str) -> None:
+        """
+        Test saving a full training checkpoint.
+        """
         filepath = os.path.join(temp_trainer_files_dir, "checkpoint.pt")
         trainer.history = {"train_loss": [0.1, 0.05]}
         trainer.best_val_loss = 0.04
@@ -377,12 +540,15 @@ class TestMGNNTrainerExecution:
         assert saved_data["best_val_loss"] == trainer.best_val_loss
 
     @patch("torch.load")
-    def test_load_checkpoint(self, mock_torch_load, trainer):
+    def test_load_checkpoint(self, mock_torch_load: MagicMock, trainer: MGNNTrainer) -> None:
+        """
+        Test loading a training checkpoint.
+        """
         dummy_checkpoint = {
-            "model_state_dict": {"dummy_model_key": torch.tensor([1.0])},
+            "model_state_dict": {"linear.weight": torch.tensor([1.0]), "linear.bias": torch.tensor([0.5])},
             "optimizer_state_dict": {"dummy_opt_key": torch.tensor([2.0])},
             "history": {"train_loss": [0.2]},
-            "config": {"loaded_config": True},  # Trainer's config is not overwritten by default
+            "config": {"loaded_config": True},
             "best_val_loss": 0.15,
         }
         mock_torch_load.return_value = dummy_checkpoint
@@ -397,34 +563,38 @@ class TestMGNNTrainerExecution:
         assert trainer.best_val_loss == dummy_checkpoint["best_val_loss"]
 
     @patch("torch.load")
-    def test_load_checkpoint_no_optimizer_state(self, mock_torch_load, trainer):
-        dummy_checkpoint = {"model_state_dict": {"key": torch.tensor(1.0)}}
+    def test_load_checkpoint_no_optimizer_state(self, mock_torch_load: MagicMock, trainer: MGNNTrainer) -> None:
+        """
+        Test loading checkpoint without optimizer state.
+        """
+        dummy_checkpoint = {"model_state_dict": {"linear.weight": torch.tensor([1.0]), "linear.bias": torch.tensor([0.5])}}
         mock_torch_load.return_value = dummy_checkpoint
         trainer.model.load_state_dict = MagicMock()
-        trainer.optimizer.load_state_dict = MagicMock()  # Should not be called
+        trainer.optimizer.load_state_dict = MagicMock()
         trainer.load_checkpoint("dummy.pt")
         trainer.optimizer.load_state_dict.assert_not_called()
 
     @patch("torch.load")
-    def test_load_checkpoint_no_history_or_best_loss(self, mock_torch_load, trainer):
-        # Create a state_dict that matches MockSimpleModel structure
-        model_state = trainer.model.state_dict()  # Get the correct keys and tensor shapes
-        # Modify a value to ensure we are loading something potentially different
-        # For simplicity, we can just use the current model's state dict
-        # or create one with the same keys.
-        # Using current model's state dict for simplicity in this test.
+    def test_load_checkpoint_no_history_or_best_loss(self, mock_torch_load: MagicMock, trainer: MGNNTrainer) -> None:
+        """
+        Test loading checkpoint without history or best loss.
+        """
+        model_state = trainer.model.state_dict()
         dummy_checkpoint = {"model_state_dict": model_state.copy()}
 
         mock_torch_load.return_value = dummy_checkpoint
         original_history = trainer.history.copy()
         original_best_loss = trainer.best_val_loss
         trainer.load_checkpoint("dummy.pt")
-        assert trainer.history == original_history  # Should remain as initialized
+        assert trainer.history == original_history
         assert trainer.best_val_loss == original_best_loss
 
     @patch("matplotlib.pyplot.show")
     @patch("matplotlib.pyplot.savefig")
-    def test_plot_training_curves(self, mock_savefig, mock_show, trainer, temp_trainer_files_dir):
+    def test_plot_training_curves(self, mock_savefig: MagicMock, mock_show: MagicMock, trainer: MGNNTrainer, temp_trainer_files_dir: str) -> None:
+        """
+        Test plotting training curves.
+        """
         trainer.history = {"train_loss": [0.5, 0.4], "val_loss": [0.6, 0.45]}
 
         filepath = os.path.join(temp_trainer_files_dir, "curves.png")
@@ -441,15 +611,20 @@ class TestMGNNTrainerExecution:
 
     @patch("matplotlib.pyplot.show")
     @patch("matplotlib.pyplot.savefig")
-    def test_plot_training_curves_no_val_loss(self, mock_savefig, mock_show, trainer, temp_trainer_files_dir):
-        trainer.history = {"train_loss": [0.5, 0.4], "val_loss": []}  # Empty val_loss
+    def test_plot_training_curves_no_val_loss(self, mock_savefig: MagicMock, mock_show: MagicMock, trainer: MGNNTrainer, temp_trainer_files_dir: str) -> None:
+        """
+        Test plotting training curves when no validation loss is available.
+        """
+        trainer.history = {"train_loss": [0.5, 0.4], "val_loss": []}
         filepath = os.path.join(temp_trainer_files_dir, "curves_no_val.png")
         trainer.plot_training_curves(filepath=filepath)
         mock_savefig.assert_called_once_with(filepath)
-        # Check that plot was created without error and only train loss is plotted (implicitly)
         plt.close("all")
 
-    def test_get_predictor(self, trainer):
+    def test_get_predictor(self, trainer: MGNNTrainer) -> None:
+        """
+        Test getting a predictor instance from the trainer.
+        """
         predictor = trainer.get_predictor()
         assert isinstance(predictor, MGNNPredictor)
         assert predictor.model == trainer.model
@@ -459,7 +634,16 @@ class TestMGNNTrainerExecution:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available or PyTorch CUDA setup issue")
 class TestStandaloneTrainEpoch:
-    def test_standalone_function(self, mock_model, mock_train_loader, dummy_config):
+    """
+    Test suite for the standalone train_epoch function.
+    """
+
+    def test_standalone_function(
+        self, mock_model: MockSimpleModel, mock_train_loader: DataLoader, dummy_config: Dict[str, Any]
+    ) -> None:
+        """
+        Test the standalone train_epoch function.
+        """
         optimizer = optim.Adam(mock_model.parameters(), lr=0.001)
         loss_fn = nn.MSELoss()
 
@@ -469,7 +653,7 @@ class TestStandaloneTrainEpoch:
 
         avg_loss = standalone_train_epoch(mock_model, optimizer, mock_train_loader, loss_fn, dummy_config["device"])
         assert isinstance(avg_loss, float)
-        mock_model.train.assert_called_once()
+        assert mock_model.train.assert_called_once() is None 
         assert optimizer.zero_grad.call_count == len(mock_train_loader)
         assert optimizer.step.call_count == len(mock_train_loader)
 
@@ -477,8 +661,16 @@ class TestStandaloneTrainEpoch:
 @patch("moml.models.mgnn.training.trainer.DJMGNN")
 @patch("moml.models.mgnn.training.trainer.MGNNTrainer")
 class TestCreateTrainerFactory:
-    def test_create_trainer_new_model(self, MockMGNNTrainer, MockDJMGNN, dummy_config, mock_train_loader):
-        # Configure the mock DJMGNN's parameters method to return a list with a dummy parameter
+    """
+    Test suite for the create_trainer factory function.
+    """
+
+    def test_create_trainer_new_model(
+        self, MockMGNNTrainer: MagicMock, MockDJMGNN: MagicMock, dummy_config: Dict[str, Any], mock_train_loader: DataLoader
+    ) -> None:
+        """
+        Test creating a new trainer with a new model.
+        """
         MockDJMGNN.return_value.parameters.return_value = [nn.Parameter(torch.randn(1))]
 
         create_trainer(config=dummy_config, train_loader=mock_train_loader)
@@ -494,45 +686,51 @@ class TestCreateTrainerFactory:
             in_dim=dummy_config["in_dim"],
             edge_attr_dim=dummy_config["edge_attr_dim"],
         )
-        MockMGNNTrainer.assert_called_once()
+        assert MockMGNNTrainer.assert_called_once() is None 
         args, kwargs = MockMGNNTrainer.call_args
         assert kwargs["model"] == MockDJMGNN.return_value
         assert kwargs["config"] == dummy_config
         assert kwargs["train_loader"] == mock_train_loader
 
-    def test_create_trainer_with_provided_model(self, MockMGNNTrainer, MockDJMGNN, dummy_config):
+    def test_create_trainer_with_provided_model(
+        self, MockMGNNTrainer: MagicMock, MockDJMGNN: MagicMock, dummy_config: Dict[str, Any]
+    ) -> None:
+        """
+        Test creating a trainer with a pre-provided model instance.
+        """
         my_model = MockSimpleModel()
-        MockDJMGNN.return_value = my_model  # Ensure create_trainer uses this if it creates one
+        MockDJMGNN.return_value = my_model
 
-        # To test passing a model directly (which is what MGNNTrainer itself supports):
         MGNNTrainer(model=my_model, config=dummy_config)
-        MockDJMGNN.assert_not_called()  # DJMGNN not called by MGNNTrainer init if model is passed
+        assert MockDJMGNN.assert_not_called() is None 
 
-        # Test create_trainer with a provided model
         create_trainer(config=dummy_config)
 
-    def test_create_trainer_missing_model_dims_in_config(self, MockMGNNTrainer, MockDJMGNN, dummy_config):
+    def test_create_trainer_missing_model_dims_in_config(
+        self, MockMGNNTrainer: MagicMock, MockDJMGNN: MagicMock, dummy_config: Dict[str, Any]
+    ) -> None:
+        """
+        Test creating a trainer when model dimensions are missing from config,
+        and inferred from data.
+        """
         config_no_dims = dummy_config.copy()
         del config_no_dims["in_dim"]
-        
-        # Configure the mock DJMGNN's parameters method
+
         MockDJMGNN.return_value.parameters.return_value = [nn.Parameter(torch.randn(1))]
-        
-        # Create a mock train loader with sample data that includes x attribute
+
         mock_train_loader = MagicMock()
         mock_dataset = MagicMock()
         mock_sample = MagicMock()
-        mock_sample.x = torch.randn(10, 16)  # 10 nodes with 16 features
+        mock_sample.x = torch.randn(10, 16)
         mock_dataset.__getitem__.return_value = mock_sample
         mock_dataset.__len__.return_value = 1
         mock_train_loader.dataset = mock_dataset
-        
+
         create_trainer(config=config_no_dims, train_loader=mock_train_loader)
-        
-        # DJMGNN should be called with in_dim from the sample data
-        MockDJMGNN.assert_called_once()
+
+        assert MockDJMGNN.assert_called_once() is None 
         args, kwargs = MockDJMGNN.call_args
-        assert kwargs["in_dim"] == 16  # From the mock sample data
+        assert kwargs["in_dim"] == 16
         assert kwargs["hidden_dim"] == config_no_dims["hidden_dim"]
         assert kwargs["n_blocks"] == config_no_dims.get("n_blocks", 3)
         assert kwargs["layers_per_block"] == config_no_dims.get("layers_per_block", 2)
@@ -541,9 +739,8 @@ class TestCreateTrainerFactory:
         assert kwargs["node_out_dim"] == config_no_dims["node_out_dim"]
         assert kwargs["graph_out_dim"] == config_no_dims["graph_out_dim"]
         assert kwargs["dropout"] == config_no_dims.get("dropout", 0.2)
-        
-        # MGNNTrainer should be called with the created model
-        MockMGNNTrainer.assert_called_once()
+
+        assert MockMGNNTrainer.assert_called_once() is None 
         args, kwargs = MockMGNNTrainer.call_args
         assert kwargs["model"] == MockDJMGNN.return_value
         assert kwargs["config"] == config_no_dims

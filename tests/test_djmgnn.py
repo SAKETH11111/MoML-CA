@@ -1,38 +1,44 @@
 """
+tests/test_djmgnn.py
+
 Unit tests for the DJMGNN model and its components in moml.models.mgnn.djmgnn.
 """
+
+import os
+import sys
+from typing import Any, Generator
 
 import pytest
 import torch
 import torch.nn as nn
 from torch_geometric.data import Data, Batch
 from torch_geometric.nn import GraphNorm
-import sys
-import os
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from moml.models.mgnn.djmgnn import GraphConvLayer, DenseGNNBlock, JKAggregator, DJMGNN
 
-# Fixture for running tests on CPU and CUDA if available
-@pytest.fixture(params=["cpu", "cuda"])
-def device(request):
-    if request.param == "cuda" and not torch.cuda.is_available():
-        pytest.skip("CUDA not available")
-    return torch.device(request.param)
-
-# Test Fixtures and Parameters
 NODE_IN_DIM = 16
 EDGE_ATTR_DIM_PRESENT = 4
-EDGE_ATTR_DIM_ABSENT = 0  # For testing no edge attributes
+EDGE_ATTR_DIM_ABSENT = 0
 HIDDEN_DIM = 32
 NUM_NODES = 10
 NUM_EDGES = 20
 BATCH_SIZE = 2
 
+@pytest.fixture(params=["cpu", "cuda"])
+def device(request: Any) -> torch.device:
+    """
+    Fixture for running tests on CPU and CUDA if available.
+    """
+    if request.param == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    return torch.device(request.param)
 
 @pytest.fixture
-def dummy_graph_data_single(request):
-    """Creates dummy graph data for a single graph.
+def dummy_graph_data_single(request: Any) -> Any:
+    """
+    Creates dummy graph data for a single graph.
     Can be parameterized to have edge_attr or not.
     """
     num_nodes_override = getattr(request, "param", {}).get("num_nodes", NUM_NODES)
@@ -52,10 +58,10 @@ def dummy_graph_data_single(request):
 
     return x, edge_index, edge_attr
 
-
 @pytest.fixture
-def dummy_graph_data_batch(request):
-    """Creates dummy graph data for a batch of graphs.
+def dummy_graph_data_batch(request: Any) -> Any:
+    """
+    Creates dummy graph data for a batch of graphs.
     Can be parameterized for edge_attr presence.
     """
     edge_attr_dim_override = getattr(request, "param", {}).get("edge_attr_dim", EDGE_ATTR_DIM_PRESENT)
@@ -293,7 +299,10 @@ class TestDJMGNN:
     GRAPH_OUT_DIM = 1
 
     @pytest.mark.parametrize("jk_mode", ["concat", "max", "attention", "lstm"])
-    def test_instantiation(self, jk_mode, device):
+    def test_instantiation(self, jk_mode: str, device: torch.device) -> None:
+        """
+        Test DJMGNN instantiation for different JK modes.
+        """
         model = DJMGNN(
             in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -304,12 +313,14 @@ class TestDJMGNN:
             node_output_dims=self.NODE_OUT_DIM,
             graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
-
         assert len(model.blocks) == self.N_BLOCKS
         assert isinstance(model.jk, JKAggregator)
         assert model.jk.mode == jk_mode
 
-    def test_instantiation_no_edge_attr(self, device):
+    def test_instantiation_no_edge_attr(self, device: torch.device) -> None:
+        """
+        Test DJMGNN instantiation with no edge attributes.
+        """
         model = DJMGNN(
             in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -321,14 +332,13 @@ class TestDJMGNN:
             graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
         assert len(model.blocks) == self.N_BLOCKS
-        assert model.processed_edge_attr_dim > 0  # Due to RBF
+        assert model.processed_edge_attr_dim > 0
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_forward_pass_single_graph_with_edge_attr(self, dummy_graph_data_single, device):
+    def test_forward_pass_single_graph_with_edge_attr(self, dummy_graph_data_single: Any, device: torch.device) -> None:
         x, edge_index, edge_attr = dummy_graph_data_single
         x, edge_index = x.to(device), edge_index.to(device)
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
-
         model = DJMGNN(
             in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -338,9 +348,7 @@ class TestDJMGNN:
             node_output_dims=self.NODE_OUT_DIM,
             graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
-
         output = model(x, edge_index, edge_attr)
-
         assert "node_pred" in output
         assert "graph_pred" in output
         assert "energy_pred" in output
@@ -348,11 +356,10 @@ class TestDJMGNN:
         assert output["graph_pred"].shape == (1, self.GRAPH_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_single", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
-    def test_forward_pass_single_graph_no_edge_attr(self, dummy_graph_data_single, device):
+    def test_forward_pass_single_graph_no_edge_attr(self, dummy_graph_data_single: Any, device: torch.device) -> None:
         x, edge_index, edge_attr = dummy_graph_data_single
         x, edge_index = x.to(device), edge_index.to(device)
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
-
         model = DJMGNN(
             in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -362,7 +369,6 @@ class TestDJMGNN:
             node_output_dims=self.NODE_OUT_DIM,
             graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
-
         output = model(x, edge_index, edge_attr)
         assert "node_pred" in output
         assert "graph_pred" in output
@@ -370,11 +376,10 @@ class TestDJMGNN:
         assert output["graph_pred"].shape == (1, self.GRAPH_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_forward_pass_batch_graph_with_edge_attr(self, dummy_graph_data_batch, device):
+    def test_forward_pass_batch_graph_with_edge_attr(self, dummy_graph_data_batch: Any, device: torch.device) -> None:
         x, edge_index, edge_attr, batch = dummy_graph_data_batch
         x, edge_index, batch = x.to(device), edge_index.to(device), batch.to(device)
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
-
         model = DJMGNN(
             in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -384,7 +389,6 @@ class TestDJMGNN:
             node_output_dims=self.NODE_OUT_DIM,
             graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
-
         output = model(x, edge_index, edge_attr, batch)
         assert "node_pred" in output
         assert "graph_pred" in output
@@ -393,10 +397,9 @@ class TestDJMGNN:
         assert output["graph_pred"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_ABSENT}], indirect=True)
-    def test_forward_pass_batch_graph_no_edge_attr(self, dummy_graph_data_batch, device):
+    def test_forward_pass_batch_graph_no_edge_attr(self, dummy_graph_data_batch: Any, device: torch.device) -> None:
         x, edge_index, _, batch = dummy_graph_data_batch
         x, edge_index, batch = x.to(device), edge_index.to(device), batch.to(device)
-
         model = DJMGNN(
             in_node_dim=NODE_IN_DIM,
             hidden_dim=HIDDEN_DIM,
@@ -413,7 +416,7 @@ class TestDJMGNN:
         assert output["graph_pred"].shape == (BATCH_SIZE, self.GRAPH_OUT_DIM)
 
     @pytest.mark.parametrize("dummy_graph_data_batch", [{"edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True)
-    def test_gradient_flow(self, dummy_graph_data_batch, device):
+    def test_gradient_flow(self, dummy_graph_data_batch: Any, device: torch.device) -> None:
         x, edge_index, edge_attr, batch = dummy_graph_data_batch
         x, edge_index, batch = x.to(device), edge_index.to(device), batch.to(device)
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
@@ -426,14 +429,11 @@ class TestDJMGNN:
             node_output_dims=self.NODE_OUT_DIM,
             graph_output_dims=self.GRAPH_OUT_DIM,
         ).to(device)
-
         for param in model.parameters():
             param.requires_grad = True
-
         output = model(x, edge_index, edge_attr, batch)
         loss = sum(p.sum() for p in output.values() if p is not None)
         loss.backward()
-
         for name, param in model.named_parameters():
             if param.requires_grad and "fallback_proj" not in name:
                 assert param.grad is not None, f"Gradient is None for {name}"
@@ -441,7 +441,7 @@ class TestDJMGNN:
     @pytest.mark.parametrize(
         "dummy_graph_data_single", [{"num_nodes": 0, "edge_attr_dim": EDGE_ATTR_DIM_PRESENT}], indirect=True
     )
-    def test_forward_zero_nodes_single_graph(self, dummy_graph_data_single, device):
+    def test_forward_zero_nodes_single_graph(self, dummy_graph_data_single: Any, device: torch.device) -> None:
         x, edge_index, edge_attr = dummy_graph_data_single
         x, edge_index = x.to(device), edge_index.to(device)
         edge_attr = edge_attr.to(device) if edge_attr is not None else None
@@ -460,10 +460,11 @@ class TestDJMGNN:
         assert output["node_pred"].shape == (0, self.NODE_OUT_DIM)
         assert output["graph_pred"].shape == (0, self.GRAPH_OUT_DIM)
 
-
 @pytest.fixture
-def model():
-    """Fixture for a DJMGNN model with specific parameters for general functional tests."""
+def model() -> DJMGNN:
+    """
+    Fixture for a DJMGNN model with specific parameters for general functional tests.
+    """
     return DJMGNN(
         in_node_dim=128,
         hidden_dim=64,
@@ -474,35 +475,32 @@ def model():
         graph_output_dims=1,
     )
 
-
-def test_djmgnn_forward_pass_with_valid_inputs(model):
-    """Test the DJMGNN forward pass with valid, non-empty graph data."""
-    x = torch.randn(10, 128)  # 10 nodes, 128 features
+def test_djmgnn_forward_pass_with_valid_inputs(model: DJMGNN) -> None:
+    """
+    Test the DJMGNN forward pass with valid, non-empty graph data.
+    """
+    x = torch.randn(10, 128)
     edge_index = torch.tensor([[0, 1, 2, 3, 4], [1, 2, 3, 4, 0]], dtype=torch.long)
-    edge_attr = torch.randn(5, 16)  # 5 edges, 16 features
-    batch = torch.zeros(10, dtype=torch.long)  # Single graph in batch
-
+    edge_attr = torch.randn(5, 16)
+    batch = torch.zeros(10, dtype=torch.long)
     output = model(x, edge_index, edge_attr, batch)
-
     assert "node_pred" in output
     assert "graph_pred" in output
     assert "energy_pred" in output
     assert output["node_pred"].shape == (10, 1)
     assert output["graph_pred"].shape == (1, 1)
 
-
-def test_djmgnn_forward_pass_with_empty_graph(model):
-    """Test the DJMGNN forward pass with a graph that has zero nodes and edges."""
-    x = torch.empty(0, 128)  # Zero nodes
-    edge_index = torch.empty(2, 0, dtype=torch.long)  # Zero edges
-    edge_attr = torch.empty(0, 16)  # Zero edge attributes
-    batch = torch.empty(0, dtype=torch.long)  # Empty batch
-
+def test_djmgnn_forward_pass_with_empty_graph(model: DJMGNN) -> None:
+    """
+    Test the DJMGNN forward pass with empty graph data.
+    """
+    x = torch.empty((0, 128))
+    edge_index = torch.empty((2, 0), dtype=torch.long)
+    edge_attr = torch.empty((0, 16))
+    batch = torch.empty((0,), dtype=torch.long)
     output = model(x, edge_index, edge_attr, batch)
-
     assert "node_pred" in output
     assert "graph_pred" in output
     assert "energy_pred" in output
     assert output["node_pred"].shape == (0, 1)
-    assert output["graph_pred"].shape[1] == 1
-    assert output["graph_pred"].shape[0] in [0, 1]
+    assert output["graph_pred"].shape == (0, 1)
