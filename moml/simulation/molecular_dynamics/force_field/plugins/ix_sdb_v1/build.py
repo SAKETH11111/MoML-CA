@@ -86,13 +86,18 @@ def _pack_bead(monomer: Any, radius_nm: float, count: int):
     2. Randomly placing monomers within the sphere with overlap avoidance
     3. Building an OpenMM topology from the packed structures
     
-    TODO: Form covalent cross-links between vinyl sites within 0.25 nm cutoff
-    TODO: Replace rejection sampling with Packmol for beads >200 monomers
-    TODO: Use van der Waals radii for more accurate collision detection
+    TODO: Form covalent cross-links between vinyl sites within 0.25 nm cutoff.
+    TODO: For beads with more than 200 monomers, replace rejection sampling with Packmol for efficient packing. The current rejection sampling approach is only practical for small bead counts and will become extremely inefficient for larger systems.
+    TODO: Use van der Waals radii for more accurate collision detection.
+    
+    Note:
+        - The current implementation is not scalable for large systems (>200 monomers).
+        - For large-scale packing, integrating Packmol or a similar tool is strongly recommended.
+        - Cross-linking logic is not yet implemented and is required for realistic bead models.
     
     Args:
         monomer: OpenFF Molecule object representing the monomer unit
-        radius_nm: Target bead radius in nanometers 
+        radius_nm: Target bead radius in nanometers
         count: Number of monomer units to pack in the bead
         
     Returns:
@@ -136,14 +141,15 @@ def _pack_bead(monomer: Any, radius_nm: float, count: int):
     all_positions = []
     
     # Pack monomers with basic overlap avoidance
-    # TODO: For >200 monomers, replace with Packmol for better packing efficiency
+    # TODO: For >200 monomers, replace with Packmol for better packing efficiency.
+    #       The current rejection sampling approach is not suitable for large bead counts.
     placed_centers = []
     max_attempts = count * 50  # Limit attempts to avoid infinite loops
     
     for mol_idx in range(count):
         placed = False
         
-        for attempt in range(max_attempts // count):
+        for _ in range(max_attempts // count):
             # Generate random position within sphere
             # Use rejection sampling for uniform distribution in sphere
             while True:

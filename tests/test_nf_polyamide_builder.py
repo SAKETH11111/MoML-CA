@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any, Generator, List
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest

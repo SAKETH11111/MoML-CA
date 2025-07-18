@@ -252,8 +252,7 @@ def engineer_features(df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
             logger.warning(
                 f"Found {num_invalid} invalid SMILES entries, removing them"
             )
-            df = cast(pd.DataFrame, df[~invalid_mask].copy())
-            assert isinstance(df, pd.DataFrame)
+            df = df[~invalid_mask].copy()
 
         if df.empty:
             error_msg = "No valid SMILES entries to engineer features"

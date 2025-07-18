@@ -39,7 +39,7 @@ Public API:
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict
 
 if TYPE_CHECKING:
     from .datasets import (

@@ -526,8 +526,8 @@ class PFASSDFDataset(InMemoryDataset):
         for bond in mol.GetBonds():
             i = bond.GetBeginAtomIdx()
             j = bond.GetEndAtomIdx()
-        # Add both directions for undirected graph
-        edge_indices.extend([[i, j], [j, i]])
+            # Add both directions for undirected graph
+            edge_indices.extend([[i, j], [j, i]])
         
         if edge_indices:
             return torch.tensor(edge_indices, dtype=torch.long).t().contiguous()

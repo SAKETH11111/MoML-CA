@@ -232,6 +232,17 @@ class DenseGNNBlock(nn.Module):
 
 
 class JKAggregator(nn.Module):
+    """
+    Jumping Knowledge aggregator for combining features from multiple blocks.
+    
+    Supports multiple aggregation modes including concatenation, max pooling,
+    attention-based weighting, and LSTM-based sequential processing.
+    
+    Args:
+        block_dims: List of feature dimensions for each block
+        out_dim: Output feature dimension
+        mode: Aggregation mode ('concat', 'max', 'attention', 'lstm')
+    """
     def __init__(self, block_dims, out_dim, mode="attention"):
         super().__init__()
         self.mode, self.block_count = mode, len(block_dims)

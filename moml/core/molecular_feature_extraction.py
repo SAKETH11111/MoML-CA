@@ -12,11 +12,8 @@ import numpy as np
 from rdkit import Chem
 from typing import Any
 
-# Suppress stub attribute errors: treat these modules as Any
-from rdkit.Chem import Descriptors as _Descriptors, Lipinski as _Lipinski, QED as _QED
-Descriptors: Any = _Descriptors
-Lipinski: Any = _Lipinski
-QED: Any = _QED
+# Suppress stub attribute errors for RDKit modules
+from rdkit.Chem import Descriptors, Lipinski, QED  # type: ignore
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -417,7 +414,7 @@ class FunctionalGroupDetector:
             matches = mol.GetSubstructMatches(hydroxyl_pattern)
             return [match[0] for match in matches]  # Return oxygen atom indices
         except Exception as e:
-            logger.error(f"Error finding hydroxyl groups")
+            logger.error(f"Error finding hydroxyl groups: {e}")
             return []
 
     @classmethod
@@ -538,11 +535,11 @@ class MolecularFeatureExtractor:
             # Distance to nearest CF3 group
             min_dist_cf3 = float("inf")
             if not cf3_groups:
-                min_dist_cf3 = 0.0  # Test expects 0.0 if no groups
+                min_dist_cf3 = -1.0  # No groups exist in the molecule
             else:
                 for cf3_idx in cf3_groups:
                     if atom_idx == cf3_idx:
-                        min_dist_cf3 = 0
+                        min_dist_cf3 = 0.0  # Atom itself is the target group
                         break
                     # Use RDKit's built-in shortest path method
                     path = Chem.GetShortestPath(mol, atom_idx, cf3_idx)
@@ -551,16 +548,16 @@ class MolecularFeatureExtractor:
                         if dist < min_dist_cf3:
                             min_dist_cf3 = dist
                 if min_dist_cf3 == float("inf"):  # If still inf, means no path found
-                    min_dist_cf3 = 0.0  # Test expects 0.0 if no path / no group
+                    min_dist_cf3 = float("inf")  # Groups exist but no path found
 
             # Distance to nearest functional group
             min_dist_func = float("inf")
             if not functional_groups:
-                min_dist_func = 0.0  # Test expects 0.0 if no groups
+                min_dist_func = -1.0  # No groups exist in the molecule
             else:
                 for func_idx in functional_groups:
                     if atom_idx == func_idx:
-                        min_dist_func = 0
+                        min_dist_func = 0.0  # Atom itself is the target group
                         break
                     path = Chem.GetShortestPath(mol, atom_idx, func_idx)
                     if path:  # path can be empty if no path exists
@@ -568,7 +565,7 @@ class MolecularFeatureExtractor:
                         if dist < min_dist_func:
                             min_dist_func = dist
                 if min_dist_func == float("inf"):  # If still inf, means no path found
-                    min_dist_func = 0.0
+                    min_dist_func = float("inf")  # Groups exist but no path found
 
             # Determine if atom is in head group or fluorinated tail
             is_head_group = False

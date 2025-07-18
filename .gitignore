@@ -2,6 +2,7 @@
 .cursor/
 .vscode/
 .idea/
+.kilocode/
 *.swp
 *~
 .DS_Store
@@ -120,10 +121,8 @@ memory-bank/systemPatterns.md
 docs/
 
 CLAUDE.md
-.kilocode/
 *.pt
 MoML-CA/data/
 data/spice/processed/
 *.pt
 data/*/processed/*.pt
-__pycache__/
