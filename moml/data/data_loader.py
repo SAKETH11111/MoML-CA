@@ -9,9 +9,7 @@ context information. It returns PyTorch Geometric Data objects ready for
 training MGNN models.
 """
 
-import glob
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 

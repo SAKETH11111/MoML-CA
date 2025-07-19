@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Set, Tuple
 import numpy as np
 # RDKit imports
 from rdkit import Chem
-from typing import Any
 
 # Suppress stub attribute errors for RDKit modules
 from rdkit.Chem import Descriptors, Lipinski, QED  # type: ignore

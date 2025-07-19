@@ -581,7 +581,7 @@ class PFASSDFDataset(InMemoryDataset):
             
             # Validate and clean descriptor values
             clean_descriptors = []
-            for i, desc in enumerate(descriptors):
+            for _, desc in enumerate(descriptors):
                 try:
                     value = float(desc)
                     if np.isnan(value) or np.isinf(value):

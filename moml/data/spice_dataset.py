@@ -139,7 +139,7 @@ class SpiceDataset(InMemoryDataset):
         
         if os.path.exists(processed_file):
             try:
-                loaded_data = torch.load(processed_file, weights_only=False)
+                loaded_data = torch.load(processed_file, weights_only=True)
                 
                 # Check if data is valid (not None for empty datasets)
                 if loaded_data[0] is not None:
