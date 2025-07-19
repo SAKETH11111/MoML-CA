@@ -1,13 +1,23 @@
 """
+moml/models/mgnn/training/callbacks.py
+
 Callbacks for training graph neural networks.
 
 This module provides callback classes that can be used to customize the
-training process by adding functionality like early stopping, model checkpointing, and learning rate scheduling.
+training process by adding functionality like early stopping, model 
+checkpointing, and learning rate scheduling. These callbacks follow the 
+standard callback pattern used in deep learning frameworks.
+
+Available Callbacks:
+    - Callback: Base callback class defining the interface
+    - EarlyStopping: Halt training when monitored metric stops improving
+    - ModelCheckpoint: Save model checkpoints during training
+    - LearningRateScheduler: Adjust learning rate during training
 """
 
 import os
 import torch
-from typing import Optional, Callable, Any, Dict
+from typing import Optional, Callable, Any, Dict, Literal
 
 
 class Callback:
@@ -239,7 +249,7 @@ class LearningRateScheduler(Callback):
         self,
         schedule: Callable[[int], float],
         monitor: Optional[str] = None,
-        mode: str = "min",
+        mode: Literal['min', 'max'] = "min",
         factor: float = 0.1,
         patience: int = 10,
         threshold: float = 1e-4,
@@ -263,7 +273,7 @@ class LearningRateScheduler(Callback):
         """
         self.schedule = schedule
         self.monitor = monitor
-        self.mode = mode
+        self.mode: Literal['min', 'max'] = mode
         self.factor = factor
         self.patience = patience
         self.threshold = threshold

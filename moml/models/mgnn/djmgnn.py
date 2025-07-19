@@ -1,16 +1,42 @@
+"""
+moml/models/mgnn/djmgnn.py
+
+Dense Jumping Knowledge Molecular Graph Neural Network (DJMGNN)
+
+This module implements a dense molecular graph neural network with jumping 
+knowledge aggregation for molecular property prediction. The architecture 
+uses dense connections within blocks and aggregates information across 
+multiple scales using various jumping knowledge strategies.
+
+Main Components:
+    - GraphConvLayer: Graph convolution layer based on NNConv
+    - DenseGNNBlock: Dense GNN block with skip connections and transitions
+    - JKAggregator: Jumping knowledge aggregation with multiple modes
+    - DJMGNN: Complete model integrating all components
+"""
+
 import math
+import logging
+from typing import List, Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import logging
 
 # Conditional imports for torch_geometric
 try:
-    from torch_geometric.nn import NNConv, global_mean_pool, global_add_pool, global_max_pool, GraphNorm
+    from torch_geometric.nn import (
+        NNConv,  # type: ignore
+        global_mean_pool,  # type: ignore
+        global_add_pool,  # type: ignore
+        global_max_pool,  # type: ignore
+        GraphNorm,  # type: ignore
+    )
     HAS_TORCH_GEOMETRIC = True
 except ImportError:
     HAS_TORCH_GEOMETRIC = False
-    # Create dummy classes/functions
+    
+    # Create dummy classes for graceful failure
     class NNConv(nn.Module):
         def __init__(self, *args, **kwargs):
             super().__init__()
@@ -30,21 +56,63 @@ except ImportError:
     def global_max_pool(*args, **kwargs):
         raise ImportError("torch_geometric is required for global_max_pool")
 
+# Constants
+DEFAULT_RBF_K = 32
+DEFAULT_RBF_MIN = 0.0
+DEFAULT_RBF_MAX = 10.0
+
 logger = logging.getLogger(__name__)
 
 
-# helpers
-def rbf_encode_dist(dists, K=32, d_min=0.0, d_max=10.0):
-    """Gaussian RBF encoding of distances (shape: [num_edges, 1] → [num_edges, K])."""
+# Helper functions
+def rbf_encode_dist(
+    dists: torch.Tensor, 
+    K: int = DEFAULT_RBF_K, 
+    d_min: float = DEFAULT_RBF_MIN, 
+    d_max: float = DEFAULT_RBF_MAX
+) -> torch.Tensor:
+    """
+    Gaussian RBF encoding of distances.
+    
+    Transforms distance values into Gaussian radial basis function features
+    for improved edge representation in graph neural networks.
+    
+    Args:
+        dists: Distance tensor of shape [num_edges, 1]
+        K: Number of RBF centers
+        d_min: Minimum distance for RBF centers
+        d_max: Maximum distance for RBF centers
+        
+    Returns:
+        torch.Tensor: RBF encoded features of shape [num_edges, K]
+    """
     mu = torch.linspace(d_min, d_max, K, device=dists.device)
     gamma = -0.5 / ((mu[1] - mu[0]) ** 2)
     diff = dists - mu.view(1, -1)
     return torch.exp(gamma * diff**2)
 
 
-# core layers
+# Core layer classes
 class GraphConvLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, edge_attr_dim):
+    """
+    Graph convolution layer based on NNConv with edge features.
+    
+    Implements a graph convolution that uses edge features to generate
+    node-specific transformation matrices via an MLP network.
+    """
+    
+    def __init__(self, in_channels: int, out_channels: int, edge_attr_dim: int) -> None:
+        """
+        Initialize GraphConvLayer.
+        
+        Args:
+            in_channels: Input node feature dimension
+            out_channels: Output node feature dimension  
+            edge_attr_dim: Edge attribute dimension (0 for no edge features)
+            
+        Raises:
+            ImportError: If torch_geometric is not available
+        """
         super().__init__()
         if not HAS_TORCH_GEOMETRIC:
             raise ImportError("torch_geometric is required for GraphConvLayer")
@@ -52,12 +120,20 @@ class GraphConvLayer(nn.Module):
         self.actual_edge_attr_dim = edge_attr_dim
         self._mlp_input_dim = 1 if edge_attr_dim == 0 else edge_attr_dim
  
-        self.edge_mlp = nn.Sequential(nn.Linear(self._mlp_input_dim, in_channels * out_channels), nn.ReLU())
+        self.edge_mlp = nn.Sequential(
+            nn.Linear(self._mlp_input_dim, in_channels * out_channels), 
+            nn.ReLU()
+        )
         self.conv = NNConv(in_channels, out_channels, nn=self.edge_mlp, aggr="add")
         self.norm = GraphNorm(out_channels)
         self.res_connection = in_channels == out_channels
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        edge_index: torch.Tensor, 
+        edge_attr: Optional[torch.Tensor]
+    ) -> torch.Tensor:
         edge_attr_for_nnconv_input = edge_attr
 
         if self.actual_edge_attr_dim == 0:
@@ -83,7 +159,32 @@ class GraphConvLayer(nn.Module):
 
 
 class DenseGNNBlock(nn.Module):
-    def __init__(self, in_dim, hidden_dim, n_layers, transition_dim, edge_attr_dim):
+    """
+    Dense GNN block with skip connections and feature transitions.
+    
+    Implements a block of graph convolution layers with dense connections,
+    where features from all previous layers are concatenated and processed
+    through transition layers.
+    """
+    
+    def __init__(
+        self, 
+        in_dim: int, 
+        hidden_dim: int, 
+        n_layers: int, 
+        transition_dim: int, 
+        edge_attr_dim: int
+    ) -> None:
+        """
+        Initialize DenseGNNBlock.
+        
+        Args:
+            in_dim: Input feature dimension
+            hidden_dim: Hidden layer dimension
+            n_layers: Number of graph convolution layers
+            transition_dim: Output dimension after final transition
+            edge_attr_dim: Edge attribute dimension
+        """
         super().__init__()
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
@@ -96,18 +197,33 @@ class DenseGNNBlock(nn.Module):
         
         for _ in range(n_layers):
             self.conv_layers.append(GraphConvLayer(hidden_dim, hidden_dim, edge_attr_dim))
-            # Transition layer to process concatenated features
             self.transition_layers.append(nn.Linear(hidden_dim * 2, hidden_dim))
 
         self.final_transition = nn.Linear(hidden_dim, transition_dim)
         self.norm = GraphNorm(transition_dim)
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        edge_index: torch.Tensor, 
+        edge_attr: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        """
+        Forward pass through the dense GNN block.
+        
+        Args:
+            x: Node features [num_nodes, in_dim]
+            edge_index: Edge connectivity [2, num_edges]
+            edge_attr: Edge attributes [num_edges, edge_attr_dim]
+            
+        Returns:
+            torch.Tensor: Updated node features [num_nodes, transition_dim]
+        """
         h = self.initial_proj(x)
         
         for i in range(self.n_layers):
             h_conv = self.conv_layers[i](h, edge_index, edge_attr)
-            h_cat = torch.cat([h, h_conv], 1)
+            h_cat = torch.cat([h, h_conv], dim=1)
             h = self.transition_layers[i](h_cat)
             h = F.relu(h)
             
@@ -116,6 +232,17 @@ class DenseGNNBlock(nn.Module):
 
 
 class JKAggregator(nn.Module):
+    """
+    Jumping Knowledge aggregator for combining features from multiple blocks.
+    
+    Supports multiple aggregation modes including concatenation, max pooling,
+    attention-based weighting, and LSTM-based sequential processing.
+    
+    Args:
+        block_dims: List of feature dimensions for each block
+        out_dim: Output feature dimension
+        mode: Aggregation mode ('concat', 'max', 'attention', 'lstm')
+    """
     def __init__(self, block_dims, out_dim, mode="attention"):
         super().__init__()
         self.mode, self.block_count = mode, len(block_dims)
@@ -453,4 +580,3 @@ class DJMGNN(nn.Module):
         out_energy = self.head_energy(graph_emb)
         
         return {"node_pred": out_node, "graph_pred": out_graph, "energy_pred": out_energy}
-        

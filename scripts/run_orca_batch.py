@@ -1,486 +1,326 @@
 """
-Automates ORCA quantum mechanical calculations for a list of SDF files.
+scripts/run_orca_batch.py
 
-This script processes a list of molecules, generates ORCA input files,
-runs ORCA calculations, and stores the results.
+This script automates the execution of quantum mechanical (QM) calculations
+using the ORCA software package for a batch of molecules provided as SDF files.
+
+It performs the following steps for each molecule:
+1.  Reads an SDF file to get the molecular structure.
+2.  Generates a 3D conformer if one is not present.
+3.  Determines the molecule's charge and spin multiplicity.
+4.  Creates an ORCA input file (`.inp`) with specified QM settings.
+5.  Optionally cleans up previous calculation files.
+6.  Executes the ORCA calculation as a subprocess.
+7.  Parses the resulting output file (`.out`) to extract key properties like
+    energy, dipole moment, and partial charges.
+8.  Aggregates the results from all molecules and saves them to a CSV file.
 """
-import os
-import subprocess
-import logging
+
 import argparse
-from typing import List, Optional, Tuple
+import csv
+import logging
+import os
+import re
+import subprocess
+import sys
 from pathlib import Path
-import re # Added
-import csv # Added
+from typing import Dict, List, Optional, Tuple, Any
 
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s | %(message)s", # Updated format
-    handlers=[logging.StreamHandler()],
-)
-logger = logging.getLogger(__name__) # Use a named logger
-
-# Updated CONFIG
-ORCA_KEYWORDS = "! B3LYP STO-3G Opt CHELPG" # Added Opt and CHELPG back
-
+# --- Configuration ---
+# ORCA calculation settings. "Opt" performs a geometry optimization.
+# "CHELPG" requests the calculation of CHELPG atomic charges.
+ORCA_KEYWORDS = "! B3LYP STO-3G Opt CHELPG"
 ORCA_OUTPUT_BLOCK = """\
 %output
    Print[P_Basis] 2
    Print[P_Mulliken] 1
    Print[P_Hirshfeld] 1
 end
-""" # Removed Print[P_ESP] 1
+"""
+DEFAULT_ORCA_EXECUTABLE = "/opt/orca/orca"
 
-DEFAULT_SDF_FILES: List[str] = [
-    "data/diverse_pfas_sdf_batch/DTXSID8031865.sdf", # PFOA
-    "data/diverse_pfas_sdf_batch/DTXSID3031864.sdf", # PFOS
-    "data/diverse_pfas_sdf_batch/DTXSID8031863.sdf", # PFNA
-    "data/diverse_pfas_sdf_batch/DTXSID7040150.sdf", # PFHxS
-    "data/diverse_pfas_sdf_batch/DTXSID3031862.sdf", # PFHxA
-    "data/diverse_pfas_sdf_batch/DTXSID5030030.sdf", # PFBS
-    "data/diverse_pfas_sdf_batch/DTXSID4059916.sdf", # PFBA
-    "data/diverse_pfas_sdf_batch/DTXSID70880215.sdf", # GenX
-    "data/diverse_pfas_sdf_batch/DTXSID5044572.sdf", # 6:2 FTOH
-    "data/diverse_pfas_sdf_batch/DTXSID7029904.sdf", # 8:2 FTOH
-]
-ORCA_OUTPUT_DIR: str = "orca_results_b3lyp_sto3g" # Updated
-DATASET_CSV: str = "qm_dataset.csv" # Added
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
+
+# Pre-compiled regex patterns for efficiency.
+RE_ENERGY = re.compile(r"FINAL SINGLE POINT ENERGY\s+(" + r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?" + r")")
+RE_DIPOLE = re.compile(
+    r"Total Dipole Moment.*?\n\s+X\s+Y\s+Z.*?\n"
+    r".*?\n\s+Dipole Magnitude\s+\(Debye\)\s+(" + r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?" + r")",
+    re.DOTALL | re.IGNORECASE,
+)
+RE_CHELPG_BLOCK = re.compile(r"CHELPG Charges.*?\n(.*?)\n\n", re.DOTALL)
+RE_CHARGE_LINE = re.compile(r"^\s*\d+\s+[A-Za-z]+\s*:?\s*(" + r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?" + r")")
 
 
-def get_orca_executable(args_path: Optional[str], default_exe_path: str = "/opt/orca/orca") -> Optional[str]: # Added default_exe_path
+def find_orca_executable(provided_path: Optional[str]) -> Optional[str]:
     """
-    Determines the path to the ORCA executable based on command-line argument, environment variable, or a default location.
-    
-    Checks for the executable in the following order: command-line argument (`args_path`), `ORCA_PATH` environment variable, and a default path. Returns the path if found, or None if not found.
+    Finds a valid ORCA executable path.
+
+    Order of precedence:
+    1. Path provided via command-line argument.
+    2. `ORCA_PATH` environment variable.
+    3. A common default path (`/opt/orca/orca`).
+
+    Args:
+        provided_path: The path from the command-line argument, if any.
+
+    Returns:
+        The validated path to the ORCA executable, or None if not found.
     """
-    if args_path:
-        if os.path.isfile(args_path):
-            logger.info(f"Using ORCA executable from command line: {args_path}")
-            return args_path
-        else:
-            logging.warning(
-                f"ORCA path from command line not found: {args_path}. Checking environment variable."
-            )
-
-    env_path = os.environ.get("ORCA_PATH")
-    if env_path:
-        if Path(env_path).is_file(): # Use Path
-            logger.info(f"Using ORCA executable from ORCA_PATH environment variable: {env_path}")
-            return env_path
-        else:
-            logger.warning(
-                f"ORCA path from ORCA_PATH environment variable not found: {env_path}."
-            )
-    
-    # Fallback to a common default if not found by other means
-    if Path(default_exe_path).is_file():
-        logger.info(f"Using common default ORCA executable: {default_exe_path}")
-        return default_exe_path
-
-    logger.error(
-        "ORCA executable not found. Please specify via --orca_path, ORCA_PATH environment variable, or ensure it's at a known default location."
-    )
+    paths_to_check = [
+        (provided_path, "command line"),
+        (os.environ.get("ORCA_PATH"), "ORCA_PATH environment variable"),
+        (DEFAULT_ORCA_EXECUTABLE, "default location"),
+    ]
+    for path, source in paths_to_check:
+        if path and Path(path).is_file():
+            logger.info(f"Using ORCA executable from {source}: {path}")
+            return str(path)
     return None
 
 
-def get_molecule_charge_multiplicity(mol: Chem.Mol) -> Tuple[int, int]: # Renamed from get_molecule_charge_mult
-    """
-    Calculates the formal charge and spin multiplicity of a molecule.
-    
-    The spin multiplicity is set to 2 if the total number of electrons is odd, otherwise 1.
-    
-    Args:
-    	mol: RDKit molecule object.
-    
-    Returns:
-    	A tuple containing the formal charge and spin multiplicity.
-    """
-    q = Chem.GetFormalCharge(mol)
-    electrons = sum(a.GetAtomicNum() for a in mol.GetAtoms()) - q
-    mult = 2 if electrons % 2 else 1 # More direct from new script
-    logger.info(f"Molecule: Charge={q}, Electrons={electrons}, Multiplicity={mult}")
-    return q, mult
+def get_molecule_properties(mol: Chem.Mol) -> Tuple[int, int]:
+    """Calculates the formal charge and spin multiplicity of an RDKit molecule."""
+    charge = Chem.GetFormalCharge(mol)
+    num_electrons = sum(atom.GetAtomicNum() for atom in mol.GetAtoms()) - charge
+    multiplicity = 1 if num_electrons % 2 == 0 else 2
+    logger.info(f"Molecule properties: Charge={charge}, Multiplicity={multiplicity}")
+    return charge, multiplicity
 
 
-def generate_orca_input_content( # Renamed from generate_orca_input
-    mol: Chem.Mol, charge: int, mult: int, ncores: int # Renamed multiplicity to mult
+def generate_orca_input_content(
+    mol: Chem.Mol, charge: int, multiplicity: int, n_cores: int
 ) -> Optional[str]:
-    """
-    Generates the content for an ORCA input file for a given molecule.
-    
-    Includes calculation keywords, optional parallelization settings, output block, and the molecule's 3D coordinates in XYZ format. Returns None if the molecule lacks a 3D conformer.
-    """
+    """Generates the string content for an ORCA input file."""
     try:
         conformer = mol.GetConformer()
+        xyz_coords = "\n".join(
+            f"  {atom.GetSymbol():<2} {pos.x:12.8f} {pos.y:12.8f} {pos.z:12.8f}"
+            for atom, pos in zip(mol.GetAtoms(), conformer.GetPositions())
+        )
     except ValueError:
-        logger.error("Molecule does not have a 3D conformer.")
+        logger.error("Molecule has no 3D conformer to generate coordinates from.")
         return None
 
-    xyz_coords = "\n".join( # Renamed from atom_lines and coordinates_block
-        f"  {a.GetSymbol():<2} {conformer.GetAtomPosition(i).x:12.8f}"
-        f" {conformer.GetAtomPosition(i).y:12.8f} {conformer.GetAtomPosition(i).z:12.8f}"
-        for i, a in enumerate(mol.GetAtoms())
-    )
-
-    pal_block = f"%pal nprocs {ncores}\nend\n" if ncores > 0 else "" # Ensure newline if block exists, 0 means no block
-    
-    # Using new ORCA_KEYWORDS and ORCA_OUTPUT_BLOCK
+    pal_block = f"%pal nprocs {n_cores}\nend\n" if n_cores > 1 else ""
     return (
         f"{ORCA_KEYWORDS}\n{pal_block}{ORCA_OUTPUT_BLOCK}\n"
-        f"* xyz {charge} {mult}\n{xyz_coords}\n*\n"
+        f"* xyz {charge} {multiplicity}\n{xyz_coords}\n*\n"
     )
 
-# ────────────────────────── ORCA OUTPUT PARSING (New) ───────────────────────────
-_re_energy = re.compile(r"FINAL SINGLE POINT ENERGY\s+(-?\d+\.\d+)")
-_re_dipole = re.compile(r"Total Dipole Moment.*?\n\s+X\s+Y\s+Z.*?\n"
-                        r".*?\n\s+Dipole Magnitude\s+\(Debye\)\s+(-?\d+\.\d+)", re.S) # Corrected to capture Debye value
-_re_chelpg = re.compile(r"CHELPG Charges.*?\n(.*?)\n\n", re.S)
 
-def parse_orca_out(out_path: Path) -> Optional[dict]:
+def parse_orca_output(out_path: Path) -> Optional[Dict[str, Any]]:
     """
-    Parses an ORCA output file to extract the final single point energy, total dipole moment magnitude, and CHELPG atomic charges.
-    
+    Parses an ORCA output file to extract key QM properties.
+
+    Args:
+        out_path: Path to the ORCA .out file.
+
     Returns:
-        A dictionary containing the molecule ID, energy in Hartree, dipole moment in Debye, and per-atom CHELPG charges (as `q_atom_1`, `q_atom_2`, ...), or None if any essential data is missing or cannot be parsed.
+        A dictionary with extracted properties, or None if parsing fails.
     """
     if not out_path.exists():
         logger.error(f"ORCA output file not found for parsing: {out_path}")
         return None
-    text = out_path.read_text(errors="ignore")
+    content = out_path.read_text(errors="ignore")
 
-    mE = _re_energy.search(text)
-    mD = _re_dipole.search(text)
-    mQ = _re_chelpg.search(text)
+    energy_match = RE_ENERGY.search(content)
+    dipole_match = RE_DIPOLE.search(content)
+    chelpg_block_match = RE_CHELPG_BLOCK.search(content)
 
-    if not (mE and mD and mQ):
-        logging.warning(f"Couldn't parse all required data (Energy, Dipole, CHELPG) from {out_path.name}")
-        # Log which specific parts are missing for better debugging
-        if not mE:
-            logging.warning(f"  Missing: FINAL SINGLE POINT ENERGY in {out_path.name}")
-        if not mD:
-            logging.warning(f"  Missing: Total Dipole Moment (Debye) in {out_path.name}")
-        if not mQ:
-            logging.warning(f"  Missing: CHELPG Charges block in {out_path.name}")
+    if not all([energy_match, dipole_match, chelpg_block_match]):
+        logger.warning(f"Could not parse all required data from {out_path.name}.")
         return None
 
-    charges = []
-    for line in mQ.group(1).strip().splitlines():
-        parts = line.split()
-        # Expecting lines like: "0   O :    -0.616322" or "0 C   -0.123456"
-        if len(parts) >= 3 and parts[0].isdigit(): # Check if first part is a digit (atom index)
-            try:
-                charges.append(float(parts[-1])) # Charge is the last part
-            except ValueError:
-                logger.warning(f"Could not parse charge from CHELPG line: '{line}' in {out_path.name}")
-                continue # Skip this line if charge parsing fails
+    if chelpg_block_match is None: 
+        logger.warning(f"CHELPG charge block regex failed in {out_path.name}.")
+        return None
 
+    charges = RE_CHARGE_LINE.findall(chelpg_block_match.group(1))
     if not charges:
-        logging.warning(f"No CHELPG charges were successfully parsed from {out_path.name}")
-        # We might still want to return other data if charges are missing but energy/dipole are present
-        # For now, let's make CHELPG charges essential for a "complete" parse.
+        logger.warning(f"CHELPG charge block found but no charges parsed in {out_path.name}.")
         return None
 
+    if energy_match is None or dipole_match is None: 
+        logger.warning(f"Energy or Dipole match failed in {out_path.name}.")
+        return None
 
-    return {
+    parsed_data: Dict[str, Any] = {
         "molid": out_path.stem,
-        "energy_hartree": float(mE.group(1)),
-        "dipole_D": float(mD.group(1)),
-        **{f"q_atom_{i+1}": q for i, q in enumerate(charges)}, # More descriptive charge keys
+        "energy_hartree": float(energy_match.group(1)),
+        "dipole_D": float(dipole_match.group(1)),
     }
-# ───────────────────────────────────────────────────────────────────────────────
-
-def cleanup_previous_orca_files(base_name: str, directory: str) -> None:
-    """
-    Removes previous ORCA output and temporary files for a given molecule in the specified directory.
-    
-    Deletes files matching the molecule's base name with common ORCA-related extensions to prevent conflicts with new calculations.
-    """
-    logger.info(f"Cleaning up previous ORCA files for {base_name} in {directory}...")
-    count_deleted = 0
-    # More comprehensive list of extensions ORCA might produce for a given base_name
-    # This doesn't include files that ORCA puts in subdirectories (like some MD files)
-    # but should cover typical single point/opt/freq outputs.
-    orca_extensions_to_clean = [
-        ".out", ".err", ".gbw", ".inp", ".prop", ".xyz", ".hess", ".pc_chelpg",
-        ".opt", ".cis", ".mp2", ".scfp", ".scfgrad", ".densities", ".dip", ".soc",
-        ".trj", ".md", ".energies", ".ges", ".vpot", ".xtbopt.log", ".omd",
-        ".oof", ".ocosmo", ".smd", ".cpcm", ".engrad", ".hessian", ".freq",
-        ".raman", ".uvspec", ".cdspec", ".xray", ".epr", ".nmr", ".mdci",
-        ".loc", ".nbo", ".aim", ".elf", ".mep", ".dens", ".spin", ".mdrestart",
-        ".chk", ".tmp", ".engrad", ".property.txt", ".citations.tmp", ".ginp.tmp",
-        ".gu.tmp", ".int.tmp", ".SHARKINP.tmp", ".bas0", ".bas1", ".bas2", ".bas3",
-        ".bas4", ".bas5", ".en.tmp" # Added from observed files
-    ]
-    for ext in orca_extensions_to_clean:
-        # Using Path.glob for safer path construction and matching
-        for f_path in Path(directory).glob(f"{base_name}{ext}"):
-            try:
-                f_path.unlink()
-                logging.debug(f"Deleted old file: {f_path}")
-                count_deleted +=1
-            except OSError as e:
-                logging.warning(f"Could not delete old file {f_path}")
-    if count_deleted > 0:
-        logger.info(f"Cleaned up {count_deleted} old ORCA files for {base_name}.")
-    else:
-        logger.info(f"No old ORCA files found for {base_name} to clean up.")
-
-
-def run_orca_calculation(
-    orca_executable: str, input_file_path_str: str, output_dir_str: str
-) -> bool:
-    """
-    Runs an ORCA quantum chemistry calculation using the specified input file.
-    
-    Executes the ORCA program as a subprocess in the given output directory, redirecting standard output and error streams to corresponding files. Returns True if the calculation completes successfully (exit code 0), otherwise returns False.
-    """
-    input_file_path = Path(input_file_path_str)
-    output_dir = Path(output_dir_str)
-
-    input_file_basename = input_file_path.name
-    base_name_for_output = input_file_path.stem # e.g., "DTXSID0059794" from "DTXSID0059794.inp"
-    
-    output_file_path = output_dir / f"{base_name_for_output}.out"
-    error_file_path = output_dir / f"{base_name_for_output}.err"
-
-    logger.info(f"Starting ORCA calculation for {input_file_basename} in {output_dir}")
-    logger.info(f"  Input file: {input_file_path}")
-    logger.info(f"  Output file will be: {output_file_path}")
-    logger.info(f"  Error file will be: {error_file_path}")
-    
-    command = [orca_executable, input_file_basename] # ORCA expects just the filename if cwd is set
-    logger.info(f"Executing ORCA command: {' '.join(command)} in directory {output_dir}")
-
-    try:
-        with open(output_file_path, "w") as f_out, open(error_file_path, "w") as f_err:
-            process = subprocess.run(
-                command,
-                cwd=output_dir, # Run ORCA from the output directory
-                stdout=f_out,
-                stderr=f_err,
-                text=True, # Ensure text mode for stdout/stderr
-                check=False, # Don't raise exception for non-zero exit codes immediately
-                timeout=7200  # Timeout after 2 hours, adjust as needed
-            )
-        
-        # Files are written directly by subprocess.
-        logger.info(f"ORCA stdout saved to {output_file_path}")
-        # stderr is always created, check if it's empty for success indication
-        
-        if process.returncode == 0:
-            logger.info(f"ORCA run completed successfully for {input_file_basename} (exit code 0).")
-            if error_file_path.exists() and error_file_path.stat().st_size == 0:
-                logger.info(f"Empty error file {error_file_path} generated by successful run, removing it.")
-                error_file_path.unlink()
-            elif error_file_path.exists():
-                 logger.info(f"ORCA stderr (though successful run, not empty) saved to {error_file_path}")
-            return True
-        else:
-            logging.error(f"ORCA run failed for {input_file_basename} with exit code {process.returncode}.")
-            logging.error(f"ORCA stderr for {input_file_basename} saved to {error_file_path}")
-            # Optionally, log snippets if needed, but files are saved.
-            try:
-                with open(output_file_path, "r") as f_out_read:
-                    logging.error(f"Captured STDOUT (see {output_file_path}):\n{f_out_read.read(1000)}...")
-                # error_file_path is already written, so just refer to it.
-                with open(error_file_path, "r") as f_err_read:
-                    content = f_err_read.read(1000)
-                    if content:
-                        logging.error(f"Captured STDERR (see {error_file_path}):\n{content}...")
-                    else:
-                        logging.error(f"Captured STDERR (see {error_file_path}): [EMPTY, but exit code was non-zero]")
-            except Exception as e_read:
-                logging.warning(f"Could not read output/error files for logging snippet: {e_read}")
-            return False
-            
-    except subprocess.TimeoutExpired:
-        logging.error(f"ORCA run for {input_file_basename} timed out after specified duration.")
-        logging.error(f"Partial ORCA stdout (if any) saved to {output_file_path}")
-        logging.error(f"Partial ORCA stderr (if any) saved to {error_file_path}")
-        return False
-    except FileNotFoundError:
-        logging.error(
-            f"ORCA executable not found at {orca_executable}. Ensure it's correctly specified and in PATH or use full path."
-        )
-        return False
-    except Exception as e:
-        logging.error(f"An unexpected error occurred while running ORCA for {input_file_basename}")
-        logging.error(f"Check {output_file_path} and {error_file_path} for any partial output.")
-        return False
-
-
-def process_sdf_file(
-    sdf_file_path: Path,
-    orca_executable: str,
-    output_dir: Path,
-    num_cores: int
-) -> Optional[dict]:
-    """
-    Processes a single SDF file: generates an ORCA input, runs the calculation, and parses the output.
-    
-    Attempts to generate a 3D conformer if missing, optimizes geometry, and cleans up previous ORCA files before calculation. Returns a dictionary of parsed results if successful, or None if any step fails.
-    """
-    logger.info(f"Processing {sdf_file_path}...")
-    base_name = sdf_file_path.stem
-    
-    cleanup_previous_orca_files(base_name, str(output_dir))
-
-    orca_input_file_path = output_dir / f"{base_name}.inp"
-
-    if not sdf_file_path.exists(): # Use Path.exists()
-        logger.error(f"SDF file not found: {sdf_file_path}")
-        return None
-
-    mol = Chem.MolFromMolFile(str(sdf_file_path), removeHs=False) # Ensure str for RDKit
-    if mol is None:
-        logger.error(f"Could not read molecule from {sdf_file_path}")
-        return None
-    
-    # Conformer generation logic from new script (slightly different from old)
-    if mol.GetNumConformers() == 0:
-        logger.info(f"No 3D conformer in {base_name}. Adding Hs and attempting to generate one.")
-        mol = Chem.AddHs(mol, addCoords=True) # Add Hs before embedding if no conformer
-        if AllChem.EmbedMolecule(mol, AllChem.ETKDGv3(randomSeed=0xF00D)) == -1: # Using ETKDGv3 from generate_3d_mol
-            logger.error(f"Conformer generation failed for {base_name}")
-            return None
-        try:
-            AllChem.MMFFOptimizeMolecule(mol) # MMFF94 optimization
-        except Exception as e:
-            logger.warning(f"MMFF optimization failed for {base_name}: {e}. Using embedded conformer.")
-    
-    if mol.GetNumConformers() == 0: # Double check
-        logger.error(f"Still no 3D conformer for {base_name} after generation attempt.")
-        return None
-
-    charge, multiplicity = get_molecule_charge_multiplicity(mol)
-    # logging.info for charge/mult already in get_molecule_charge_multiplicity
-
-    orca_input_content = generate_orca_input_content(mol, charge, multiplicity, num_cores)
-    if not orca_input_content:
-        logger.error(f"Failed to generate ORCA input for {base_name}")
-        return None
-
-    try:
-        orca_input_file_path.write_text(orca_input_content) # Use Path.write_text
-        logger.info(f"Generated ORCA input file: {orca_input_file_path}")
-    except IOError as e:
-        logger.error(f"Failed to write ORCA input file {orca_input_file_path}")
-        return None
-
-    if not run_orca_calculation(orca_executable, str(orca_input_file_path), str(output_dir)):
-        logger.error(f"ORCA calculation failed for {base_name}")
-        # Attempt to parse even if ORCA failed, might get partial data or specific error messages
-        # However, the new parse_orca_out expects certain fields, so it might return None anyway.
-        # For now, if ORCA fails, we consider the molecule processing failed for dataset.
-        return None
-    
-    # Parse output if ORCA run was successful
-    parsed_data = parse_orca_out(output_dir / f"{base_name}.out")
-    if parsed_data:
-        logger.info(f"Successfully parsed ORCA output for {base_name}.")
-    else:
-        logger.warning(f"Failed to parse all required data from ORCA output for {base_name}.")
-        # Even if parsing fails, the ORCA run itself might have produced files.
-        # The function should return None if parsing is incomplete for dataset purposes.
+    parsed_data.update({f"q_atom_{i+1}": float(q) for i, q in enumerate(charges)})
     return parsed_data
 
 
+def cleanup_orca_files(base_name: str, directory: Path):
+    """Removes previous ORCA output and temporary files."""
+    logger.info(f"Cleaning up previous ORCA files for {base_name} in {directory}...")
+    extensions = [
+        ".out", ".err", ".gbw", ".inp", ".prop", ".xyz", ".hess", ".opt",
+        ".tmp", ".property.txt"
+    ]
+    for ext in extensions:
+        for f in directory.glob(f"{base_name}{ext}"):
+            try:
+                f.unlink()
+            except OSError as e:
+                logger.warning(f"Could not delete old file {f}: {e}")
+
+
+def run_orca_calculation(
+    orca_executable: str, input_path: Path, output_dir: Path
+) -> bool:
+    """
+    Executes a single ORCA calculation as a subprocess.
+
+    Args:
+        orca_executable: Path to the ORCA executable.
+        input_path: Path to the ORCA input file.
+        output_dir: Directory where the calculation will run.
+
+    Returns:
+        True if the calculation completes successfully (exit code 0), False otherwise.
+    """
+    base_name = input_path.stem
+    out_path = output_dir / f"{base_name}.out"
+    err_path = output_dir / f"{base_name}.err"
+
+    command = [orca_executable, str(input_path.resolve())]
+    logger.info(f"Running command: {' '.join(command)}")
+
+    try:
+        with open(out_path, "w") as f_out, open(err_path, "w") as f_err:
+            process = subprocess.run(
+                command,
+                cwd=output_dir,
+                stdout=f_out,
+                stderr=f_err,
+                check=True,
+                text=True,
+            )
+        logger.info(f"ORCA calculation for {base_name} completed successfully.")
+        return True
+    except FileNotFoundError:
+        logger.error(f"ORCA executable not found at: {orca_executable}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"ORCA calculation for {base_name} failed with exit code {e.returncode}.")
+        logger.error(f"Check logs for details: {out_path} and {err_path}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during ORCA run for {base_name}: {e}")
+    return False
+
+
+def process_sdf_file(
+    sdf_path: Path,
+    orca_executable: str,
+    output_dir: Path,
+    n_cores: int,
+    no_cleanup: bool,
+) -> Optional[Dict[str, Any]]:
+    """
+    Full processing pipeline for a single SDF file.
+
+    Generates input, runs calculation, and parses output.
+
+    Returns:
+        A dictionary of parsed QM properties, or None if any step fails.
+    """
+    logger.info(f"--- Processing SDF file: {sdf_path.name} ---")
+    base_name = sdf_path.stem
+    input_path = output_dir / f"{base_name}.inp"
+    out_path = output_dir / f"{base_name}.out"
+
+    suppl = Chem.SDMolSupplier(str(sdf_path))
+    mol = next(suppl, None)
+    if not mol:
+        logger.error(f"Could not read molecule from {sdf_path}")
+        return None
+
+    charge, multiplicity = get_molecule_properties(mol)
+    input_content = generate_orca_input_content(mol, charge, multiplicity, n_cores)
+    if not input_content:
+        return None
+
+    output_dir.mkdir(exist_ok=True)
+    if not no_cleanup:
+        cleanup_orca_files(base_name, output_dir)
+    input_path.write_text(input_content)
+
+    success = run_orca_calculation(orca_executable, input_path, output_dir)
+    if not success:
+        return None
+
+    return parse_orca_output(out_path)
+
+
 def main():
-    """
-    Coordinates the batch ORCA quantum mechanical calculations for a list of SDF files and compiles the results into a CSV dataset.
-    
-    Parses command-line arguments for SDF file paths, ORCA executable location, output directory, and number of processor cores. For each molecule, it prepares input files, runs ORCA, parses outputs, and collects results. Successfully parsed results are appended to a CSV file, with logging of progress and summary statistics.
-    """
-    parser = argparse.ArgumentParser(
-        description="Run ORCA calculations for a list of SDF files and assemble QM dataset."
-    )
-    parser.add_argument(
-        "--sdf_files",
-        nargs="+",
-        default=DEFAULT_SDF_FILES,
-        help="List of SDF files to process. Defaults to a predefined list.",
-    )
-    parser.add_argument(
-        "--orca_path",
-        type=str,
-        default=os.environ.get("ORCA_PATH"),
-        help="Path to the ORCA executable. Overrides ORCA_PATH. Defaults to /opt/orca/orca if neither is set.",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default=ORCA_OUTPUT_DIR,
-        help=f"Directory to store ORCA input and output files. Default: {ORCA_OUTPUT_DIR}",
-    )
-    parser.add_argument(
-        "--num_cores",
-        type=int,
-        default=4, # Updated default from new script
-        help="Number of processor cores for ORCA to use. Default: 4.",
-    )
+    """Main function to run the ORCA batch processing script."""
+    parser = argparse.ArgumentParser(description="Run ORCA calculations for a batch of SDF files.")
+    parser.add_argument("sdf_files", nargs="+", help="Paths to one or more input SDF files.")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to store ORCA inputs and outputs.")
+    parser.add_argument("--n_cores", type=int, default=1, help="Number of cores for parallel ORCA jobs.")
+    parser.add_argument("--orca_path", type=str, help="Path to the ORCA executable.")
+    parser.add_argument("--no_cleanup", action="store_true", help="Do not delete previous ORCA output files.")
+    parser.add_argument("--output_csv", type=str, default="qm_dataset.csv", help="Path for the final output CSV file.")
     args = parser.parse_args()
 
-    orca_executable = get_orca_executable(args.orca_path, default_exe_path="/opt/orca/orca") # Pass new default
+    orca_executable = find_orca_executable(args.orca_path)
     if not orca_executable:
+        logger.error("Could not find ORCA executable. Exiting.")
+        sys.exit(1)
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(exist_ok=True)
+
+    all_results = []
+    failed_sdfs = []
+
+    for sdf_path_str in args.sdf_files:
+        sdf_path = Path(sdf_path_str)
+        if not sdf_path.exists():
+            logger.warning(f"SDF file not found: {sdf_path}. Skipping.")
+            failed_sdfs.append(sdf_path.name)
+            continue
+        
+        result = process_sdf_file(
+            sdf_path, orca_executable, output_dir, args.n_cores, args.no_cleanup
+        )
+        if result:
+            all_results.append(result)
+        else:
+            failed_sdfs.append(sdf_path.name)
+    
+    if not all_results:
+        logger.warning("No molecules were successfully processed.")
         return
 
-    output_dir_path = Path(args.output_dir)
-    output_dir_path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"ORCA output will be saved in: {output_dir_path.resolve()}")
+    # Write results to CSV
+    output_csv_path = output_dir / args.output_csv
+    header = list(all_results[0].keys())
+    try:
+        with open(output_csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(all_results)
+        logger.info(f"Successfully wrote QM data for {len(all_results)} molecules to {output_csv_path}")
+    except IOError as e:
+        logger.error(f"Failed to write output CSV file: {e}")
 
-    dataset_rows = [] # For collecting parsed data
-    successful_runs = 0
-    failed_runs = 0
-
-    for sdf_file_str in args.sdf_files:
-        sdf_file_path = Path(sdf_file_str) # Convert to Path object
-        parsed_result = process_sdf_file(
-            sdf_file_path, orca_executable, output_dir_path, args.num_cores
-        )
-        if parsed_result:
-            dataset_rows.append(parsed_result)
-            successful_runs += 1
-        else:
-            failed_runs += 1
-            logger.info(f"Continuing to next molecule after failure or incomplete parsing for {sdf_file_path.name}.")
-        logger.info("-" * 50)
-
-    logger.info("Batch processing finished.")
-    logger.info(f"Successful ORCA runs with complete parsing: {successful_runs}")
-    logger.info(f"Failed ORCA runs or incomplete parsing: {failed_runs}")
-
-    # Write / append CSV dataset
-    if dataset_rows:
-        dataset_file_path = Path(DATASET_CSV)
-        # Determine fieldnames from all collected data to handle cases where some molecules might have more/less CHELPG charges
-        all_keys = set()
-        for row in dataset_rows:
-            all_keys.update(row.keys())
-        
-        # Ensure a consistent order, e.g., molid, energy, dipole, then sorted charges
-        fieldnames = ['molid', 'energy_hartree', 'dipole_D']
-        charge_keys = sorted([k for k in all_keys if k.startswith('q_atom_')], key=lambda x: int(x.split('_')[-1]))
-        fieldnames.extend(charge_keys)
-        # Add any other keys that might have been missed (though unlikely with current parsing)
-        fieldnames.extend(sorted(list(all_keys - set(fieldnames))))
-
-
-        csv_exists = dataset_file_path.is_file()
-        try:
-            with open(dataset_file_path, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore') # ignore charges not present for a molecule
-                if not csv_exists or dataset_file_path.stat().st_size == 0 : # also check if file is empty
-                    writer.writeheader()
-                writer.writerows(dataset_rows)
-            logger.info(f"Wrote/Appended {len(dataset_rows)} records to {DATASET_CSV}")
-        except IOError as e:
-            logger.error(f"Could not write to CSV file {DATASET_CSV}")
-    else:
-        logger.warning("No successful ORCA runs with complete parsing to write to dataset CSV.")
+    if failed_sdfs:
+        logger.warning(f"\n--- Processing Summary ---")
+        logger.warning(f"Failed to process {len(failed_sdfs)} SDF files:")
+        for fname in failed_sdfs:
+            logger.warning(f"  - {fname}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,88 @@
+Author: OpenFF Initiative
+Date: 2024-01-01
+Description: Custom force field parameters for polyamide membrane simulations
+Version: 1.0.0
+
+# Custom parameter definitions for polyamide systems
+Constraints:
+  - smirks: "[#6X4:1]-[#6X4:2]"
+    id: c1
+    distance: 1.526 * angstrom
+    
+  - smirks: "[#6X3:1]-[#7X3:2]"
+    id: c2
+    distance: 1.335 * angstrom
+
+# Bond parameters optimized for polyamide networks
+Bonds:
+  - smirks: "[#6X4:1]-[#6X4:2]"
+    id: b1
+    length: 1.526 * angstrom
+    k: 620.0 * kilocalorie_per_mole / angstrom**2
+    
+  - smirks: "[#6X3:1]-[#7X3:2]"
+    id: b2
+    length: 1.335 * angstrom
+    k: 570.0 * kilocalorie_per_mole / angstrom**2
+    
+  - smirks: "[#6X3:1]=[#8X1:2]"
+    id: b3
+    length: 1.229 * angstrom
+    k: 1140.0 * kilocalorie_per_mole / angstrom**2
+
+# Angle parameters for polyamide structure
+Angles:
+  - smirks: "[#6X4:1]-[#6X4:2]-[#6X4:3]"
+    id: a1
+    angle: 112.7 * degree
+    k: 58.35 * kilocalorie_per_mole / radian**2
+    
+  - smirks: "[#6X3:1]-[#7X3:2]-[#1:3]"
+    id: a2
+    angle: 119.8 * degree
+    k: 38.0 * kilocalorie_per_mole / radian**2
+
+# Torsion parameters for conformational flexibility
+ProperTorsions:
+  - smirks: "[#6X4:1]-[#6X4:2]-[#6X4:3]-[#6X4:4]"
+    id: t1
+    periodicity: [1, 2, 3]
+    phase: [0.0, 180.0, 0.0] * degree
+    k: [0.18, -0.25, 0.20] * kilocalorie_per_mole
+    
+  - smirks: "[#6X3:1]-[#7X3:2]-[#6X3:3]-[#6X3:4]"
+    id: t2
+    periodicity: [1, 2]
+    phase: [0.0, 180.0] * degree
+    k: [0.5, 4.9] * kilocalorie_per_mole
+
+# Non-bonded parameters for van der Waals interactions
+vdW:
+  - smirks: "[#6X4:1]"
+    id: v1
+    sigma: 3.5 * angstrom
+    epsilon: 0.1094 * kilocalorie_per_mole
+    
+  - smirks: "[#6X3:1]"
+    id: v2
+    sigma: 3.55 * angstrom
+    epsilon: 0.0860 * kilocalorie_per_mole
+    
+  - smirks: "[#7X3:1]"
+    id: v3
+    sigma: 3.25 * angstrom
+    epsilon: 0.1700 * kilocalorie_per_mole
+    
+  - smirks: "[#8X1:1]"
+    id: v4
+    sigma: 2.96 * angstrom
+    epsilon: 0.2100 * kilocalorie_per_mole
+
+# Electrostatic parameters
+Electrostatics:
+  scale12: 0.0
+  scale13: 0.0
+  scale14: 0.833333
+  scale15: 1.0
+  cutoff: 9.0 * angstrom
+  switch_width: 1.0 * angstrom

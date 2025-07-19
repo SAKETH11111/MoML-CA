@@ -1,6 +1,16 @@
 """
-Build a rigid graphene-like slab inside the current working directory
-and return paths & indices needed by the MD builder.
+moml/simulation/molecular_dynamics/force_field/plugins/gac_v1/build.py
+
+Granular Activated Carbon (GAC) Surface Builder Module
+
+This module provides functionality to build a rigid graphene-like slab representing
+a granular activated carbon (GAC) surface for molecular dynamics simulations.
+It creates a hexagonal carbon lattice with specified dimensions that can be used
+as an adsorption surface in PFAS treatment simulations.
+
+The module generates both the 3D structure and topology information needed by the
+MD simulation builder, with options to control the size and properties of the
+carbon surface.
 """
 from pathlib import Path
 from typing import List, Tuple
@@ -9,7 +19,26 @@ from openmm.app import PDBFile, Topology
 from openmm.app.element import carbon
 
 def build(tmp_dir: Path, cfg: dict) -> Tuple[Path, Topology, List[int]]:
-    """Return (pdb_path, topology_obj, surface_atom_indices)."""
+    """
+    Build a rigid graphene-like GAC surface and return required simulation components.
+    
+    This function creates a hexagonal carbon lattice representing a granular activated
+    carbon surface based on the provided configuration. It generates the PDB file,
+    topology, and atom indices needed for molecular dynamics simulations.
+    
+    Args:
+        tmp_dir: Path to temporary directory where output files will be written
+        cfg: Configuration dictionary containing:
+            - slab_dims_nm: List[float] with [x, y, z] dimensions in nanometers
+            - pore_fraction: Float indicating porosity (0.0 = solid slab)
+            - freeze_atoms: Boolean indicating whether to fix atom positions
+    
+    Returns:
+        Tuple[Path, Topology, List[int]]: A tuple containing:
+            - Path: Path to the generated PDB file
+            - Topology: OpenMM Topology object for the surface
+            - List[int]: List of atom indices comprising the surface
+    """
     box_x, box_y, slab_z = cfg["slab_dims_nm"]
     a = 0.142  # nm C–C
     # create simple hexagonal sheet – minimal until full pore model arrives

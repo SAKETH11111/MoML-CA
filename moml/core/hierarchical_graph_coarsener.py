@@ -1,38 +1,27 @@
 """
-Graph Coarsening for PFAS Molecular Structures
+moml/core/hierarchical_graph_coarsener.py
 
-This module provides functionality to create hierarchical graph representations
-of PFAS molecules at different levels of coarseness:
-1. Atom level (original graph)
-2. Functional group level (intermediate coarseness)
-3. Structural motif level (highest coarseness)
-
-Theory:
-Graph coarsening reduces the size and complexity of molecular graphs by aggregating
-nodes (atoms) into super-nodes (functional groups) based on chemical meaning.
-This creates a hierarchical representation that:
-- Captures long-range interactions more effectively
-- Reduces computational complexity for large molecules
-- Provides chemically meaningful abstractions for interpretation
-- Enables multi-scale feature learning in graph neural networks
+Graph coarsening for PFAS molecular structures using hierarchical representations.
 """
 
-import os
-import torch
-from torch_geometric.data import Data
-from rdkit import Chem
-from typing import Dict, List, Tuple, Optional, Union
 import logging
-import numpy as np
+import os
+from typing import Dict, List, Optional, Tuple, Union, cast
 
-from moml.core.molecular_feature_extraction import FunctionalGroupDetector, MolecularFeatureExtractor
-from moml.core import create_graph_processor
+import numpy as np
+import torch
+from rdkit import Chem
+from moml.core.molecular_graph_processor import Data
+
+from moml.core.molecular_graph_processor import MolecularGraphProcessor
+from moml.core.molecular_feature_extraction import (
+    FunctionalGroupDetector,
+    MolecularFeatureExtractor,
+)
 from moml.simulation.qm.parser.orca_parser import parse_orca_output
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 class GraphCoarsener:
     """
@@ -57,8 +46,9 @@ class GraphCoarsener:
     graph algorithms, ensuring that the resulting super-nodes have chemical meaning
     (e.g., CF3 groups, carboxylic acid groups) specific to PFAS structures.
     """
+    UNMAPPED_MOTIF = -1  # Identifier for unclassified structural motifs
 
-    def __init__(self, use_3d_coords: bool = True, use_pfas_features: bool = True):
+    def __init__(self, use_3d_coords: bool = True, use_pfas_features: bool = True) -> None:
         """
         Initialize the GraphCoarsener.
 
@@ -72,9 +62,10 @@ class GraphCoarsener:
         self.feature_extractor = MolecularFeatureExtractor()
 
         # Create a graph processor for initial atom-level graphs
-        self.graph_processor = create_graph_processor(
-            {"use_3d_coords": use_3d_coords, "use_pfas_specific_features": use_pfas_features}
-        )
+        self.graph_processor = MolecularGraphProcessor({
+            "use_3d_coords": use_3d_coords, 
+            "use_pfas_specific_features": use_pfas_features
+        })
 
     def _create_cluster_mapping(self, mol: Chem.Mol) -> Dict[int, int]:
         """
@@ -87,16 +78,16 @@ class GraphCoarsener:
             Dictionary mapping atom indices to cluster indices
         """
         # Identify functional groups
-        cf_group_definitions, non_cf_functional_groups = self.functional_group_detector.identify_all_functional_groups(
-            mol
+        cf_group_definitions, non_cf_functional_groups = (
+            self.functional_group_detector.identify_all_functional_groups(mol)
         )
 
-        logger.info(f"[_create_cluster_mapping] Molecule: {Chem.MolToSmiles(mol)}")
+        logger.info(f"Molecule: {Chem.MolToSmiles(mol)}")
         logger.info(
-            f"[_create_cluster_mapping] Identified non_cf_functional_groups type: {type(non_cf_functional_groups)}"
+            f"Identified non_cf_functional_groups type: {type(non_cf_functional_groups)}"
         )
         logger.info(
-            f"[_create_cluster_mapping] Identified non_cf_functional_groups content: {non_cf_functional_groups}"
+            f"Identified non_cf_functional_groups content: {non_cf_functional_groups}"
         )
 
         # Create initial mapping with each atom as its own cluster
@@ -104,15 +95,19 @@ class GraphCoarsener:
         next_cluster_id = mol.GetNumAtoms()
 
         # Assign cluster IDs to non-CF functional groups
-        # non_cf_functional_groups is a List[Set[int]]
-        logger.debug(f"[_create_cluster_mapping] Full non_cf_functional_groups before loop: {non_cf_functional_groups}")
+        logger.debug(
+            f"Full non_cf_functional_groups before loop: {non_cf_functional_groups}"
+        )
         for i, group_atom_indices in enumerate(non_cf_functional_groups):
             logger.debug(
-                f"[_create_cluster_mapping] Loop iteration {i}, group_atom_indices type: {type(group_atom_indices)}, content: {group_atom_indices}"
+                f"Loop iteration {i}, group_atom_indices type: "
+                f"{type(group_atom_indices)}, content: {group_atom_indices}"
             )
             logger.info(
-                f"[_create_cluster_mapping] Processing group {i}, type: {type(group_atom_indices)}, content: {group_atom_indices}"
+                f"Processing group {i}, type: {type(group_atom_indices)}, "
+                f"content: {group_atom_indices}"
             )
+            
             if isinstance(group_atom_indices, (set, list, tuple)):
                 # This is expected: group_atom_indices is a set of atom indices
                 current_group_cluster_id = next_cluster_id
@@ -121,11 +116,16 @@ class GraphCoarsener:
                         cluster_mapping[atom_idx] = current_group_cluster_id
                     else:
                         logger.warning(
-                            f"Unexpected item {atom_idx} (type {type(atom_idx)}) in functional group set {group_atom_indices}. Skipping."
+                            f"Unexpected item {atom_idx} (type {type(atom_idx)}) "
+                            f"in functional group set {group_atom_indices}. Skipping."
                         )
                 next_cluster_id += 1
             else:
-                err_msg = f"Unexpected type for a functional group element: {type(group_atom_indices)}. Content: {group_atom_indices}. Expected set, list, or tuple of atom indices."
+                err_msg = (
+                    f"Unexpected type for a functional group element: "
+                    f"{type(group_atom_indices)}. Content: {group_atom_indices}. "
+                    f"Expected set, list, or tuple of atom indices."
+                )
                 logger.error(err_msg)
                 raise TypeError(err_msg)
 
@@ -143,25 +143,33 @@ class GraphCoarsener:
 
         return cluster_mapping
 
-    def _create_structural_mapping(self, mol: Chem.Mol, cluster_mapping: Dict[int, int]) -> Dict[int, int]:
+    def _create_structural_mapping(
+        self, mol: Chem.Mol, cluster_mapping: Dict[int, int]
+    ) -> Dict[int, int]:
         """
         Create a mapping from cluster indices to structural motif indices.
+        
+        This method identifies major structural components of PFAS molecules:
+        - Head groups (functional groups like COOH, SO3H)
+        - Tail groups (fluorinated carbon chains)
 
         Args:
             mol: RDKit molecule
             cluster_mapping: Mapping from atom indices to functional group cluster indices
 
         Returns:
-            Dictionary mapping cluster indices to structural motif indices
+            Dictionary mapping cluster indices to structural motif indices:
+            - 0: Head group motif (functional groups)
+            - 1: Tail group motif (fluorinated chains)
         """
         distance_features = self.feature_extractor.calculate_distance_features(mol)
 
         # Initialize structural mapping
         structural_mapping = {}
 
-        # Identify fluorinated tail (0) and head groups (1)
-        head_group_cluster = 0
-        tail_group_cluster = 1
+        # Define motif identifiers
+        HEAD_GROUP_MOTIF = 0  # Functional groups (COOH, SO3H, etc.)
+        TAIL_GROUP_MOTIF = 1  # Fluorinated carbon chains
 
         for atom_idx, cluster_id in cluster_mapping.items():
             # Skip if this cluster is already mapped
@@ -175,9 +183,9 @@ class GraphCoarsener:
 
             # Assign cluster to head or tail structural motif
             if is_head:
-                structural_mapping[cluster_id] = head_group_cluster
+                structural_mapping[cluster_id] = HEAD_GROUP_MOTIF
             else:
-                structural_mapping[cluster_id] = tail_group_cluster
+                structural_mapping[cluster_id] = TAIL_GROUP_MOTIF
 
         return structural_mapping
 
@@ -390,22 +398,16 @@ class GraphCoarsener:
         # 3. Create a combined mapping from original atom indices directly to structural motif IDs.
         atom_to_motif_mapping = {}
         for atom_idx, fg_cluster_id in atom_to_fg_mapping.items():
-            motif_id = fg_to_motif_mapping.get(fg_cluster_id)
-            if motif_id is not None:
-                atom_to_motif_mapping[atom_idx] = motif_id
-            else:
+            motif_id = fg_to_motif_mapping.get(fg_cluster_id, self.UNMAPPED_MOTIF)
+            if motif_id == self.UNMAPPED_MOTIF:
                 logger.warning(
-                    f"FG cluster ID {fg_cluster_id} (derived from atom {atom_idx}) "
-                    f"was not found in fg_to_motif_mapping. This atom/group will not be mapped to a motif."
+                    f"FG cluster {fg_cluster_id} (from atom {atom_idx}) was not mapped to a known motif. "
+                    f"Assigning default ID {self.UNMAPPED_MOTIF}."
                 )
-                # Optionally, assign to a default "unmapped" motif ID or skip.
-                # For now, atoms belonging to such FG clusters won't be included in motif graph nodes
-                # if _compute_coarsened_features relies on keys present in atom_to_motif_mapping.
-                # Let's ensure _compute_coarsened_features handles this gracefully or all atoms are mapped.
-                # For now, we will map them to a special motif ID if needed, or ensure all are covered.
-                # The current _compute_coarsened_features iterates sorted(clusters.keys()),
-                # where clusters are built from the mapping. So unmapped atoms are excluded.
+            atom_to_motif_mapping[atom_idx] = motif_id
 
+        # Unmapped FG clusters are assigned a default ID to ensure all atoms are included in the motif graph.
+        
         # 4. Compute features, edges, and positions for the structural motif graph.
         # These computations MUST use the original atom_level_data and the atom_to_motif_mapping.
         motif_x = self._compute_coarsened_features(atom_level_data, atom_to_motif_mapping)
@@ -451,13 +453,21 @@ class GraphCoarsener:
 
         return motif_data
 
-    def create_hierarchical_graphs(self, data: Data, mol: Chem.Mol) -> Dict[str, Data]:
+    def create_hierarchical_graphs(
+        self, data: Data, mol: Chem.Mol
+    ) -> Dict[str, Data]:
         """
         Create hierarchical graph representations at multiple levels of coarseness.
+        
+        This is the main method for generating multi-scale molecular representations.
+        It creates three levels of graph abstractions:
+        1. Atom level - Original molecular graph with individual atoms
+        2. Functional group level - Atoms grouped into chemical functional groups
+        3. Structural motif level - Functional groups grouped into major structural components
 
         Args:
             data: Original PyTorch Geometric Data object (atom-level)
-            mol: RDKit molecule
+            mol: RDKit molecule corresponding to the data
 
         Returns:
             Dictionary of graphs at different levels:
@@ -468,10 +478,16 @@ class GraphCoarsener:
         # Create functional group level graph
         functional_group_graph = self.create_functional_group_graph(data, mol)
 
-        # Create structural motif level graph
-        structural_motif_graph = self.create_structural_motif_graph(functional_group_graph, mol)
+        # Create structural motif level graph  
+        structural_motif_graph = self.create_structural_motif_graph(
+            functional_group_graph, mol  # Use functional group graph
+        )
 
-        return {"atom": data, "functional_group": functional_group_graph, "structural_motif": structural_motif_graph}
+        return {
+            "atom": data, 
+            "functional_group": functional_group_graph, 
+            "structural_motif": structural_motif_graph
+        }
 
     def create_from_molecule_file(
         self,
@@ -514,7 +530,7 @@ class GraphCoarsener:
             "use_partial_charges": use_partial_charges,
         }
 
-        graph_processor = create_graph_processor(processor_config)
+        graph_processor = MolecularGraphProcessor(processor_config)
 
         # Process the molecule file with partial charges if available
         if use_partial_charges and partial_charges is not None:
@@ -524,8 +540,13 @@ class GraphCoarsener:
         else:
             atom_graph_data = graph_processor.file_to_graph(mol_file)
 
+        if atom_graph_data is None:
+            raise ValueError(f"Failed to create atom-level graph from {mol_file}")
+
         # Generate hierarchical graphs
-        hierarchical_graphs = self.create_hierarchical_graphs(atom_graph_data, mol)
+        hierarchical_graphs = self.create_hierarchical_graphs(
+            cast(Data, atom_graph_data), mol
+        )
 
         # Save graphs if output_dir is provided, otherwise return graph objects
         if output_dir:

@@ -1,56 +1,73 @@
-import os
-import sys
+"""
+scripts/train_alternating.py
+
+This script implements an alternating training scheme for the DJMGNN model.
+It is designed to train on two different types of tasks in an alternating
+fashion: a primary graph-level task (e.g., predicting molecular properties
+on the QM9 dataset) and a secondary node-level task (e.g., predicting atomic
+forces on the SPICE dataset).
+
+This approach allows the model to learn from both macroscopic graph-level
+properties and microscopic node-level details, potentially leading to more
+robust and accurate representations. The script handles data loading, model
+initialization, checkpointing, and the alternating training loop.
+"""
+
 import argparse
 import logging
+import os
+import sys
 import time
-import yaml
-import glob
+from pathlib import Path
+from typing import Any, Dict, Iterator, Optional
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import yaml
+from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader as GraphDataLoader
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from moml.data.dataset import get_dataset
-from moml.models.mgnn.djmgnn import DJMGNN
-from moml.data.feature_transforms import CreateEdges, FeaturizeNodes, StandardizeTargets
 from torchvision.transforms import Compose
 
+# Add project root to Python path
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(PROJECT_ROOT))
+
+from moml.data.dataset import get_dataset
+from moml.data.feature_transforms import (CreateEdges, FeaturizeNodes,
+                                          StandardizeTargets)
+from moml.models.mgnn.djmgnn import DJMGNN
+
+DEFAULT_NODE_FEATURE_DIM = 29
+LOG_FILE_NAME = "alternating_training.log"
+
+logger = logging.getLogger(__name__)
+
+
 def setup_logging():
-    # Get the logger for the current module (__main__ when run as a script)
-    logger = logging.getLogger(__name__)
+    """Configure logging to output to both console and a file."""
     logger.setLevel(logging.INFO)
-
-    # Prevent adding handlers multiple times if this function were ever called more than once
     if not logger.handlers:
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-        # StreamHandler for terminal output
+        # Console handler
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
 
-        # FileHandler for output to alternating_training.log
+        # File handler
         try:
-            log_file_path = 'alternating_training.log'
-            file_handler = logging.FileHandler(log_file_path, mode='a') # 'a' for append
+            log_file_path = Path(LOG_FILE_NAME).resolve()
+            file_handler = logging.FileHandler(log_file_path, mode="a")
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
-            # This message goes to both handlers if file_handler was added successfully.
-            # Check for this message in both terminal and the log file.
-            logger.info(f"File logger initialized. Logging to: {os.path.abspath(log_file_path)}")
-        except Exception as e:
-            # Log error to stream handler if file handler setup fails
-            logger.error(f"CRITICAL: Failed to initialize file logger for '{log_file_path}'", exc_info=True)
-    
-    # Stop messages from propagating to the root logger if it has other handlers
-    logger.propagate = False 
-    return logger
+            logger.info(f"Logging to file: {log_file_path}")
+        except Exception:
+            logger.error(f"Failed to initialize file logger.", exc_info=True)
 
 
-def create_cycle_iterator(dataloader):
+def create_cycle_iterator(dataloader: Optional[GraphDataLoader]) -> Optional[Iterator[Batch]]:
+    """Create an infinite iterator from a DataLoader."""
     if dataloader is None:
         return None
     while True:
@@ -58,317 +75,233 @@ def create_cycle_iterator(dataloader):
             yield batch
 
 
-def compute_losses(model, batch, device, logger, lambda_weight=1000.0, task_type: str = "graph"):
-    batch = batch.to(device)
-    if not hasattr(batch, 'x') or batch.x is None:
+def compute_losses(
+    model: DJMGNN, batch: Batch, device: torch.device, task_type: str
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Compute and return the losses for a given batch and task type."""
+    batch = batch.to(device)  # type: ignore[attr-defined]
+    if not hasattr(batch, "x") or batch.x is None:  # type: ignore[attr-defined]
         logger.warning("Batch is missing 'x' attribute. Skipping loss computation.")
-        return torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)
+        return torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
 
     out = model(
-        x=batch.x,
-        edge_index=batch.edge_index,
-        edge_attr=getattr(batch, 'edge_attr', None),
-        batch=getattr(batch, 'batch', None),
-        dist=getattr(batch, 'dist', None)
+        x=batch.x,  # type: ignore[attr-defined]
+        edge_index=batch.edge_index,  # type: ignore[attr-defined]
+        edge_attr=getattr(batch, "edge_attr", None),
+        batch=getattr(batch, "batch", None),
+        dist=getattr(batch, "dist", None),
     )
-    
-    node_pred = out.get("node_pred")
-    graph_pred = out.get("graph_pred")
-    energy_pred = out.get("energy_pred")
-    
-    node_loss = torch.tensor(0.0, device=device)
-    graph_loss = torch.tensor(0.0, device=device)
-    energy_loss = torch.tensor(0.0, device=device)
 
-    # Node-level loss (SPICE)
-    if task_type == "node" and node_pred is not None and hasattr(batch, 'node_y') and batch.node_y is not None:
-        if batch.node_y.numel() > 0 and node_pred.numel() > 0:
-            if node_pred.shape == batch.node_y.shape:
-                node_loss = nn.MSELoss()(node_pred, batch.node_y)
-            else:
-                logger.warning(f"Node prediction shape {node_pred.shape} mismatch with target shape {batch.node_y.shape}. Skipping node loss.")
+    node_loss, graph_loss, energy_loss = (
+        torch.tensor(0.0, device=device),
+        torch.tensor(0.0, device=device),
+        torch.tensor(0.0, device=device),
+    )
 
-    # Graph-level loss (QM9)
-    if task_type == "graph" and graph_pred is not None and hasattr(batch, 'y') and batch.y is not None:
-        if batch.y.numel() > 0 and graph_pred.numel() > 0:
-            targets = batch.y
-            if graph_pred.shape == targets.shape:
-                graph_loss = nn.MSELoss()(graph_pred, targets)
-            else:
-                logger.warning(f"Graph prediction shape {graph_pred.shape} mismatch with target shape {targets.shape}. Skipping graph loss.")
-        elif graph_pred is not None:
-            logger.warning(f"Graph prediction or target data is missing or empty. Skipping graph loss.")
-    
-    # Energy loss (SPICE)
-    if task_type == "node" and energy_pred is not None and hasattr(batch, 'y_graph') and batch.y_graph is not None:
-        if batch.y_graph.numel() > 0 and energy_pred.numel() > 0:
-            targets = batch.y_graph
-            if targets.dim() == 1:
-                targets = targets.view(-1, 1)
+    # Node-level force prediction loss (e.g., for SPICE)
+    if task_type == "node" and "node_pred" in out and hasattr(batch, "node_y"):
+        if batch.node_y.numel() > 0 and out["node_pred"].shape == batch.node_y.shape:  # type: ignore[attr-defined]
+            node_loss = nn.MSELoss()(out["node_pred"], batch.node_y)  # type: ignore[attr-defined]
 
-            if energy_pred.size(-1) == targets.size(-1):
-                targets = torch.clamp(targets, -5, 5)
-                energy_loss = nn.MSELoss()(energy_pred, targets)
-            else:
-                logger.warning(f"SPICE energy prediction dim {energy_pred.size(-1)} mismatch with target dim {targets.size(-1)}. Skipping energy loss.")
+    # Graph-level property prediction loss (e.g., for QM9)
+    if task_type == "graph" and "graph_pred" in out and hasattr(batch, "y"):
+        if batch.y.numel() > 0 and out["graph_pred"].shape == batch.y.shape:  # type: ignore[attr-defined]
+            graph_loss = nn.MSELoss()(out["graph_pred"], batch.y)  # type: ignore[attr-defined]
+
+    # Graph-level energy prediction loss (e.g., for SPICE)
+    if task_type == "node" and "energy_pred" in out and hasattr(batch, "y_graph"):
+        if batch.y_graph.numel() > 0:  # type: ignore[attr-defined]
+            targets = batch.y_graph.view(-1, 1)  # type: ignore[attr-defined]
+            if out["energy_pred"].shape == targets.shape:
+                energy_loss = nn.MSELoss()(out["energy_pred"], targets)
 
     return node_loss, graph_loss, energy_loss
 
 
-def train_step(model, batch, optimizer, device, loss_node_weight, loss_graph_weight, logger, lambda_weight=1000.0, lambda_energy_weight=1.0, task_type: str = "graph"):
+def train_step(
+    model: DJMGNN,
+    optimizer: optim.Optimizer,
+    batch: Batch,
+    device: torch.device,
+    task_type: str,
+    weights: Dict[str, float],
+) -> Dict[str, float]:
+    """Perform a single training step."""
     model.train()
     optimizer.zero_grad()
-    
-    node_loss, graph_loss, energy_loss = compute_losses(model, batch, device, logger, lambda_weight, task_type=task_type)
-    
-    total_loss = (loss_node_weight * lambda_weight * node_loss) + \
-                 (loss_graph_weight * graph_loss) + \
-                 (loss_node_weight * lambda_energy_weight * energy_loss) # energy loss is also on node step
-    
+
+    node_loss, graph_loss, energy_loss = compute_losses(model, batch, device, task_type)
+
+    total_loss = (
+        weights["loss_node"] * node_loss
+        + weights["loss_graph"] * graph_loss
+        + weights["loss_energy"] * energy_loss
+    )
+
     if torch.isfinite(total_loss) and total_loss > 0:
         total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
     elif not torch.isfinite(total_loss):
         logger.warning(f"Non-finite loss detected ({total_loss}). Skipping step.")
-    
+
     return {
-        'total_loss': total_loss.item() if total_loss > 0 else 0.0,
-        'node_loss': node_loss.item() if isinstance(node_loss, torch.Tensor) else node_loss,
-        'graph_loss': graph_loss.item() if isinstance(graph_loss, torch.Tensor) else graph_loss,
-        'energy_loss': energy_loss.item() if isinstance(energy_loss, torch.Tensor) else energy_loss,
-        'loss_node_weight': loss_node_weight,
-        'loss_graph_weight': loss_graph_weight
+        "total_loss": total_loss.item(),
+        "node_loss": node_loss.item(),
+        "graph_loss": graph_loss.item(),
+        "energy_loss": energy_loss.item(),
     }
 
 
-def save_checkpoint(model, optimizer, step, loss, checkpoint_dir):
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'step': step,
-        'loss': loss,
-    }
-    checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_step_{step}.pt')
-    torch.save(checkpoint, checkpoint_path)
-    return checkpoint_path
+def save_checkpoint(
+    model: nn.Module, optimizer: optim.Optimizer, step: int, loss: float, ckpt_dir: str
+):
+    """Save a training checkpoint."""
+    os.makedirs(ckpt_dir, exist_ok=True)
+    checkpoint_path = os.path.join(ckpt_dir, f"checkpoint_step_{step}.pt")
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "step": step,
+            "loss": loss,
+        },
+        checkpoint_path,
+    )
+    logger.info(f"Checkpoint saved to {checkpoint_path}")
+
+
+def load_checkpoint(
+    model: nn.Module, optimizer: optim.Optimizer, ckpt_path: str
+) -> int:
+    """Load a training checkpoint."""
+    logger.info(f"Resuming from checkpoint: {ckpt_path}")
+    checkpoint = torch.load(ckpt_path)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    return checkpoint.get("step", 0)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Alternating training for DJMGNN')
-    parser.add_argument('--max_steps', type=int, default=8000, help='Maximum training steps')
-    parser.add_argument('--batch_graph', type=int, default=8, help='Batch size for graph-level tasks')
-    parser.add_argument('--batch_node', type=int, default=4, help='Batch size for node-level tasks')
-    parser.add_argument('--lr', type=float, default=3e-5, help='Learning rate')
-    parser.add_argument('--loss_node_weight', type=float, default=1.0, help='Weight for the node-level loss component.')
-    parser.add_argument('--lambda_weight', type=float, default=1000.0, help='Lambda weighting factor for node loss')
-    parser.add_argument('--lambda_energy_weight', type=float, default=1.0, help='Lambda weighting factor for SPICE energy loss')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Checkpoint directory')
-    parser.add_argument('--save_every', type=int, default=1000, help='Save checkpoint every N steps')
-    parser.add_argument('--log_every', type=int, default=20, help='Log every N steps')
-    parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
-    parser.add_argument('--config_path', type=str, default='config/training_config.template.yaml', help='Path to training config YAML file')
-    parser.add_argument('--fresh_start', action='store_true', help='Start training from scratch, ignoring existing checkpoints.')
-    parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Specific checkpoint file to resume from.')
-    parser.add_argument('--ckpt', type=str, default=None, help='Alias for --resume_from_checkpoint.')
-    parser.add_argument('--graph_dataset', type=str, default='qm9', help='Dataset for graph-level tasks (e.g., "qm9", "pfas").')
-    parser.add_argument('--node_dataset', type=str, default='spice', help='Dataset for node-level tasks (e.g., "spice", "none").')
+    """Main function to run the alternating training script."""
+    parser = argparse.ArgumentParser(
+        description="Alternating training for DJMGNN on graph and node-level tasks."
+    )
+    parser.add_argument("--max_steps", type=int, default=8000, help="Maximum training steps.")
+    parser.add_argument("--batch_graph", type=int, default=8, help="Batch size for graph-level tasks.")
+    parser.add_argument("--batch_node", type=int, default=4, help="Batch size for node-level tasks.")
+    parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate.")
+    parser.add_argument("--loss_node_weight", type=float, default=1000.0, help="Weight for node-level losses (forces).")
+    parser.add_argument("--loss_energy_weight", type=float, default=1.0, help="Weight for node-level energy loss.")
+    parser.add_argument("--loss_graph_weight", type=float, default=1.0, help="Weight for graph-level loss.")
+    parser.add_argument("--checkpoint_dir", type=str, default="checkpoints", help="Directory to save checkpoints.")
+    parser.add_argument("--save_every", type=int, default=1000, help="Frequency of saving checkpoints.")
+    parser.add_argument("--log_every", type=int, default=20, help="Frequency of logging training progress.")
+    parser.add_argument("--device", type=str, default="auto", help="Device to use ('auto', 'cpu', 'cuda').")
+    parser.add_argument("--config_path", type=str, default="config/training_config.template.yaml", help="Path to training config.")
+    parser.add_argument("--fresh_start", action="store_true", help="Start fresh, ignoring existing checkpoints.")
+    parser.add_argument("--resume_from_checkpoint", type=str, help="Path to a specific checkpoint to resume from.")
+    parser.add_argument("--graph_dataset", type=str, default="qm9", help="Dataset for graph-level tasks.")
+    parser.add_argument("--node_dataset", type=str, default="spice", help="Dataset for node-level tasks ('none' to disable).")
     args = parser.parse_args()
-    
-    if args.ckpt:
-        args.resume_from_checkpoint = args.ckpt
 
-    logger = setup_logging() # Logging is set up here
-    # The first log messages will now include the one from setup_logging itself
-    logger.info("Starting alternating training for DJMGNN")
+    setup_logging()
+    logger.info("Starting alternating training for DJMGNN.")
     logger.info(f"Arguments: {vars(args)}")
 
     try:
-        with open(args.config_path, 'r') as f:
+        with open(args.config_path, "r") as f:
             config = yaml.safe_load(f)
-        logger.info(f"Loaded training configuration from {args.config_path}")
-    except Exception as e:
-        logger.error(f"Error loading configuration file {args.config_path}", exc_info=True)
+    except FileNotFoundError:
+        logger.error(f"Configuration file not found at {args.config_path}", exc_info=True)
         sys.exit(1)
-    
-    if args.device == 'auto':
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    else:
-        device = torch.device(args.device)
+
+    device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
-    
-    # Set in_node_dim based on dataset
-    in_node_dim_cfg = 29
-    
-    try:
-        transform_graph = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.graph_dataset)])
-        transform_node = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.node_dataset)])
 
-        # Graph-level dataset
-        ds_graph = get_dataset(args.graph_dataset, root="data", transform=transform_graph)
-        graph_loader = GraphDataLoader(
-            ds_graph,
-            batch_size=args.batch_graph,
-            shuffle=True,
-            num_workers=4
-        )
-        graph_cycle = create_cycle_iterator(graph_loader)
-        logger.info(f"Loaded {args.graph_dataset.upper()} dataset for graph-level tasks with {len(ds_graph)} samples.")
+    # --- DataLoaders ---
+    transform_graph = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.graph_dataset)])
+    ds_graph = get_dataset(args.graph_dataset, root="data", transform=transform_graph)
+    graph_loader = GraphDataLoader(ds_graph, batch_size=args.batch_graph, shuffle=True, num_workers=4)
+    graph_cycle = create_cycle_iterator(graph_loader)
+    logger.info(f"Loaded {args.graph_dataset.upper()} dataset with {len(ds_graph)} samples.")
 
-        # Node-level dataset
-        node_cycle = None
-        if args.node_dataset.lower() != 'none':
-            try:
-                ds_node = get_dataset(args.node_dataset, root="data", split="train", transform=transform_node)
-                node_loader = GraphDataLoader(
-                    ds_node,
-                    batch_size=args.batch_node,
-                    shuffle=True,
-                    num_workers=4
-                )
-                node_cycle = create_cycle_iterator(node_loader)
-                logger.info(f"Loaded {args.node_dataset.upper()} dataset for node-level tasks with {len(ds_node)} samples.")
-            except Exception as e:
-                logger.warning(f"Could not load {args.node_dataset.upper()} dataset: {e}. Node-level tasks will be skipped.")
+    node_cycle = None
+    if args.node_dataset.lower() != "none":
+        try:
+            transform_node = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.node_dataset)])
+            ds_node = get_dataset(args.node_dataset, root="data", split="train", transform=transform_node)
+            node_loader = GraphDataLoader(ds_node, batch_size=args.batch_node, shuffle=True, num_workers=4)
+            node_cycle = create_cycle_iterator(node_loader)
+            logger.info(f"Loaded {args.node_dataset.upper()} dataset with {len(ds_node)} samples.")
+        except Exception as e:
+            logger.warning(f"Could not load {args.node_dataset.upper()} dataset: {e}. Node-level tasks will be skipped.")
+
+    # Model and Optimizer
+    mgnn_config = config.get("mgnn", {})
+    model = DJMGNN(
+        in_node_dim=DEFAULT_NODE_FEATURE_DIM,
+        in_edge_dim=mgnn_config.get("in_edge_dim", 0),
+        node_output_dims=mgnn_config.get("node_output_dims", 3),
+        graph_output_dims=mgnn_config.get("graph_output_dims", 19),
+        energy_output_dims=mgnn_config.get("energy_output_dims", 1),
+        hidden_dim=mgnn_config.get("hidden_channels", 128),
+        n_blocks=mgnn_config.get("num_layers", 4),
+    ).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    start_step = 0
+    if not args.fresh_start:
+        ckpt_path = args.resume_from_checkpoint
+        if not ckpt_path:
+            # Find the latest checkpoint if not specified.
+            checkpoints = sorted(
+                Path(args.checkpoint_dir).glob("checkpoint_step_*.pt"),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+            if checkpoints:
+                ckpt_path = checkpoints[0]
+        if ckpt_path and os.path.exists(ckpt_path):
+            start_step = load_checkpoint(model, optimizer, str(ckpt_path))
+
+    # Training Loop
+    loss_weights = {
+        "loss_node": args.loss_node_weight,
+        "loss_energy": args.loss_energy_weight,
+        "loss_graph": args.loss_graph_weight,
+    }
+
+    start_time = time.time()
+    for step in range(start_step, args.max_steps):
+        # Alternate between graph and node-level tasks.
+        if node_cycle and step % 2 == 0:
+            task_type = "node"
+            batch = next(node_cycle)
+        elif graph_cycle:
+            task_type = "graph"
+            batch = next(graph_cycle)
         else:
-            logger.info("No node-level dataset specified. Training will be graph-only.")
-        
-        logger.info("Initializing DJMGNN model...")
+            logger.error("No data loaders available. Exiting.")
+            break
 
-        mgnn_config = config.get('mgnn', {})
-        graph_output_dims_cfg = mgnn_config.get('graph_output_dims', 19) 
-        node_output_dims_cfg = mgnn_config.get('node_output_dims', 3)   
-        energy_output_dims_cfg = mgnn_config.get('energy_output_dims', 1)
-        hidden_dim_cfg = mgnn_config.get('hidden_channels', 128) 
-        n_blocks_cfg = mgnn_config.get('num_layers', 4)
-        in_edge_dim_cfg = mgnn_config.get('in_edge_dim', 0)
+        losses = train_step(model, optimizer, batch, device, task_type, loss_weights)
 
-        model = DJMGNN(
-            in_node_dim=in_node_dim_cfg,
-            in_edge_dim=in_edge_dim_cfg,
-            node_output_dims=node_output_dims_cfg,
-            graph_output_dims=graph_output_dims_cfg,
-            energy_output_dims=energy_output_dims_cfg,
-            hidden_dim=hidden_dim_cfg,        
-            n_blocks=n_blocks_cfg             
-        )
-        model = model.to(device)
-        
-        optimizer = optim.Adam(model.parameters(), lr=args.lr)
-
-        start_step = 0
-        if not args.fresh_start:
-            checkpoint_to_load = None
-            if args.resume_from_checkpoint:
-                if os.path.exists(args.resume_from_checkpoint):
-                    checkpoint_to_load = args.resume_from_checkpoint
-                else:
-                    logger.warning(f"Specified checkpoint {args.resume_from_checkpoint} not found. Attempting to load latest.")
-            
-            if checkpoint_to_load is None: # Fallback to latest if specific one not provided or not found
-                checkpoint_to_load = max(glob.glob(os.path.join(args.checkpoint_dir, '*.pt')), key=os.path.getctime, default=None)
-
-            if checkpoint_to_load:
-                logger.info(f"Resuming from checkpoint: {checkpoint_to_load}")
-                checkpoint = torch.load(checkpoint_to_load, map_location=device)
-                model.load_state_dict(checkpoint['model_state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                # For fine-tuning, we load weights but start the step count from 0
-                # start_step = checkpoint.get('step', 0)
-                logger.info(f"Loaded model state from step {checkpoint.get('step', 0)} with loss {checkpoint.get('loss', 'N/A')}")
-            else:
-                logger.info("No checkpoint found. Starting from scratch.")
-        else:
-            logger.info("Starting fresh training as per --fresh_start flag.")
-
-        
-        logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-        
-        logger.info("Starting alternating training...")
-        start_time = time.time()
-        
-        # Initialize metrics with default values to handle case where max_steps is 0
-        metrics = {
-            'total_loss': 0.0,
-            'node_loss': 0.0,
-            'graph_loss': 0.0,
-            'energy_loss': 0.0,
-            'loss_node_weight': 0,
-            'loss_graph_weight': 0
-        }
-        
-        for step in range(start_step, args.max_steps):
-            # Determine which task to perform
-            if node_cycle and step % 2 != 0:
-                # Perform a node-level task
-                batch = next(node_cycle)
-                loss_node_weight = args.loss_node_weight
-                loss_graph_weight = 0
-                task_type = "node"
-            else:
-                # Perform a graph-level task
-                batch = next(graph_cycle)
-                loss_node_weight = 0
-                loss_graph_weight = 1
-                task_type = "graph"
-            
-            metrics = train_step(
-                model=model,
-                batch=batch,
-                optimizer=optimizer,
-                device=device,
-                loss_node_weight=loss_node_weight,
-                loss_graph_weight=loss_graph_weight,
-                logger=logger,
-                lambda_weight=args.lambda_weight,
-                lambda_energy_weight=args.lambda_energy_weight,
-                task_type=task_type
+        if step % args.log_every == 0:
+            elapsed_time = time.time() - start_time
+            logger.info(
+                f"Step {step}/{args.max_steps} | "
+                f"Task: {task_type.capitalize()} | "
+                f"Total Loss: {losses['total_loss']:.4f} | "
+                f"Node: {losses['node_loss']:.4f} | "
+                f"Graph: {losses['graph_loss']:.4f} | "
+                f"Energy: {losses['energy_loss']:.4f} | "
+                f"Time/Step: {elapsed_time/args.log_every:.2f}s"
             )
-            
-            # Log the graph step and the subsequent node step when the graph step is a logging step
-            if step % args.log_every == 0 or \
-               (node_cycle and task_type == "node" and (step - 1) % args.log_every == .0):
-                elapsed_time = time.time() - start_time
-                logger.info(
-                    f"Step {step:5d} | Task: {task_type:5s} | "
-                    f"Total Loss: {metrics['total_loss']:.6f} | "
-                    f"Node Loss: {metrics['node_loss']:.6f} | "
-                    f"Graph Loss: {metrics['graph_loss']:.6f} | "
-                    f"Energy Loss: {metrics['energy_loss']:.6f} | "
-                    f"Time: {elapsed_time:.1f}s"
-                )
-            
-            if step % args.save_every == 0 and step > 0:
-                checkpoint_path = save_checkpoint(
-                    model, optimizer, step, metrics['total_loss'], args.checkpoint_dir
-                )
-                logger.info(f"Saved checkpoint: {checkpoint_path}")
-        
-        # This final_checkpoint save is important if max_steps is reached or if start_step >= max_steps
-        if args.max_steps > 0 and start_step < args.max_steps : # Avoid saving if no steps were run or if already past max_steps
-            final_checkpoint = save_checkpoint(
-                model, optimizer, args.max_steps, metrics.get('total_loss', 0.0), args.checkpoint_dir
-            )
-            logger.info(f"Training completed. Final checkpoint: {final_checkpoint}")
-        elif start_step >= args.max_steps:
-             logger.info(f"Training already completed or surpassed max_steps (start_step: {start_step}, max_steps: {args.max_steps}). No new checkpoint saved.")
-        else: # max_steps is 0 or negative
-            logger.info(f"Training completed (max_steps was {args.max_steps}, start_step was {start_step}). No new checkpoint saved beyond initial load if applicable.")
+            start_time = time.time()
 
-        total_time = time.time() - start_time
-        logger.info(f"Total training time: {total_time:.2f} seconds")
-        
-    except KeyboardInterrupt:
-        logger.warning("Training interrupted by user.")
-        if 'model' in locals() and 'optimizer' in locals() and 'step' in locals() and 'metrics' in locals():
-            final_checkpoint = save_checkpoint(
-                model, optimizer, step, metrics.get('total_loss', 0.0), args.checkpoint_dir
-            )
-            logger.info(f"Saved partial checkpoint: {final_checkpoint}")
-    except Exception as e:
-        logger.error(f"Training failed: {str(e)}", exc_info=True)
-        raise
+        if step % args.save_every == 0 and step > 0:
+            save_checkpoint(model, optimizer, step, losses["total_loss"], args.checkpoint_dir)
 
 
 if __name__ == "__main__":

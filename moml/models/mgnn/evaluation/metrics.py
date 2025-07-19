@@ -1,29 +1,54 @@
 """
-Metrics module for evaluating models.
+moml/models/mgnn/evaluation/metrics.py
 
-This module provides functions for calculating performance metrics
-and visualizing predictions for molecular graph neural networks.
+MGNN Model Evaluation Metrics Module
+
+This module provides comprehensive evaluation metrics and visualization tools for 
+Molecular Graph Neural Network (MGNN) models. It supports both regression and 
+classification tasks with node-level and graph-level predictions.
+
+The module includes functions for calculating standard machine learning metrics
+such as RMSE, MAE, R², accuracy, precision, recall, F1-score, and AUC. It also
+provides visualization capabilities for comparing predictions against ground truth.
+
+Functions:
+    calculate_metrics: General metrics calculation with task type detection
+    calculate_regression_metrics: Regression-specific metrics (RMSE, MAE, R², etc.)
+    calculate_classification_metrics: Classification metrics (accuracy, precision, etc.)
+    calculate_node_level_metrics: Node-level prediction metrics with masking
+    calculate_graph_level_metrics: Graph-level prediction metrics with masking
+    visualize_predictions: Create plots comparing predictions vs ground truth
 """
 
-import os
-import numpy as np
-import matplotlib.pyplot as plt
 import logging
+import os
 from typing import Dict, List, Optional, Union
+
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+import numpy as np
 import torch
-from sklearn.utils.multiclass import type_of_target
 from sklearn.metrics import (
-    mean_squared_error,
-    mean_absolute_error,
-    r2_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score,
     accuracy_score,
     confusion_matrix,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+    roc_auc_score,
 )
+from sklearn.utils.multiclass import type_of_target
 
+# Constants
+DEFAULT_THRESHOLD = 0.5
+DEFAULT_FIGURE_SIZE = (10, 8)
+DEFAULT_DPI = 300
+EPSILON = 1e-8  # Small value to prevent division by zero
+MIN_SAMPLES_FOR_METRICS = 1
+
+# Setup logging
 logger = logging.getLogger(__name__)
 
 
@@ -35,304 +60,576 @@ def calculate_metrics(
     """
     Calculate evaluation metrics for model predictions.
 
+    This is the main entry point for metrics calculation. It automatically
+    handles input conversion and dispatches to appropriate specialized functions
+    based on the task type.
+
     Args:
-        true_values: Ground truth values
-        pred_values: Predicted values
+        true_values: Ground truth values in various formats
+        pred_values: Predicted values in various formats  
         task_type: Type of task ('regression' or 'classification')
 
     Returns:
-        Dictionary with calculated metrics
+        Dictionary containing calculated metrics with string keys and float values
     """
-    # Convert inputs to numpy arrays if they are tensors or lists
-    if isinstance(true_values, torch.Tensor):
-        true_values = true_values.detach().cpu().numpy()
-    elif isinstance(true_values, list):
-        true_values = np.array(true_values)
+    # Convert inputs to numpy arrays with validation
+    true_array = _convert_to_numpy(true_values, "true_values")
+    pred_array = _convert_to_numpy(pred_values, "pred_values")
 
-    if isinstance(pred_values, torch.Tensor):
-        pred_values = pred_values.detach().cpu().numpy()
-    elif isinstance(pred_values, list):
-        pred_values = np.array(pred_values)
+    # Validate array shapes
+    _validate_array_shapes(true_array, pred_array)
 
-    # Ensure arrays have the same shape
-    if true_values.shape != pred_values.shape:
+    # Validate minimum sample size
+    if true_array.size < MIN_SAMPLES_FOR_METRICS:
+        logger.warning(f"Very small sample size: {true_array.size}")
+
+    # Dispatch to appropriate metrics function
+    if task_type == "regression":
+        return calculate_regression_metrics(true_array, pred_array)
+    elif task_type == "classification":
+        return calculate_classification_metrics(true_array, pred_array)
+    else:
         raise ValueError(
-            f"Shape mismatch: true_values shape {true_values.shape} != pred_values shape {pred_values.shape}"
+            f"Unsupported task_type: '{task_type}'. "
+            f"Supported types are: 'regression', 'classification'"
         )
 
-    # Calculate metrics based on task type
-    if task_type == "regression":
-        return calculate_regression_metrics(true_values, pred_values)
-    elif task_type == "classification":
-        return calculate_classification_metrics(true_values, pred_values)
-    else:
-        raise ValueError(f"Unsupported task_type: {task_type}")
 
-
-def calculate_regression_metrics(true_values: np.ndarray, pred_values: np.ndarray) -> Dict[str, float]:
+def _convert_to_numpy(
+    values: Union[torch.Tensor, np.ndarray, List], 
+    name: str
+) -> np.ndarray:
     """
-    Calculate regression metrics.
+    Convert input values to numpy array with proper error handling.
 
     Args:
-        true_values: Ground truth values
-        pred_values: Predicted values
+        values: Input values to convert
+        name: Name of the variable for error messages
 
     Returns:
-        Dictionary with regression metrics
+        Converted numpy array
     """
-    # Calculate metrics
-    rmse = np.sqrt(mean_squared_error(true_values, pred_values))
-    mae = mean_absolute_error(true_values, pred_values)
+    try:
+        if isinstance(values, torch.Tensor):
+            array = values.detach().cpu().numpy()
+        elif isinstance(values, list):
+            array = np.array(values)
+        elif isinstance(values, np.ndarray):
+            array = values
+        else:
+            raise TypeError(f"Unsupported type for {name}: {type(values)}")
 
-    # R² can sometimes be negative, so we handle that case
-    r2 = r2_score(true_values, pred_values)
-    if r2 < 0:
-        r2 = 0.0
+        # Validate the resulting array
+        if array.size == 0:
+            raise ValueError(f"{name} contains no elements")
 
-    # Mean relative error
-    mre = np.mean(np.abs((true_values - pred_values) / (true_values + 1e-8)))
+        return array
 
-    # Mean absolute percentage error
-    mape = np.mean(np.abs((true_values - pred_values) / (np.abs(true_values) + 1e-8)) * 100)
+    except ValueError:
+        # Re-raise ValueError as-is (for empty arrays, NaN/Inf validation)
+        raise
+    except TypeError:
+        # Re-raise TypeError as-is (for unsupported types)
+        raise
+    except Exception as e:
+        logger.error(f"Failed to convert {name} to numpy array: {e}")
+        raise TypeError(f"Could not convert {name} to numpy array: {e}")
 
-    # Median absolute error
-    medae = np.median(np.abs(true_values - pred_values))
 
-    return {"rmse": rmse, "mae": mae, "r2": r2, "mre": mre, "mape": mape, "medae": medae}
+def _validate_array_shapes(true_array: np.ndarray, pred_array: np.ndarray) -> None:
+    """
+    Validate that true and predicted arrays have compatible shapes.
+
+    Args:
+        true_array: Ground truth array
+        pred_array: Predicted values array
+    """
+    if true_array.shape != pred_array.shape:
+        raise ValueError(
+            f"Shape mismatch: true_values shape {true_array.shape} "
+            f"!= pred_values shape {pred_array.shape}"
+        )
+
+
+def calculate_regression_metrics(
+    true_values: np.ndarray, 
+    pred_values: np.ndarray
+) -> Dict[str, float]:
+    """
+    Calculate comprehensive regression evaluation metrics.
+
+    Computes various regression metrics including error measures, correlation
+    measures, and relative error metrics. Handles edge cases gracefully.
+
+    Args:
+        true_values: Ground truth values as numpy array
+        pred_values: Predicted values as numpy array
+
+    Returns:
+        Dictionary with regression metrics:
+        - rmse: Root Mean Square Error
+        - mae: Mean Absolute Error  
+        - r2: R-squared coefficient (clipped to [0, 1])
+        - mre: Mean Relative Error
+        - mape: Mean Absolute Percentage Error
+        - medae: Median Absolute Error
+    """
+    # Validate inputs for NaN/Inf values
+    if true_values.size == 0 or pred_values.size == 0:
+        raise ValueError("Input arrays must not be empty")
+    
+    if np.isnan(true_values).any() or np.isinf(true_values).any():
+        raise ValueError("true_values contains NaN or Inf values")
+    
+    if np.isnan(pred_values).any() or np.isinf(pred_values).any():
+        raise ValueError("pred_values contains NaN or Inf values")
+    
+    try:
+        # Core error metrics
+        mse = mean_squared_error(true_values, pred_values)
+        rmse = np.sqrt(mse)
+        mae = mean_absolute_error(true_values, pred_values)
+
+        # R-squared with bounds checking
+        r2 = r2_score(true_values, pred_values)
+        r2 = max(0.0, float(r2))  # Clip negative R² to 0
+
+        # Relative error metrics with epsilon protection
+        denominator_mre = np.abs(true_values) + EPSILON
+        mre = np.mean(np.abs((true_values - pred_values) / denominator_mre))
+
+        # Mean Absolute Percentage Error
+        denominator_mape = np.abs(true_values) + EPSILON
+        mape = np.mean(np.abs((true_values - pred_values) / denominator_mape) * 100)
+
+        # Median Absolute Error
+        medae = np.median(np.abs(true_values - pred_values))
+
+        metrics = {
+            "rmse": float(rmse),
+            "mae": float(mae),
+            "r2": float(r2),
+            "mre": float(mre),
+            "mape": float(mape),
+            "medae": float(medae),
+        }
+
+        logger.debug(f"Calculated regression metrics: {metrics}")
+        return metrics
+
+    except Exception as e:
+        logger.error(f"Error calculating regression metrics: {e}")
+        # Return safe fallback values
+        return {
+            "rmse": float('inf'),
+            "mae": float('inf'), 
+            "r2": 0.0,
+            "mre": float('inf'),
+            "mape": float('inf'),
+            "medae": float('inf'),
+        }
 
 
 def calculate_classification_metrics(
-    true_values: np.ndarray, pred_values: np.ndarray, threshold: float = 0.5
+    true_values: np.ndarray, 
+    pred_values: np.ndarray, 
+    threshold: float = DEFAULT_THRESHOLD
 ) -> Dict[str, float]:
     """
-    Calculate classification metrics. Handles binary and multiclass tasks.
+    Calculate comprehensive classification evaluation metrics.
+
+    Handles both binary and multiclass classification with automatic detection
+    of the classification type. Supports probability inputs and direct label inputs.
 
     Args:
-        true_values: Ground truth values. Expected as 1D array of class labels
-                     (e.g., [0, 1, 0] for binary; [0, 1, 2, 1] for multiclass)
-                     or 2D one-hot encoded array for multiclass.
-        pred_values: Predicted values.
-                     For binary: 1D array of probabilities or direct labels.
-                     For multiclass: 2D array of probabilities per class (n_samples, n_classes)
-                                     or 1D array of direct class labels.
-        threshold: Threshold for converting probabilities to binary labels.
+        true_values: Ground truth class labels or one-hot encoded array
+        pred_values: Predicted probabilities or class labels
+        threshold: Threshold for converting probabilities to binary predictions
 
     Returns:
-        Dictionary with classification metrics.
+        Dictionary with classification metrics:
+        - accuracy: Overall accuracy
+        - precision: Precision score (macro-averaged for multiclass)
+        - recall: Recall score (macro-averaged for multiclass)  
+        - f1: F1 score (macro-averaged for multiclass)
+        - auc: AUC-ROC score (when applicable)
     """
-    metrics: Dict[str, float] = {}
+    # Input validation
+    _validate_classification_inputs(true_values, pred_values)
 
-    # Validate inputs for common issues before proceeding
-    if true_values.size == 0 or pred_values.size == 0:
-        raise ValueError("Input arrays true_values and pred_values must not be empty.")
-    if np.isnan(true_values).any() or np.isinf(true_values).any():
-        raise ValueError("true_values contains NaN or Inf values.")
-    if np.isnan(pred_values).any() or np.isinf(pred_values).any():
-        raise ValueError("pred_values contains NaN or Inf values.")
-
-    # 1. Standardize true_values to 1D class labels (_true_labels_1d)
-    _true_labels_1d: np.ndarray
-    if true_values.ndim == 2:
-        if true_values.shape[1] == 1:  # e.g., [[0], [1]]
-            _true_labels_1d = true_values.flatten().astype(int)
-        else:  # Assume one-hot encoded, e.g., [[1,0,0], [0,1,0]]
-            _true_labels_1d = np.argmax(true_values, axis=1)
-    else:  # Already 1D
-        _true_labels_1d = true_values.astype(int)
-
-    # 2. Determine target type and appropriate averaging method based on number of unique true classes
-    _unique_true_classes = np.unique(_true_labels_1d)
-    _num_true_classes = len(_unique_true_classes)
-    _target_type: str  # To be explicitly set
-    _sklearn_avg_method: str
-
-    if _num_true_classes > 2:
-        _target_type = "multiclass"
-        _sklearn_avg_method = "macro"
-    elif _num_true_classes == 2:
-        _target_type = "binary"
-        _sklearn_avg_method = "binary"
-    elif _num_true_classes <= 1:
-        # Handle single class case (metrics are defaulted)
-        # This logic is to get some accuracy value if possible, other metrics are ill-defined.
-        _pred_labels_1d_for_accuracy_only: np.ndarray
-        if pred_values.ndim == 1:  # Check if pred_values are probabilities or labels
-            is_proba_heuristic_single_class = np.issubdtype(pred_values.dtype, np.floating) and not np.all(
-                np.isin(np.unique(pred_values), [0, 1])
+    try:
+        # Standardize inputs to 1D class labels
+        true_labels_1d = _standardize_true_labels(true_values)
+        
+        # Analyze target characteristics
+        unique_classes = np.unique(true_labels_1d)
+        num_classes = len(unique_classes)
+        
+        # Handle edge case: single class or empty
+        if num_classes <= 1:
+            return _handle_single_class_metrics(
+                true_labels_1d, pred_values, threshold, num_classes
             )
-            _pred_labels_1d_for_accuracy_only = (
-                (pred_values > threshold).astype(int) if is_proba_heuristic_single_class else pred_values.astype(int)
-            )
-        elif pred_values.ndim == 2 and pred_values.shape[1] == 1:  # (N,1) shape
-            flat_preds_single_class = pred_values.flatten()
-            is_proba_heuristic_single_class = np.issubdtype(flat_preds_single_class.dtype, np.floating) and not np.all(
-                np.isin(np.unique(flat_preds_single_class), [0, 1])
-            )
-            _pred_labels_1d_for_accuracy_only = (
-                (flat_preds_single_class > threshold).astype(int)
-                if is_proba_heuristic_single_class
-                else flat_preds_single_class.astype(int)
-            )
-        elif pred_values.ndim == 2:  # Assumed (N, C) probabilities for multiclass, take argmax
-            _pred_labels_1d_for_accuracy_only = np.argmax(pred_values, axis=1)
-        else:  # Fallback for unexpected shapes
-            _pred_labels_1d_for_accuracy_only = pred_values.astype(int).flatten()
 
-        if _pred_labels_1d_for_accuracy_only.shape == _true_labels_1d.shape:
-            metrics["accuracy"] = accuracy_score(_true_labels_1d, _pred_labels_1d_for_accuracy_only)
-        else:
-            metrics["accuracy"] = 0.0  # Shape mismatch, cannot compute accuracy
-        # For single class in true labels, other metrics are typically 0 or undefined.
-        # AUC is conventionally 0.5 if only one class present. If zero classes (empty true_labels), then 0.0.
-        metrics.update({"precision": 0.0, "recall": 0.0, "f1": 0.0, "auc": 0.5 if _num_true_classes == 1 else 0.0})
+        # Determine classification type and process predictions
+        target_type = "binary" if num_classes == 2 else "multiclass"
+        pred_labels_1d, probas_for_auc = _process_predictions(
+            pred_values, target_type, threshold, unique_classes
+        )
+
+        # Validate processed arrays
+        _validate_array_shapes(true_labels_1d, pred_labels_1d)
+
+        # Calculate core metrics
+        metrics = _calculate_core_classification_metrics(
+            true_labels_1d, pred_labels_1d, target_type
+        )
+
+        # Add AUC if probabilities are available
+        _add_auc_metrics(
+            metrics, true_labels_1d, probas_for_auc, target_type, num_classes
+        )
+
+        logger.debug(f"Calculated {target_type} classification metrics: {metrics}")
         return metrics
-    else:  # Should ideally not be reached if _num_true_classes is always non-negative.
-        # This case implies _num_true_classes is 0, which should have been caught by the empty array check earlier.
-        raise ValueError(f"Internal logic error: Unexpected number of true classes: {_num_true_classes}")
 
-    # 3. Determine predicted class labels (_pred_labels_1d)
-    #    and identify if binary probabilities were provided for AUC.
-    _pred_labels_1d: np.ndarray
-    _binary_probas_for_auc: Optional[np.ndarray] = None
-    _multiclass_probas_for_auc: Optional[np.ndarray] = None
+    except Exception as e:
+        logger.error(f"Error calculating classification metrics: {e}")
+        return _get_fallback_classification_metrics()
 
-    if _target_type == "binary":
-        if pred_values.ndim == 1:
-            is_proba_heuristic = np.issubdtype(pred_values.dtype, np.floating) and not np.all(
-                np.isin(np.unique(pred_values), [0, 1])
-            )
-            if is_proba_heuristic and np.all(pred_values >= 0) and np.all(pred_values <= 1):
-                _pred_labels_1d = (pred_values > threshold).astype(int)
-                _binary_probas_for_auc = pred_values
-            else:
-                _pred_labels_1d = pred_values.astype(int)
-        elif pred_values.ndim == 2 and pred_values.shape[1] == 1:  # (N,1)
-            flat_preds = pred_values.flatten()
-            is_proba_heuristic = np.issubdtype(flat_preds.dtype, np.floating) and not np.all(
-                np.isin(np.unique(flat_preds), [0, 1])
-            )
-            if is_proba_heuristic and np.all(flat_preds >= 0) and np.all(flat_preds <= 1):
-                _pred_labels_1d = (flat_preds > threshold).astype(int)
-                _binary_probas_for_auc = flat_preds
-            else:
-                _pred_labels_1d = flat_preds.astype(int)
-        elif pred_values.ndim == 2 and pred_values.shape[1] == 2:  # (N,2) probabilities
-            _pred_labels_1d = np.argmax(pred_values, axis=1)
-            # Determine positive class index for AUC. Assume class '1' is positive if present.
-            if _num_true_classes == 2:  # Ensure we have two unique classes
-                sorted_unique_classes = np.sort(_unique_true_classes)
-                # If labels are not 0 and 1, map to 0 and 1 for roc_auc_score or pick one as positive
-                # For simplicity, if 1 is present, use its probas. Otherwise, use probas of the larger label.
-                if 1 in sorted_unique_classes:
-                    # Find which column in pred_values corresponds to class 1
-                    # This assumes pred_values columns are ordered like sorted unique classes,
-                    # or that the second column is for the positive class if labels are 0,1.
-                    # A common convention is [prob_class_0, prob_class_1].
-                    _binary_probas_for_auc = pred_values[:, 1]  # Default to second column for class 1
-                else:  # e.g. classes are -1, 1 or other pairs. Use prob of the class considered positive.
-                    # This part might need more robust handling if classes are not {0,1}
-                    # For now, if not {0,1}, AUC might be tricky without knowing positive label.
-                    # Defaulting to prob of the second class if not 0,1.
-                    _binary_probas_for_auc = pred_values[:, 1]
 
-        else:  # Assumed to be direct binary labels if shape is unexpected for probabilities
-            _pred_labels_1d = pred_values.astype(int).flatten()
+def _validate_classification_inputs(
+    true_values: np.ndarray, 
+    pred_values: np.ndarray
+) -> None:
+    """
+    Validate inputs for classification metrics calculation.
 
-    elif _target_type == "multiclass":
-        if pred_values.ndim == 2 and pred_values.shape[1] == _num_true_classes:  # Probas (N, C)
-            _pred_labels_1d = np.argmax(pred_values, axis=1)
-            _multiclass_probas_for_auc = pred_values
-        elif pred_values.ndim == 1:  # Direct class labels (N,)
-            _pred_labels_1d = pred_values.astype(int)
+    Args:
+        true_values: Ground truth array
+        pred_values: Predicted values array
+    """
+    if true_values.size == 0 or pred_values.size == 0:
+        raise ValueError("Input arrays must not be empty")
+    
+    if np.isnan(true_values).any() or np.isinf(true_values).any():
+        raise ValueError("true_values contains NaN or Inf values")
+    
+    if np.isnan(pred_values).any() or np.isinf(pred_values).any():
+        raise ValueError("pred_values contains NaN or Inf values")
+
+
+def _standardize_true_labels(true_values: np.ndarray) -> np.ndarray:
+    """
+    Convert true values to standardized 1D integer labels.
+
+    Args:
+        true_values: Ground truth array (1D labels or 2D one-hot)
+    """
+    if true_values.ndim == 2:
+        if true_values.shape[1] == 1:
+            # Shape (N, 1) -> flatten
+            return true_values.flatten().astype(int)
         else:
-            raise ValueError(
-                f"Unsupported pred_values shape {pred_values.shape} for multiclass target "
-                f"with {_num_true_classes} classes."
-            )
-    else:  # Should be caught by the initial _target_type check
-        _pred_labels_1d = pred_values.astype(int).flatten()  # Fallback
-
-    # Ensure _pred_labels_1d is 1D
-    if _pred_labels_1d.ndim > 1 and _pred_labels_1d.shape[1] == 1:
-        _pred_labels_1d = _pred_labels_1d.flatten()
-
-    if _true_labels_1d.shape != _pred_labels_1d.shape:
-        raise ValueError(
-            f"Shape mismatch after processing: "
-            f"true_labels_1d shape {_true_labels_1d.shape} != "
-            f"pred_labels_1d shape {_pred_labels_1d.shape}"
-        )
-
-    # 4. Calculate metrics
-    y_true_sklearn_type = type_of_target(_true_labels_1d)  # 'binary', 'multiclass', etc.
-
-    # Determine the effective average method for precision, recall, f1
-    if y_true_sklearn_type == "binary":
-        effective_average_for_scores = "binary"
-    elif y_true_sklearn_type == "multiclass":
-        # For multiclass, 'macro' computes the metric independently for each class and then takes the average.
-        # 'weighted' accounts for class imbalance. 'macro' is a common default.
-        effective_average_for_scores = "macro"
+            # One-hot encoded -> argmax
+            return np.argmax(true_values, axis=1)
     else:
-        # This case should ideally not be reached if inputs are validated classification labels
-        # and the single-class case (len(unique_labels) <= 1) is handled earlier.
-        logger.warning(
-            f"Unexpected y_true_sklearn_type '{y_true_sklearn_type}' encountered. "
-            f"Defaulting 'average' parameter for scores to 'macro'. "
-            f"True labels: {np.unique(_true_labels_1d)}"
+        # Already 1D
+        return true_values.astype(int)
+
+
+def _handle_single_class_metrics(
+    true_labels_1d: np.ndarray,
+    pred_values: np.ndarray, 
+    threshold: float,
+    num_classes: int
+) -> Dict[str, float]:
+    """
+    Handle edge case where only one class is present in true labels.
+
+    Args:
+        true_labels_1d: 1D true labels array
+        pred_values: Prediction values
+        threshold: Classification threshold
+        num_classes: Number of unique classes
+
+    Returns:
+        Dictionary with edge case metrics
+    """
+    metrics = {
+        "precision": 0.0,
+        "recall": 0.0, 
+        "f1": 0.0,
+        "auc": 0.5 if num_classes == 1 else 0.0,
+    }
+
+    # Try to calculate accuracy if possible
+    try:
+        pred_labels = _convert_predictions_to_labels(
+            pred_values, threshold, "single_class"
         )
-        effective_average_for_scores = "macro"
-
-    metrics["accuracy"] = accuracy_score(_true_labels_1d, _pred_labels_1d)
-    metrics["precision"] = precision_score(
-        _true_labels_1d, _pred_labels_1d, average=effective_average_for_scores, zero_division=0
-    )
-    metrics["recall"] = recall_score(
-        _true_labels_1d, _pred_labels_1d, average=effective_average_for_scores, zero_division=0
-    )
-    metrics["f1"] = f1_score(_true_labels_1d, _pred_labels_1d, average=effective_average_for_scores, zero_division=0)
-
-    # 5. AUC Calculation
-    if _target_type == "binary" and _binary_probas_for_auc is not None:
-        # Ensure _binary_probas_for_auc is 1D
-        if _binary_probas_for_auc.ndim > 1:
-            if _binary_probas_for_auc.shape[1] == 1:
-                _binary_probas_for_auc = _binary_probas_for_auc.flatten()
-            else:  # Should not happen if logic above is correct for binary probas
-                _binary_probas_for_auc = None
-
-        if _binary_probas_for_auc is not None and _binary_probas_for_auc.shape == _true_labels_1d.shape:
-            if len(np.unique(_true_labels_1d)) < 2:
-                metrics["auc"] = 0.5
-            else:
-                try:
-                    auc_val = roc_auc_score(_true_labels_1d, _binary_probas_for_auc)
-                    metrics["auc"] = 0.5 if np.isnan(auc_val) else auc_val
-                except ValueError:  # Catches "Only one class present in y_true" or other issues
-                    metrics["auc"] = 0.5
-                except Exception:  # General catch
-                    metrics["auc"] = 0.5
-        # else: Cannot calculate AUC if suitable probabilities are not found or shape mismatch
-
-    elif _target_type == "multiclass" and _multiclass_probas_for_auc is not None:
-        if _num_true_classes > 1 and _multiclass_probas_for_auc.shape == (_true_labels_1d.shape[0], _num_true_classes):
-            try:
-                auc_val = roc_auc_score(
-                    _true_labels_1d,
-                    _multiclass_probas_for_auc,
-                    multi_class="ovr",  # or 'ovo'
-                    average=(
-                        _sklearn_avg_method if _sklearn_avg_method != "binary" else "macro"
-                    ),  # Ensure valid average for roc_auc
-                )
-                metrics[f"auc_{_sklearn_avg_method}_ovr"] = 0.5 if np.isnan(auc_val) else auc_val
-            except ValueError:  # e.g. "Only one class present in y_true"
-                metrics[f"auc_{_sklearn_avg_method}_ovr"] = 0.5
-            except Exception:
-                metrics[f"auc_{_sklearn_avg_method}_ovr"] = 0.5
-        # else: Cannot calculate multiclass AUC
+        if pred_labels.shape == true_labels_1d.shape:
+            metrics["accuracy"] = accuracy_score(true_labels_1d, pred_labels)
+        else:
+            metrics["accuracy"] = 0.0
+    except Exception:
+        metrics["accuracy"] = 0.0
 
     return metrics
+
+
+def _process_predictions(
+    pred_values: np.ndarray,
+    target_type: str,
+    threshold: float,
+    unique_classes: np.ndarray
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    """
+    Process prediction values into labels and extract probabilities for AUC.
+
+    Args:
+        pred_values: Raw prediction values
+        target_type: 'binary' or 'multiclass'
+        threshold: Classification threshold
+        unique_classes: Array of unique class labels
+
+    Returns:
+        Tuple of (predicted_labels, probabilities_for_auc)
+    """
+    if target_type == "binary":
+        return _process_binary_predictions(pred_values, threshold, unique_classes)
+    else:
+        return _process_multiclass_predictions(pred_values, len(unique_classes))
+
+
+def _process_binary_predictions(
+    pred_values: np.ndarray,
+    threshold: float,
+    unique_classes: np.ndarray
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    """
+    Process binary classification predictions.
+
+    Args:
+        pred_values: Prediction values
+        threshold: Classification threshold  
+        unique_classes: Unique class labels
+
+    Returns:
+        Tuple of (predicted_labels, probabilities_for_auc)
+    """
+    probas_for_auc = None
+
+    if pred_values.ndim == 1:
+        # 1D predictions - could be probabilities or labels
+        if _is_probability_array(pred_values):
+            pred_labels = (pred_values > threshold).astype(int)
+            probas_for_auc = pred_values
+        else:
+            pred_labels = pred_values.astype(int)
+            
+    elif pred_values.ndim == 2 and pred_values.shape[1] == 1:
+        # Shape (N, 1) - flatten and process
+        flat_preds = pred_values.flatten()
+        if _is_probability_array(flat_preds):
+            pred_labels = (flat_preds > threshold).astype(int)
+            probas_for_auc = flat_preds
+        else:
+            pred_labels = flat_preds.astype(int)
+            
+    elif pred_values.ndim == 2 and pred_values.shape[1] == 2:
+        # Shape (N, 2) - binary class probabilities
+        pred_labels = np.argmax(pred_values, axis=1)
+        # Use probability of positive class (assume class 1 if present)
+        if 1 in unique_classes:
+            probas_for_auc = pred_values[:, 1]
+        else:
+            probas_for_auc = pred_values[:, 1]  # Use second column as default
+    else:
+        # Fallback: treat as direct labels
+        pred_labels = pred_values.astype(int).flatten()
+
+    return pred_labels, probas_for_auc
+
+
+def _process_multiclass_predictions(
+    pred_values: np.ndarray,
+    num_classes: int
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    """
+    Process multiclass classification predictions.
+
+    Args:
+        pred_values: Prediction values
+        num_classes: Number of classes
+
+    Returns:
+        Tuple of (predicted_labels, probabilities_for_auc)
+    """
+    if pred_values.ndim == 2 and pred_values.shape[1] == num_classes:
+        # Probability matrix (N, C)
+        pred_labels = np.argmax(pred_values, axis=1)
+        probas_for_auc = pred_values
+    elif pred_values.ndim == 1:
+        # Direct class labels
+        pred_labels = pred_values.astype(int)
+        probas_for_auc = None
+    else:
+        raise ValueError(
+            f"Unsupported pred_values shape {pred_values.shape} "
+            f"for multiclass with {num_classes} classes"
+        )
+
+    return pred_labels, probas_for_auc
+
+
+def _is_probability_array(array: np.ndarray) -> bool:
+    """
+    Heuristic to determine if array contains probabilities.
+
+    Args:
+        array: Array to check
+
+    Returns:
+        True if array likely contains probabilities
+    """
+    return bool(
+        np.issubdtype(array.dtype, np.floating) and
+        np.all(array >= 0) and 
+        np.all(array <= 1) and
+        not np.all(np.isin(np.unique(array), [0, 1]))
+    )
+
+
+def _convert_predictions_to_labels(
+    pred_values: np.ndarray,
+    threshold: float,
+    context: str
+) -> np.ndarray:
+    """
+    Convert predictions to class labels based on context.
+
+    Args:
+        pred_values: Prediction values
+        threshold: Classification threshold
+        context: Context for conversion logic
+
+    Returns:
+        Array of predicted class labels
+    """
+    if pred_values.ndim == 1:
+        if _is_probability_array(pred_values):
+            return (pred_values > threshold).astype(int)
+        else:
+            return pred_values.astype(int)
+    elif pred_values.ndim == 2:
+        if pred_values.shape[1] == 1:
+            flat_preds = pred_values.flatten()
+            if _is_probability_array(flat_preds):
+                return (flat_preds > threshold).astype(int)
+            else:
+                return flat_preds.astype(int)
+        else:
+            return np.argmax(pred_values, axis=1)
+    else:
+        return pred_values.astype(int).flatten()
+
+
+def _calculate_core_classification_metrics(
+    true_labels: np.ndarray,
+    pred_labels: np.ndarray,
+    target_type: str
+) -> Dict[str, float]:
+    """
+    Calculate core classification metrics (accuracy, precision, recall, F1).
+
+    Args:
+        true_labels: True class labels
+        pred_labels: Predicted class labels
+        target_type: 'binary' or 'multiclass'
+
+    Returns:
+        Dictionary with core metrics
+    """
+    # Determine averaging strategy
+    average_method = "binary" if target_type == "binary" else "macro"
+
+    metrics = {
+        "accuracy": accuracy_score(true_labels, pred_labels),
+        "precision": precision_score(
+            true_labels, pred_labels, average=average_method, zero_division="warn"
+        ),
+        "recall": recall_score(
+            true_labels, pred_labels, average=average_method, zero_division="warn"
+        ),
+        "f1": f1_score(
+            true_labels, pred_labels, average=average_method, zero_division="warn"
+        ),
+    }
+
+    return metrics
+
+
+def _add_auc_metrics(
+    metrics: Dict[str, float],
+    true_labels: np.ndarray,
+    probas_for_auc: Optional[np.ndarray],
+    target_type: str,
+    num_classes: int
+) -> None:
+    """
+    Add AUC metrics to the metrics dictionary if probabilities are available.
+
+    Args:
+        metrics: Dictionary to add AUC metrics to
+        true_labels: True class labels
+        probas_for_auc: Probabilities for AUC calculation
+        target_type: 'binary' or 'multiclass'
+        num_classes: Number of classes
+    """
+    if probas_for_auc is None:
+        return
+
+    try:
+        if target_type == "binary" and probas_for_auc.ndim == 1:
+            if len(np.unique(true_labels)) >= 2:
+                auc_score = roc_auc_score(true_labels, probas_for_auc)
+                metrics["auc"] = 0.5 if np.isnan(auc_score) else float(auc_score)
+            else:
+                metrics["auc"] = 0.5
+                
+        elif target_type == "multiclass" and probas_for_auc.ndim == 2:
+            if num_classes > 2 and probas_for_auc.shape[1] == num_classes:
+                auc_score = roc_auc_score(
+                    true_labels, probas_for_auc, 
+                    multi_class="ovr", average="macro"
+                )
+                metrics["auc_macro_ovr"] = 0.5 if np.isnan(auc_score) else float(auc_score)
+            else:
+                metrics["auc_macro_ovr"] = 0.5
+                
+    except Exception as e:
+        logger.debug(f"Could not calculate AUC: {e}")
+        if target_type == "binary":
+            metrics["auc"] = 0.5
+        else:
+            metrics["auc_macro_ovr"] = 0.5
+
+
+def _get_fallback_classification_metrics() -> Dict[str, float]:
+    """
+    Get fallback metrics for error cases.
+
+    Returns:
+        Dictionary with safe fallback metric values
+    """
+    return {
+        "accuracy": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "auc": 0.5,
+    }
 
 
 def calculate_node_level_metrics(
@@ -342,40 +639,46 @@ def calculate_node_level_metrics(
     node_mask: Optional[Union[torch.Tensor, np.ndarray, List]] = None,
 ) -> Dict[str, float]:
     """
-    Calculate metrics for node-level predictions.
+    Calculate metrics for node-level predictions with optional masking.
+
+    This function is specialized for graph neural networks where predictions
+    are made at the node level. It supports masking to include/exclude
+    specific nodes from the evaluation.
 
     Args:
         true_values: Ground truth values for nodes
         pred_values: Predicted values for nodes
         task_type: Type of task ('regression' or 'classification')
-        node_mask: Optional mask to filter nodes (1 for nodes to include, 0 for nodes to exclude)
+        node_mask: Optional mask to filter nodes (1 for include, 0 for exclude)
 
     Returns:
         Dictionary with node-level metrics
     """
-    # Convert inputs to numpy arrays if they are tensors or lists
-    if isinstance(true_values, torch.Tensor):
-        true_values = true_values.detach().cpu().numpy()
-    elif isinstance(true_values, list):
-        true_values = np.array(true_values)
+    # Convert inputs to numpy arrays
+    true_array = _convert_to_numpy(true_values, "true_values")
+    pred_array = _convert_to_numpy(pred_values, "pred_values")
 
-    if isinstance(pred_values, torch.Tensor):
-        pred_values = pred_values.detach().cpu().numpy()
-    elif isinstance(pred_values, list):
-        pred_values = np.array(pred_values)
-
+    # Apply mask if provided
     if node_mask is not None:
-        if isinstance(node_mask, torch.Tensor):
-            node_mask = node_mask.detach().cpu().numpy().astype(bool)
-        elif isinstance(node_mask, list):
-            node_mask = np.array(node_mask, dtype=bool)
+        mask_array = _convert_to_numpy(node_mask, "node_mask").astype(bool)
+        
+        # Validate mask size
+        if mask_array.size != true_array.size:
+            raise ValueError(
+                f"Node mask size {mask_array.size} does not match "
+                f"true_values size {true_array.size}"
+            )
 
-        # Apply mask to include only certain nodes
-        true_values = true_values[node_mask]
-        pred_values = pred_values[node_mask]
+        # Apply mask to filter nodes
+        true_array = true_array[mask_array]
+        pred_array = pred_array[mask_array]
+        
+        logger.debug(
+            f"Applied node mask: {mask_array.sum()}/{mask_array.size} nodes selected"
+        )
 
     # Calculate metrics using the general function
-    return calculate_metrics(true_values, pred_values, task_type)
+    return calculate_metrics(true_array, pred_array, task_type)
 
 
 def calculate_graph_level_metrics(
@@ -385,40 +688,46 @@ def calculate_graph_level_metrics(
     graph_mask: Optional[Union[torch.Tensor, np.ndarray, List]] = None,
 ) -> Dict[str, float]:
     """
-    Calculate metrics for graph-level predictions.
+    Calculate metrics for graph-level predictions with optional masking.
+
+    This function is specialized for graph neural networks where predictions
+    are made at the graph level. It supports masking to include/exclude
+    specific graphs from the evaluation.
 
     Args:
         true_values: Ground truth values for graphs
         pred_values: Predicted values for graphs
         task_type: Type of task ('regression' or 'classification')
-        graph_mask: Optional mask to filter graphs (1 for graphs to include, 0 for graphs to exclude)
+        graph_mask: Optional mask to filter graphs (1 for include, 0 for exclude)
 
     Returns:
         Dictionary with graph-level metrics
     """
-    # Convert inputs to numpy arrays if they are tensors or lists
-    if isinstance(true_values, torch.Tensor):
-        true_values = true_values.detach().cpu().numpy()
-    elif isinstance(true_values, list):
-        true_values = np.array(true_values)
+    # Convert inputs to numpy arrays
+    true_array = _convert_to_numpy(true_values, "true_values")
+    pred_array = _convert_to_numpy(pred_values, "pred_values")
 
-    if isinstance(pred_values, torch.Tensor):
-        pred_values = pred_values.detach().cpu().numpy()
-    elif isinstance(pred_values, list):
-        pred_values = np.array(pred_values)
-
+    # Apply mask if provided
     if graph_mask is not None:
-        if isinstance(graph_mask, torch.Tensor):
-            graph_mask = graph_mask.detach().cpu().numpy().astype(bool)
-        elif isinstance(graph_mask, list):
-            graph_mask = np.array(graph_mask, dtype=bool)
+        mask_array = _convert_to_numpy(graph_mask, "graph_mask").astype(bool)
+        
+        # Validate mask size
+        if mask_array.size != true_array.size:
+            raise ValueError(
+                f"Graph mask size {mask_array.size} does not match "
+                f"true_values size {true_array.size}"
+            )
 
-        # Apply mask to include only certain graphs
-        true_values = true_values[graph_mask]
-        pred_values = pred_values[graph_mask]
+        # Apply mask to filter graphs
+        true_array = true_array[mask_array]
+        pred_array = pred_array[mask_array]
+        
+        logger.debug(
+            f"Applied graph mask: {mask_array.sum()}/{mask_array.size} graphs selected"
+        )
 
     # Calculate metrics using the general function
-    return calculate_metrics(true_values, pred_values, task_type)
+    return calculate_metrics(true_array, pred_array, task_type)
 
 
 def visualize_predictions(
@@ -428,188 +737,211 @@ def visualize_predictions(
     title: str = "Predictions vs Ground Truth",
     save_path: Optional[str] = None,
     show_metrics: bool = True,
-) -> plt.Figure:
+) -> Figure:
     """
-    Visualize model predictions compared to ground truth.
+    Create visualization comparing model predictions to ground truth.
+
+    This function generates appropriate plots based on the task type:
+    - Regression: Scatter plot with identity line and error metrics
+    - Classification: Confusion matrix with classification metrics
 
     Args:
         true_values: Ground truth values
         pred_values: Predicted values
         task_type: Type of task ('regression' or 'classification')
-        title: Plot title
-        save_path: Optional path to save the plot
-        show_metrics: Whether to show metrics on the plot
+        title: Plot title text
+        save_path: Optional path to save the plot image
+        show_metrics: Whether to display metrics on the plot
 
     Returns:
-        Matplotlib figure
+        Matplotlib Figure object containing the visualization
     """
-    # Convert inputs to numpy arrays if they are tensors or lists
-    if isinstance(true_values, torch.Tensor):
-        true_values = true_values.detach().cpu().numpy()
-    elif isinstance(true_values, list):
-        true_values = np.array(true_values)
+    # Convert inputs to numpy arrays
+    true_array = _convert_to_numpy(true_values, "true_values")
+    pred_array = _convert_to_numpy(pred_values, "pred_values")
 
-    if isinstance(pred_values, torch.Tensor):
-        pred_values = pred_values.detach().cpu().numpy()
-    elif isinstance(pred_values, list):
-        pred_values = np.array(pred_values)
+    # Create figure with appropriate size
+    fig = plt.figure(figsize=DEFAULT_FIGURE_SIZE)
 
-    # Create figure
-    fig = plt.figure(figsize=(10, 8))
+    try:
+        if task_type == "regression":
+            _create_regression_plot(true_array, pred_array, show_metrics)
+        elif task_type == "classification":
+            _create_classification_plot(true_array, pred_array, show_metrics)
+        else:
+            raise ValueError(f"Unsupported task_type for visualization: {task_type}")
 
-    # Create different visualizations based on task type
-    if task_type == "regression":
-        # Scatter plot with identity line
-        plt.scatter(true_values, pred_values, alpha=0.5)
+        # Apply common formatting
+        plt.title(title, fontsize=14, fontweight='bold')
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.tight_layout()
 
-        # Add identity line
-        min_val = min(np.min(true_values), np.min(pred_values))
-        max_val = max(np.max(true_values), np.max(pred_values))
-        plt.plot([min_val, max_val], [min_val, max_val], "r--")
+        # Save plot if path provided
+        if save_path:
+            _save_plot(fig, save_path)
 
-        plt.xlabel("Ground Truth")
-        plt.ylabel("Predictions")
+        logger.debug(f"Created {task_type} visualization with title: {title}")
+        return fig
 
-        # Calculate and display metrics
-        if show_metrics:
-            metrics = calculate_regression_metrics(true_values, pred_values)
+    except Exception as e:
+        logger.error(f"Error creating visualization: {e}")
+        plt.close(fig)
+        raise
 
-            metric_text = f"RMSE: {metrics['rmse']:.4f}\n" f"MAE: {metrics['mae']:.4f}\n" f"R²: {metrics['r2']:.4f}"
 
-            plt.annotate(
-                metric_text,
-                xy=(0.05, 0.95),
-                xycoords="axes fraction",
-                ha="left",
-                va="top",
-                bbox=dict(boxstyle="round", fc="white", alpha=0.8),
+def _create_regression_plot(
+    true_array: np.ndarray,
+    pred_array: np.ndarray,
+    show_metrics: bool
+) -> None:
+    """
+    Create scatter plot for regression predictions.
+
+    Args:
+        true_array: Ground truth values
+        pred_array: Predicted values
+        show_metrics: Whether to show metrics
+    """
+    # Create scatter plot
+    plt.scatter(true_array, pred_array, alpha=0.6, s=30, edgecolors='black', linewidth=0.5)
+
+    # Add perfect prediction line
+    min_val = min(np.min(true_array), np.min(pred_array))
+    max_val = max(np.max(true_array), np.max(pred_array))
+    plt.plot([min_val, max_val], [min_val, max_val], "r--", linewidth=2, label="Perfect Prediction")
+
+    # Set labels
+    plt.xlabel("Ground Truth", fontsize=12)
+    plt.ylabel("Predictions", fontsize=12)
+    plt.legend()
+
+    # Add metrics if requested
+    if show_metrics:
+        try:
+            metrics = calculate_regression_metrics(true_array, pred_array)
+            metric_text = (
+                f"RMSE: {metrics['rmse']:.4f}\n"
+                f"MAE: {metrics['mae']:.4f}\n"
+                f"R²: {metrics['r2']:.4f}"
+            )
+            
+            plt.text(
+                0.05, 0.95, metric_text,
+                transform=plt.gca().transAxes,
+                verticalalignment='top',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                fontsize=10
+            )
+        except Exception as e:
+            logger.warning(f"Could not add metrics to regression plot: {e}")
+
+
+def _create_classification_plot(
+    true_array: np.ndarray,
+    pred_array: np.ndarray,
+    show_metrics: bool
+) -> None:
+    """
+    Create confusion matrix plot for classification predictions.
+
+    Args:
+        true_array: Ground truth labels
+        pred_array: Predicted values (probabilities or labels)
+        show_metrics: Whether to show metrics
+    """
+    # Standardize true labels to 1D integer format (handle one-hot encoding)
+    true_labels = _standardize_true_labels(true_array)
+    
+    # Convert predictions to labels if they are probabilities
+    if (pred_array.ndim == 1 and 
+        np.issubdtype(pred_array.dtype, np.floating) and
+        np.all(pred_array >= 0) and np.all(pred_array <= 1) and
+        pred_array.max() <= 1.0):
+        pred_labels = (pred_array > DEFAULT_THRESHOLD).astype(int)
+    elif pred_array.ndim == 2:
+        pred_labels = np.argmax(pred_array, axis=1)
+    else:
+        pred_labels = pred_array.astype(int)
+
+    # Create confusion matrix
+    cm = confusion_matrix(true_labels, pred_labels)
+    
+    # Plot confusion matrix
+    im = plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)  # type: ignore
+    plt.colorbar(im)
+
+    # Determine class labels
+    num_classes = cm.shape[0]
+    if num_classes == 2:
+        class_names = ["Negative", "Positive"]
+    else:
+        class_names = [f"Class {i}" for i in range(num_classes)]
+
+    # Set ticks and labels
+    tick_marks = np.arange(num_classes)
+    plt.xticks(tick_marks, class_names, rotation=45)
+    plt.yticks(tick_marks, class_names)
+
+    # Add text annotations to cells
+    threshold = cm.max() / 2.0
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            plt.text(
+                j, i, str(cm[i, j]),
+                ha="center", va="center",
+                color="white" if cm[i, j] > threshold else "black",
+                fontsize=12, fontweight='bold'
             )
 
-    elif task_type == "classification":
-        # For binary classification
-        if len(true_values.shape) == 1 or true_values.shape[1] == 1:
-            # Confusion matrix
-            if pred_values.max() <= 1.0 and pred_values.min() >= 0.0:
-                # Convert probabilities to binary predictions
-                binary_preds = (pred_values > 0.5).astype(int)
-                cm = confusion_matrix(true_values, binary_preds)
-            else:
-                # Predictions are already binary
-                cm = confusion_matrix(true_values, pred_values)
+    plt.xlabel("Predicted Label", fontsize=12)
+    plt.ylabel("True Label", fontsize=12)
 
-            plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
-            plt.colorbar()
+    # Add metrics if requested
+    if show_metrics:
+        try:
+            metrics = calculate_classification_metrics(true_array, pred_array)
+            metric_text = (
+                f"Accuracy: {metrics['accuracy']:.4f}\n"
+                f"Precision: {metrics['precision']:.4f}\n"
+                f"Recall: {metrics['recall']:.4f}\n"
+                f"F1: {metrics['f1']:.4f}"
+            )
+            
+            if "auc" in metrics:
+                metric_text += f"\nAUC: {metrics['auc']:.4f}"
 
-            classes = ["Negative", "Positive"]
-            tick_marks = np.arange(len(classes))
-            plt.xticks(tick_marks, classes)
-            plt.yticks(tick_marks, classes)
+            plt.text(
+                1.05, 0.5, metric_text,
+                transform=plt.gca().transAxes,
+                verticalalignment='center',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                fontsize=10
+            )
+        except Exception as e:
+            logger.warning(f"Could not add metrics to classification plot: {e}")
 
-            # Add text annotations to the confusion matrix cells
-            threshold = cm.max() / 2.0
-            for i in range(cm.shape[0]):
-                for j in range(cm.shape[1]):
-                    plt.text(
-                        j,
-                        i,
-                        format(cm[i, j], "d"),
-                        ha="center",
-                        va="center",
-                        color="white" if cm[i, j] > threshold else "black",
-                    )
 
-            plt.xlabel("Predicted Label")
-            plt.ylabel("True Label")
+def _save_plot(fig: Figure, save_path: str) -> None:
+    """
+    Save plot to file with proper directory creation.
 
-            # Calculate and display metrics
-            if show_metrics:
-                metrics = calculate_classification_metrics(true_values, pred_values)
+    Args:
+        fig: Matplotlib figure to save
+        save_path: Path to save the plot
 
-                metric_text = (
-                    f"Accuracy: {metrics['accuracy']:.4f}\n"
-                    f"Precision: {metrics['precision']:.4f}\n"
-                    f"Recall: {metrics['recall']:.4f}\n"
-                    f"F1: {metrics['f1']:.4f}"
-                )
+    Raises:
+        OSError: If file cannot be saved
+    """
+    try:
+        # Create directory if it doesn't exist
+        save_dir = os.path.dirname(save_path)
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
 
-                if "auc" in metrics:
-                    metric_text += f"\nAUC: {metrics['auc']:.4f}"
-
-                plt.annotate(
-                    metric_text,
-                    xy=(1.05, 0.5),
-                    xycoords="axes fraction",
-                    ha="left",
-                    va="center",
-                    bbox=dict(boxstyle="round", fc="white", alpha=0.8),
-                )
-
-        # For multi-class classification
-        else:
-            # Convert to class indices if predictions are probabilities
-            if pred_values.shape == true_values.shape:
-                pred_classes = np.argmax(pred_values, axis=1)
-                true_classes = np.argmax(true_values, axis=1)
-            else:
-                pred_classes = pred_values
-                true_classes = true_values
-
-            # Confusion matrix
-            cm = confusion_matrix(true_classes, pred_classes)
-            plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
-            plt.colorbar()
-
-            # Adding labels
-            num_classes = cm.shape[0]
-            classes = [str(i) for i in range(num_classes)]
-            tick_marks = np.arange(num_classes)
-            plt.xticks(tick_marks, classes)
-            plt.yticks(tick_marks, classes)
-
-            # Add text annotations to the confusion matrix cells
-            threshold = cm.max() / 2.0
-            for i in range(cm.shape[0]):
-                for j in range(cm.shape[1]):
-                    plt.text(
-                        j,
-                        i,
-                        format(cm[i, j], "d"),
-                        ha="center",
-                        va="center",
-                        color="white" if cm[i, j] > threshold else "black",
-                    )
-
-            plt.xlabel("Predicted Label")
-            plt.ylabel("True Label")
-
-            # Calculate and display metrics
-            if show_metrics:
-                metrics = calculate_classification_metrics(true_classes, pred_classes)
-
-                metric_text = (
-                    f"Accuracy: {metrics['accuracy']:.4f}\n"
-                    f"Precision: {metrics['precision']:.4f}\n"
-                    f"Recall: {metrics['recall']:.4f}\n"
-                    f"F1: {metrics['f1']:.4f}"
-                )
-
-                plt.annotate(
-                    metric_text,
-                    xy=(1.05, 0.5),
-                    xycoords="axes fraction",
-                    ha="left",
-                    va="center",
-                    bbox=dict(boxstyle="round", fc="white", alpha=0.8),
-                )
-
-    plt.title(title)
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.tight_layout()
-
-    # Save the plot if a path is provided
-    if save_path:
-        # Create the directory if it doesn't exist
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-
-    return fig
+        # Save with high quality
+        fig.savefig(save_path, dpi=DEFAULT_DPI, bbox_inches="tight", facecolor='white')
+        logger.info(f"Saved plot to: {save_path}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save plot to {save_path}: {e}")
+        raise OSError(f"Could not save plot: {e}")

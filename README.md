@@ -23,8 +23,10 @@ Large files in the `data/qm9/processed/` directory (particularly `*.pt` files) a
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/MoML-CA.git
+# Clone the repository (choose HTTPS or SSH)
+git clone https://github.com/SAKETH11111/MoML-CA.git
+# or, if you have SSH keys configured:
+# git clone git@github.com:SAKETH11111/MoML-CA.git
 cd MoML-CA
 
 # Create a conda environment

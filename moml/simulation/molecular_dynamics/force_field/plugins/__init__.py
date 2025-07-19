@@ -1,5 +1,16 @@
 """
-Plugin loader for force field components.
+__init__.py
+
+Force Field Plugin System Module
+
+This module provides a plugin system for force field components in molecular dynamics
+simulations. It enables dynamic loading of different surface types and materials
+that can be used in simulations, with each plugin providing its own configuration
+and implementation.
+
+The module handles plugin discovery, loading, and validation to ensure that all
+required components are present and properly structured. This modular approach
+allows for easy extension of the simulation capabilities with new surface types.
 """
 
 import importlib
@@ -7,19 +18,30 @@ from pathlib import Path
 from typing import Tuple, Dict, Any
 
 def load_plugin(plugin_name: str) -> Tuple[Dict[str, Any], Any]:
-    """Load a force field plugin by name.
+    """
+    Load a force field plugin by name.
+    
+    This function locates and loads a force field plugin, validating that it has
+    the required files and interface. It returns both the plugin's configuration
+    and the build module that contains the implementation code.
     
     Args:
-        plugin_name: Name of the plugin to load (e.g. 'nf_polyamide_v1')
+        plugin_name: Name of the plugin to load (e.g. 'nf_polyamide_v1', 'gac_v1')
         
     Returns:
-        Tuple containing:
-        - Dict: Plugin configuration from config.yaml
-        - Any: Plugin build module with get_xml method
+        Tuple[Dict[str, Any], Any]: A tuple containing:
+            - Dict[str, Any]: Plugin configuration loaded from config.yaml
+            - Any: Plugin build module with the 'build' function
         
     Raises:
+        ValueError: If plugin directory is missing or required files are not found
         ImportError: If plugin module cannot be loaded
-        ValueError: If plugin is missing required files
+        AttributeError: If plugin module lacks required interface
+        
+    Example:
+        >>> config, build_module = load_plugin('gac_v1')
+        >>> # Use the build module to create a surface
+        >>> surface = build_module.build(temp_dir, config)
     """
     # Get the plugin directory
     plugin_dir = Path(__file__).parent / plugin_name

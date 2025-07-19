@@ -1,12 +1,8 @@
 """
-MoML Utils Package
+moml/utils/__init__.py
 
-Public API:
-- load_data, inspect_data, clean_column_names, convert_numeric_columns, handle_missing_values, standardize_text_data, extract_numeric_from_text, save_processed_data: data processing utilities
-- validate_smiles: SMILES validation
-- create_rdkit_mols, extract_fluorine_count, calculate_molecular_complexity, categorize_molecular_features, add_fluorinated_group_counts: molecular utilities
-- plot_distribution, plot_top_types, plot_pie_chart, plot_heatmap, plot_scatter, plot_success_rate, plot_count: visualization utilities
-- generate_2d_structure, draw_molecule, save_molecule_image, generate_molecule_grid, save_molecule_grid, visualize_dataset, load_molecules_from_pickle, visualize_molecular_graph, print_graph_statistics, visualize_hierarchical_graphs, visualize_pfas20_molecules: advanced visualization functions
+This package provides utility functions for data processing, validation,
+and molecular analysis in the MoML-CA framework.
 """
 
 # Data processing utilities
@@ -29,32 +25,13 @@ from .data_utils.molecular import (
     create_rdkit_mols,
     extract_fluorine_count,
     calculate_molecular_complexity,
+    calculate_molecular_properties,
     categorize_molecular_features,
-    add_fluorinated_group_counts,)
-
-# Visualization utilities
-from .visualization_utils.visualization import (
-    plot_distribution,
-    plot_top_types,
-    plot_pie_chart,
-    plot_heatmap,
-    plot_scatter,
-    plot_success_rate,
-    plot_count,
-    generate_2d_structure,
-    draw_molecule,
-    save_molecule_image,
-    generate_molecule_grid,
-    save_molecule_grid,
-    visualize_dataset,
-    load_molecules_from_pickle,
-    visualize_molecular_graph,
-    print_graph_statistics,
-    visualize_hierarchical_graphs,
-    visualize_pfas20_molecules,
+    add_fluorinated_group_counts,
 )
 
 __all__ = [
+    # Data processing
     "load_data",
     "inspect_data",
     "clean_column_names",
@@ -63,28 +40,13 @@ __all__ = [
     "standardize_text_data",
     "extract_numeric_from_text",
     "save_processed_data",
+    # Validation
     "validate_smiles",
+    # Molecular utilities
     "create_rdkit_mols",
     "extract_fluorine_count",
     "calculate_molecular_complexity",
+    "calculate_molecular_properties",
     "categorize_molecular_features",
     "add_fluorinated_group_counts",
-    "plot_distribution",
-    "plot_top_types",
-    "plot_pie_chart",
-    "plot_heatmap",
-    "plot_scatter",
-    "plot_success_rate",
-    "plot_count",
-    "generate_2d_structure",
-    "draw_molecule",
-    "save_molecule_image",
-    "generate_molecule_grid",
-    "save_molecule_grid",
-    "visualize_dataset",
-    "load_molecules_from_pickle",
-    "visualize_molecular_graph",
-    "print_graph_statistics",
-    "visualize_hierarchical_graphs",
-    "visualize_pfas20_molecules",
 ]

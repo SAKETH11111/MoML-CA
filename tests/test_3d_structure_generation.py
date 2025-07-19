@@ -1,43 +1,41 @@
-#!python
 """
-Test script for 3D structure generation from SMILES
+tests/test_3d_structure_generation.py
 
-This script tests the conversion of SMILES strings to 3D molecular structures
-using RDKit, which is a key component of our ORCA input preparation.
+Tests 3D structure generation from SMILES strings using RDKit, a key step in ORCA input preparation.
 """
 
+import logging
 import os
 import sys
-import pytest
-import logging
 import tempfile
-import numpy as np
 from pathlib import Path
+from typing import List, Tuple
+
+import numpy as np
+import pytest
 
 try:
     from rdkit import Chem
-
-    print("RDKit import successful!")
 except ImportError:
     pytest.skip("RDKit not installed, skipping 3D structure generation tests", allow_module_level=True)
 
-# Import the function from the original module
 from moml.simulation.qm.parser.orca_parser import smiles_to_3d_structure
 
-# Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("test_3d_generation")
 
 
-def run_tests():
-    """Run the 3D structure generation tests."""
-    # Test cases
-    test_cases = [
-        # Simple molecules
+def run_tests() -> bool:
+    """
+    Run the 3D structure generation tests for a set of SMILES strings.
+
+    Returns:
+        bool: True if all tests pass, False otherwise.
+    """
+    test_cases: List[Tuple[str, str]] = [
         ("CC", "Ethane"),
         ("CC(F)(F)F", "Trifluoromethane"),
         ("c1ccccc1", "Benzene"),
-        # PFAS compounds
         ("C(C(F)(F)F)C(F)(F)F", "Hexafluoroethane"),
         ("C(F)(F)(F)C(F)(F)C(F)(F)F", "Perfluoropropane"),
     ]
@@ -50,14 +48,12 @@ def run_tests():
     temp_dir = tempfile.TemporaryDirectory()
 
     for idx, (smiles, name) in enumerate(test_cases):
-        print(f"Test {idx+1}: {name}")
+        print(f"Test {idx + 1}: {name}")
         print(f"  SMILES: {smiles}")
 
-        # Generate 3D structure
         mol = smiles_to_3d_structure(smiles, name)
 
         if mol is not None:
-            # Get basic information about the molecule
             num_atoms = mol.GetNumAtoms()
             num_bonds = mol.GetNumBonds()
             num_conformers = mol.GetNumConformers()
@@ -65,13 +61,11 @@ def run_tests():
             print(f"  Success: Generated 3D structure with {num_atoms} atoms, {num_bonds} bonds")
             print(f"  Number of conformers: {num_conformers}")
 
-            # Check that 3D coordinates exist
             if num_conformers > 0:
                 conf = mol.GetConformer()
                 pos = conf.GetAtomPosition(0)
                 print(f"  First atom coordinates: ({pos.x:.4f}, {pos.y:.4f}, {pos.z:.4f})")
 
-                # Save to MOL file for inspection
                 mol_file = os.path.join(temp_dir.name, f"{name}.mol")
                 Chem.MolToMolFile(mol, mol_file)
                 print(f"  Saved to: {mol_file}")
@@ -86,10 +80,8 @@ def run_tests():
 
         print()
 
-    # Clean up
     temp_dir.cleanup()
 
-    # Print summary
     print("\n===== Summary =====")
     print(f"Total tests: {len(test_cases)}")
     print(f"Passed: {success_count}")
@@ -98,7 +90,6 @@ def run_tests():
     return success_count == len(test_cases)
 
 
-# Check if this module is being run directly or being imported
 if __name__ == "__main__":
     print("Testing 3D structure generation functionality...")
     success = run_tests()
@@ -109,6 +100,4 @@ if __name__ == "__main__":
         print("\nSome 3D structure generation tests FAILED!")
         sys.exit(1)
 else:
-    # When being collected by pytest, skip this test module
-    # This will properly skip the tests when running with pytest
     pytest.skip("Script style 3D structure tests, skipping under pytest", allow_module_level=True)

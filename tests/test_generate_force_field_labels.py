@@ -1,10 +1,25 @@
+"""
+tests/test_generate_force_field_labels.py
+
+Unit tests for the force field label generation script.
+"""
+
+from pathlib import Path
+from typing import Dict
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
 
-from scripts.generate_force_field_labels import load_smiles_map, generate_labels
+from scripts.generate_force_field_labels import generate_labels, load_smiles_map
 
 
-def test_load_smiles_map(tmp_path):
+def test_load_smiles_map(tmp_path: Path) -> None:
+    """
+    Test loading a SMILES map from a CSV file.
+    
+    Args:
+        tmp_path (Path): Temporary directory path provided by pytest.
+    """
     csv_path = tmp_path / "mols.csv"
     df = pd.DataFrame({"DTXSID": ["1", "2"], "SMILES": ["C", "CC"]})
     df.to_csv(csv_path, index=False)
@@ -14,7 +29,15 @@ def test_load_smiles_map(tmp_path):
 
 @patch("scripts.generate_force_field_labels.ForceFieldMapper")
 @patch("scripts.generate_force_field_labels.safe_parse_orca_output")
-def test_generate_labels(mock_parse, mock_mapper_cls, tmp_path):
+def test_generate_labels(mock_parse: MagicMock, mock_mapper_cls: MagicMock, tmp_path: Path) -> None:
+    """
+    Test label generation using mocked ForceFieldMapper and ORCA parser.
+    
+    Args:
+        mock_parse (MagicMock): Mock of the ORCA parser function.
+        mock_mapper_cls (MagicMock): Mock of the ForceFieldMapper class.
+        tmp_path (Path): Temporary directory path provided by pytest.
+    """
     out_file = tmp_path / "mol1.out"
     out_file.write_text("dummy")
 
@@ -28,7 +51,7 @@ def test_generate_labels(mock_parse, mock_mapper_cls, tmp_path):
 
     labels = generate_labels(str(tmp_path), {"mol1": "[H]"})
 
-    mock_parse.assert_called_with(str(out_file))
+    mock_parse.assert_called_with(out_file)
     mock_mapper.generate_force_field_parameters.assert_called_once()
     assert labels == {
         "mol1": {
@@ -37,4 +60,4 @@ def test_generate_labels(mock_parse, mock_mapper_cls, tmp_path):
             "angles": {},
             "dihedrals": {},
         }
-    } 
+    }

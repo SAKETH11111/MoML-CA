@@ -1,15 +1,19 @@
-#!python
 """
-Test script for SMILES validation functionality
+tests/test_smiles_validation_logic.py
+
+Unit tests for SMILES validation functionality.
 
 This script verifies the SMILES validation functions in moml.core module,
 ensuring they correctly handle valid, invalid, and edge case structures.
 """
 
+import logging
 import os
 import sys
+import unittest
+from typing import Any, Dict, List, Optional, Tuple
+
 import pytest
-import logging
 
 # Add project root to path to enable imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -17,133 +21,129 @@ sys.path.append(project_root)
 
 # Try to import RDKit
 try:
+    from rdkit import Chem
 
-    print("RDKit import successful!")
+    RDKIT_AVAILABLE = True
 except ImportError:
+    RDKIT_AVAILABLE = False
     pytest.skip("RDKit not installed, skipping SMILES validation tests", allow_module_level=True)
 
 from moml.core import calculate_molecular_descriptors
 from moml.utils import validate_smiles
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("test_smiles_validation")
 
 
-def run_tests():
-    """Run SMILES validation tests."""
+def run_tests() -> bool:
+    """
+    Run SMILES validation tests.
+
+    Returns:
+        bool: True if all tests pass, False otherwise.
+    """
     print("\n===== SMILES Validation Tests =====\n")
 
-    # Test case 1: Valid SMILES
     print("Test case 1: Valid SMILES structures")
-    valid_smiles = [
-        "C",  # Methane
-        "CC",  # Ethane
-        "c1ccccc1",  # Benzene
-        "CC(=O)O",  # Acetic acid
-        "C(C(F)(F)F)C(F)(F)F",  # Hexafluoroethane
-        "ClC(Cl)(Cl)Cl",  # Carbon tetrachloride
-        "C1CCC(CC1)C(=O)O",  # Cyclohexanecarboxylic acid
-        "CC1=C(C=C(C=C1)C(=O)O)C",  # 2,5-Dimethylbenzoic acid
-        "C[N+](C)(C)CC([O-])=O",  # Betaine (zwitterion)
+    valid_smiles: List[str] = [
+        "C",
+        "CC",
+        "c1ccccc1",
+        "CC(=O)O",
+        "C(C(F)(F)F)C(F)(F)F",
+        "ClC(Cl)(Cl)Cl",
+        "C1CCC(CC1)C(=O)O",
+        "CC1=C(C=C(C=C1)C(=O)O)C",
+        "C[N+](C)(C)CC([O-])=O",
     ]
 
     valid_count = 0
     for smiles in valid_smiles:
-        is_valid, canonical, mol = validate_smiles(smiles)
+        is_valid, canonical, mol, error_msg = validate_smiles(smiles)
 
         if is_valid:
             valid_count += 1
             print(f"  ✓ {smiles} → {canonical}")
 
-            # Calculate some basic descriptors as a further check
             if mol is not None:
                 descriptors = calculate_molecular_descriptors(mol)
                 print(f"     MW: {descriptors['molecular_weight']:.2f}, LogP: {descriptors['logp']:.2f}")
         else:
-            print(f"  ✗ {smiles} (Failed - should be valid)")
+            print(f"  ✗ {smiles} (Failed - should be valid). Error: {error_msg}")
 
     print(f"\nValidated {valid_count}/{len(valid_smiles)} valid SMILES")
     valid_test_passed = valid_count == len(valid_smiles)
 
-    # Test case 2: Invalid SMILES
     print("\nTest case 2: Invalid SMILES structures")
-    invalid_smiles = [
-        "X",  # Invalid atom
-        "C(",  # Unclosed parenthesis
-        "CC(",  # Unclosed parenthesis
-        "C1CC",  # Unclosed ring
-        "C1CC2",  # Unclosed rings
-        "C1CCCC",  # Unclosed ring (5 should be 5-membered)
-        "C12C2",  # Invalid ring connection
-        "invalidstructure",  # Random string
-        # RDKit parses these, even if chemically questionable
-        # "C:C",                     # Invalid bond type
-        # "CC#CC#CC#CC#CC",          # Cumulative triple bonds (unstable)
+    invalid_smiles: List[str] = [
+        "X",
+        "C(",
+        "CC(",
+        "C1CC",
+        "C1CC2",
+        "C1CCCC",
+        "C12C2",
+        "invalidstructure",
     ]
 
-    valid_but_should_fail = [
+    valid_but_should_fail: List[str] = [
         "C:C",
         "CC#CC#CC#CC#CC",
     ]
 
     invalid_count = 0
     for smiles in invalid_smiles:
-        is_valid, canonical, mol = validate_smiles(smiles)
+        is_valid, canonical, mol, error_msg = validate_smiles(smiles)
 
         if not is_valid:
             invalid_count += 1
             print(f"  ✓ {smiles} (Correctly identified as invalid)")
         else:
-            print(f"  ✗ {smiles} → {canonical} (Failed - should be invalid)")
+            print(f"  ✗ {smiles} → {canonical} (Failed - should be invalid). Mol: {mol}, Error: {error_msg}")
 
-    # Check the ones RDKit validates but might be chemically invalid
     valid_but_should_fail_count = 0
     for smiles in valid_but_should_fail:
-        is_valid, canonical, mol = validate_smiles(smiles)
+        is_valid, canonical, mol, error_msg = validate_smiles(smiles)
         if is_valid:
-            # This is expected RDKit behavior, but we note it failed our stricter test intent
-            print(f"  ! {smiles} → {canonical} (Validated by RDKit, but failed test intent)")
-            # We don't count these towards the pass/fail of the basic RDKit validation test
+            print(f"  ! {smiles} → {canonical} (Validated by RDKit, but failed test intent). Mol: {mol}, Error: {error_msg}")
         else:
-            # If RDKit *does* invalidate them, that's fine too
             valid_but_should_fail_count += 1
             print(f"  ✓ {smiles} (Correctly identified as invalid by RDKit)")
 
-    total_invalid_tested = len(invalid_smiles)  # We only count the ones RDKit should invalidate
+    total_invalid_tested = len(invalid_smiles)
     print(f"\nValidated {invalid_count}/{total_invalid_tested} invalid SMILES (excluding chemically questionable ones)")
     invalid_test_passed = invalid_count == total_invalid_tested
 
-    # Test case 3: Edge cases
     print("\nTest case 3: Edge case SMILES structures")
-    edge_smiles = [
-        "[H]",  # Hydrogen atom
-        "c1cc[nH]c1",  # Pyrrole (aromatic nitrogen with attached H)
-        "[NH4+]",  # Ammonium ion
-        "[2H]O[2H]",  # Heavy water (D2O)
-        "C=1C=CC=CC=1",  # Benzene with '=' bonds
-        "[13CH4]",  # Isotope-labeled methane
-        "[*]c1ccccc1",  # Unspecified atom
-        "[Fe]",  # Iron atom
-        "Cc1c(C)cccc1C",  # 1,2,3-trimethylbenzene with explicit C
-        "[Pt](Cl)(Cl)(Cl)(Cl)",  # PtCl4 (square planar)
+    edge_smiles: List[str] = [
+        "[H]",
+        "c1cc[nH]c1",
+        "[NH4+]",
+        "[2H]O[2H]",
+        "C=1C=CC=CC=1",
+        "[13CH4]",
+        "[*]c1ccccc1",
+        "[Fe]",
+        "Cc1c(C)cccc1C",
+        "[Pt](Cl)(Cl)(Cl)(Cl)",
     ]
 
     edge_count = 0
     for smiles in edge_smiles:
-        is_valid, canonical, mol = validate_smiles(smiles)
+        is_valid, canonical, mol, error_msg = validate_smiles(smiles)
 
         if is_valid:
             edge_count += 1
             print(f"  ✓ {smiles} → {canonical}")
         else:
-            print(f"  ✗ {smiles} (Failed - should be edge case valid)")
+            print(f"  ✗ {smiles} (Failed - should be edge case valid). Error: {error_msg}")
 
     print(f"\nValidated {edge_count}/{len(edge_smiles)} edge case SMILES")
-    edge_test_passed = edge_count >= len(edge_smiles) * 0.7  # Allow some failures in edge cases
+    edge_test_passed = edge_count >= len(edge_smiles) * 0.7
 
-    # Print summary
     print("\n===== Summary =====")
-    test_results = {
+    test_results: Dict[str, bool] = {
         "Valid SMILES": valid_test_passed,
         "Invalid SMILES": invalid_test_passed,
         "Edge cases": edge_test_passed,
@@ -157,70 +157,71 @@ def run_tests():
     return all_passed
 
 
-# Define pytest style tests
-class TestSmilesValidation:
-    """Pytest style tests for SMILES validation."""
+class TestSmilesValidation(unittest.TestCase):
+    """
+    Pytest style tests for SMILES validation.
+    """
 
-    def test_valid_smiles(self):
-        """Test validation of valid SMILES strings."""
-        valid_smiles = [
-            "C",  # Methane
-            "CC",  # Ethane
-            "c1ccccc1",  # Benzene
-            "CC(=O)O",  # Acetic acid
-            "C(C(F)(F)F)C(F)(F)F",  # Hexafluoroethane
+    def test_valid_smiles(self) -> None:
+        """
+        Test validation of valid SMILES strings.
+        """
+        valid_smiles: List[str] = [
+            "C",
+            "CC",
+            "c1ccccc1",
+            "CC(=O)O",
+            "C(C(F)(F)F)C(F)(F)F",
         ]
 
         for smiles in valid_smiles:
-            is_valid, canonical, mol, error_msg = validate_smiles(smiles)  # Unpack 4
-            assert is_valid, f"SMILES string {smiles} should be valid. Error: {error_msg}"
-            assert canonical is not None, f"Canonical form should not be None for {smiles}"
-            assert mol is not None, f"RDKit mol should not be None for {smiles}"
+            is_valid, canonical, mol, error_msg = validate_smiles(smiles)
+            self.assertTrue(is_valid, f"SMILES string {smiles} should be valid. Error: {error_msg}")
+            self.assertIsNotNone(canonical, f"Canonical form should not be None for {smiles}")
+            self.assertIsNotNone(mol, f"RDKit mol should not be None for {smiles}")
 
-    def test_invalid_smiles(self):
-        """Test validation of invalid SMILES strings."""
-        invalid_smiles = [
-            "X",  # Invalid atom
-            "C(",  # Unclosed parenthesis
-            "CC(",  # Unclosed parenthesis
-            "C1CC",  # Unclosed ring
-            "invalidstructure",  # Random string
+    def test_invalid_smiles(self) -> None:
+        """
+        Test validation of invalid SMILES strings.
+        """
+        invalid_smiles: List[str] = [
+            "X",
+            "C(",
+            "CC(",
+            "C1CC",
+            "invalidstructure",
         ]
 
         for smiles in invalid_smiles:
-            is_valid, canonical, mol, error_msg = validate_smiles(smiles)  # Unpack 4
-            assert not is_valid, f"SMILES string {smiles} should be invalid. Canonical: {canonical}, Mol: {mol}"
+            is_valid, canonical, mol, error_msg = validate_smiles(smiles)
+            self.assertFalse(is_valid, f"SMILES string {smiles} should be invalid. Canonical: {canonical}, Mol: {mol}")
 
-    def test_descriptor_calculation(self):
-        """Test calculation of molecular descriptors for valid SMILES."""
-        test_smiles = "CC(=O)O"  # Acetic acid
+    def test_descriptor_calculation(self) -> None:
+        """
+        Test calculation of molecular descriptors for valid SMILES.
+        """
+        test_smiles = "CC(=O)O"
 
-        # Validate SMILES and get mol object
-        is_valid, canonical, mol, error_msg = validate_smiles(test_smiles)  # Unpack 4
-        assert is_valid, f"SMILES string {test_smiles} should be valid. Error: {error_msg}"
-        assert mol is not None, "Mol object should not be None for descriptor calculation"
+        is_valid, canonical, mol, error_msg = validate_smiles(test_smiles)
+        self.assertTrue(is_valid, f"SMILES string {test_smiles} should be valid. Error: {error_msg}")
+        self.assertIsNotNone(mol, "Mol object should not be None for descriptor calculation")
 
-        # Calculate descriptors
         descriptors = calculate_molecular_descriptors(mol)
 
-        # Check that required descriptors exist
-        assert "molecular_weight" in descriptors
-        assert "logp" in descriptors
-        assert "num_atoms" in descriptors
-        assert "num_bonds" in descriptors
-        assert "num_rings" in descriptors
+        self.assertIn("molecular_weight", descriptors)
+        self.assertIn("logp", descriptors)
+        self.assertIn("num_atoms", descriptors)
+        self.assertIn("num_bonds", descriptors)
+        self.assertIn("num_rings", descriptors)
 
-        # Check specific values for acetic acid
-        assert 58 < descriptors["molecular_weight"] < 62  # ~60.05 g/mol
-        assert descriptors["num_atoms"] == 8  # 2C + 4H + 2O = 8
-        assert descriptors["num_bonds"] >= 7  # 1C-C + 1C=O + 1C-O + 4C-H = 7
+        self.assertGreater(descriptors["molecular_weight"], 58)
+        self.assertLess(descriptors["molecular_weight"], 62)
+        self.assertEqual(descriptors["num_atoms"], 8)
+        self.assertGreaterEqual(descriptors["num_bonds"], 7)
+        self.assertEqual(descriptors["num_rings"], 0)
 
 
 if __name__ == "__main__":
+    logger.info("Starting SMILES validation tests...")
     success = run_tests()
-    if success:
-        print("\nAll SMILES validation tests PASSED!")
-        sys.exit(0)
-    else:
-        print("\nSome SMILES validation tests FAILED!")
-        sys.exit(1)
+    sys.exit(0 if success else 1)

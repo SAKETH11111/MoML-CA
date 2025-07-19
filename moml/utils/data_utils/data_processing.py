@@ -1,185 +1,188 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 """
-Common Data Processing Utilities
+moml/utils/data_utils/data_processing.py
 
-This module contains general-purpose data processing functions used across
-different data processors in the MoML framework.
+This module provides a collection of general-purpose utility functions for
+common data cleaning and preprocessing tasks using the pandas library. These
+functions are designed to be modular and reusable across different data
+pipelines within the MoML-CA framework.
 """
 
-import os
-import pandas as pd
-import numpy as np
-import re
 import logging
+import os
+import re
 from pathlib import Path
-from typing import Union, List, Dict, Optional
+from typing import Dict, List, Optional, Union
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("data_processing")
+import numpy as np
+import pandas as pd
+
+# Logger for this module
+logger = logging.getLogger(__name__)
 
 
 def load_data(file_path: Union[str, Path]) -> pd.DataFrame:
-    """Load data from a CSV file.
+    """
+    Load data from a CSV file into a pandas DataFrame.
 
     Args:
-        file_path: Path to the CSV file
+        file_path (Union[str, Path]): The path to the CSV file.
 
     Returns:
-        DataFrame containing the loaded data
+        pd.DataFrame: A DataFrame containing the loaded data.
     """
     logger.info(f"Loading data from: {file_path}")
     return pd.read_csv(file_path)
 
 
 def inspect_data(df: pd.DataFrame) -> None:
-    """Perform initial inspection of a dataset.
+    """
+    Perform and log a basic inspection of a DataFrame.
+
+    This function provides a quick overview of the DataFrame's properties,
+    including its shape, data types, and the extent of missing values.
 
     Args:
-        df: DataFrame to inspect
+        df (pd.DataFrame): The DataFrame to inspect.
     """
-    logger.info("=== Initial Data Inspection ===")
-    logger.info(f"Dataset shape: {df.shape}")
-    logger.info(f"Data types:\n{df.dtypes}")
-    logger.info(f"Missing values:\n{df.isnull().sum()}")
-    logger.info(f"First 5 rows:\n{df.head()}")
+    logger.info("--- Initial Data Inspection ---")
+    logger.info(f"Dataset Shape: {df.shape}")
+    logger.info(f"Data Types:\n{df.dtypes.to_string()}")
+    logger.info(f"Missing Values per Column:\n{df.isnull().sum().to_string()}")
+    logger.info("---------------------------------")
 
 
 def clean_column_names(df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.DataFrame:
-    """Rename columns for consistency.
+    """
+    Rename DataFrame columns for clarity and consistency.
 
     Args:
-        df: DataFrame to clean
-        column_mapping: Dictionary mapping old column names to new column names
+        df (pd.DataFrame): The DataFrame whose columns will be renamed.
+        column_mapping (Dict[str, str]): A dictionary mapping original column
+            names to their new names.
 
     Returns:
-        DataFrame with renamed columns
+        pd.DataFrame: A new DataFrame with the renamed columns.
     """
-    logger.info("=== Cleaning Column Names ===")
+    logger.info("Cleaning column names...")
     df = df.rename(columns=column_mapping)
-    logger.info("Columns renamed successfully")
+    logger.info("Column names cleaned successfully.")
     return df
 
 
 def convert_numeric_columns(df: pd.DataFrame, numeric_columns: List[str]) -> pd.DataFrame:
-    """Convert specified columns to numeric type.
+    """
+    Convert specified columns of a DataFrame to a numeric type.
+
+    Non-convertible values will be set to NaN (Not a Number).
 
     Args:
-        df: DataFrame to convert
-        numeric_columns: List of column names to convert to numeric
+        df (pd.DataFrame): The DataFrame to process.
+        numeric_columns (List[str]): A list of column names to convert.
 
     Returns:
-        DataFrame with converted numeric columns
+        pd.DataFrame: The DataFrame with specified columns converted to numeric types.
     """
-    logger.info("=== Converting Numeric Columns ===")
-
+    logger.info("Converting columns to numeric type...")
     for col in numeric_columns:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-            logger.info(f"Converted {col} to numeric")
-
+            logger.info(f"  - Converted '{col}' to numeric.")
     return df
 
 
 def handle_missing_values(
     df: pd.DataFrame, numeric_fill: str = "median", categorical_fill: str = "Unknown"
 ) -> pd.DataFrame:
-    """Handle missing values in the dataset.
+    """
+    Impute missing values in a DataFrame.
+
+    Fills missing values in numeric columns with the column's median or mean,
+    and fills missing values in categorical columns with a specified string.
 
     Args:
-        df: DataFrame to process
-        numeric_fill: Method to fill numeric missing values ('median' or 'mean')
-        categorical_fill: Value to fill categorical missing values
+        df (pd.DataFrame): The DataFrame with missing values to handle.
+        numeric_fill (str, optional): The method for filling numeric columns,
+            either 'median' or 'mean'. Defaults to "median".
+        categorical_fill (str, optional): The placeholder value for missing
+            categorical data. Defaults to "Unknown".
 
     Returns:
-        DataFrame with handled missing values
+        pd.DataFrame: The DataFrame with missing values imputed.
     """
-    logger.info("=== Handling Missing Values ===")
-
-    # Get numeric and categorical columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    logger.info("Handling missing values...")
+    numeric_cols = df.select_dtypes(include=np.number).columns
     categorical_cols = df.select_dtypes(include=["object", "category"]).columns
 
-    # Handle numeric columns
     for col in numeric_cols:
-        if not df[col].isna().all():
-            if numeric_fill == "median":
-                fill_value = df[col].median()
-            else:  # mean
-                fill_value = df[col].mean()
-            df[col] = df[col].fillna(fill_value)
-            logger.info(f"Filled missing values in {col} with {numeric_fill}: {fill_value}")
+        if df[col].isnull().sum() > 0:
+            fill_value = df[col].median() if numeric_fill == "median" else df[col].mean()
+            df[col].fillna(fill_value, inplace=True)
+            logger.info(f"  - Filled missing values in numeric column '{col}' with {numeric_fill} ({fill_value:.4f}).")
 
-    # Handle categorical columns
     for col in categorical_cols:
-        df[col] = df[col].fillna(categorical_fill)
-        logger.info(f"Filled missing values in {col} with '{categorical_fill}'")
+        if df[col].isnull().sum() > 0:
+            df[col].fillna(categorical_fill, inplace=True)
+            logger.info(f"  - Filled missing values in categorical column '{col}' with '{categorical_fill}'.")
 
     return df
 
 
-def standardize_text_data(df: pd.DataFrame, text_columns: List[str], special_char_cols: List[str]) -> pd.DataFrame:
-    """Standardize text data in specified columns.
+def standardize_text_data(df: pd.DataFrame, text_columns: List[str]) -> pd.DataFrame:
+    """
+    Standardize text data by stripping whitespace.
 
     Args:
-        df: DataFrame to standardize
-        text_columns: List of column names containing text data
-        special_char_cols: List of column names to remove special characters from
+        df (pd.DataFrame): The DataFrame to process.
+        text_columns (List[str]): A list of column names containing text data.
 
     Returns:
-        DataFrame with standardized text data
+        pd.DataFrame: The DataFrame with standardized text data.
     """
-    logger.info("=== Standardizing Text Data ===")
-
+    logger.info("Standardizing text data...")
     for col in text_columns:
-        if col in df.columns:
+        if col in df.columns and df[col].dtype == "object":
             df[col] = df[col].str.strip()
-            logger.info(f"Removed trailing spaces from {col}")
-
-            if col in special_char_cols:
-                df[col] = df[col].str.replace(r"[^\w\s\-\(\)\[\]\{\}\.,;:+=/\\]", "", regex=True)
-                logger.info(f"Removed special characters from {col}")
-
+            logger.info(f"  - Stripped whitespace from '{col}'.")
     return df
 
 
 def extract_numeric_from_text(text: str) -> Optional[float]:
-    """Extract numeric value from text string.
+    """
+    Extract the first numeric value found in a text string.
+
+    This function also recognizes "ND" or "not detected" as zero.
 
     Args:
-        text: Text string containing numeric value
+        text (str): The text string to parse.
 
     Returns:
-        Extracted numeric value or None if no value found
+        Optional[float]: The extracted numeric value, or None if no numeric
+        value is found.
     """
     if pd.isna(text):
         return None
 
-    text = str(text).lower()
-
-    # Handle "ND" (Non-Detect) as 0
-    if text == "nd" or text == "not detected":
+    text_lower = str(text).lower()
+    if text_lower in ["nd", "not detected"]:
         return 0.0
 
-    # Extract first numeric value
-    numeric_values = re.findall(r"\d+\.?\d*", text)
-    return float(numeric_values[0]) if numeric_values else None
+    # This regex finds the first integer or floating-point number.
+    match = re.search(r"\d+\.?\d*", text_lower)
+    return float(match.group(0)) if match else None
 
 
-def save_processed_data(df: pd.DataFrame, output_path: Union[str, Path], create_dirs: bool = True) -> None:
-    """Save processed DataFrame to CSV file.
+def save_processed_data(df: pd.DataFrame, output_path: Union[str, Path]) -> None:
+    """
+    Save a processed DataFrame to a CSV file.
+
+    This function ensures the output directory exists before saving.
 
     Args:
-        df: DataFrame to save
-        output_path: Path where to save the file
-        create_dirs: Whether to create output directories if they don't exist
+        df (pd.DataFrame): The DataFrame to be saved.
+        output_path (Union[str, Path]): The destination file path.
     """
-    logger.info(f"=== Saving Processed Data to {output_path} ===")
-
-    if create_dirs:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
+    logger.info(f"Saving processed data to: {output_path}")
+    output_dir = Path(output_path).parent
+    os.makedirs(output_dir, exist_ok=True)
     df.to_csv(output_path, index=False)
-    logger.info("Data saved successfully")
+    logger.info("Data saved successfully.")
