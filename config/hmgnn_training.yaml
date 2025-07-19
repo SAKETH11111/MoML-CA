@@ -1,0 +1,167 @@
+# hmgnn_training.yaml
+# Configuration for standalone HMGNN training
+
+# Training parameters
+epochs: 100
+batch_size: 8
+num_workers: 4
+val_split: 0.1
+
+# Optimizer configuration
+optimizer: "adam"
+learning_rate: 1e-3
+weight_decay: 1e-5
+max_grad_norm: 1.0
+
+# HMGNN model configuration
+hmgnn:
+  scale_dims: [29, 29, 29]  # Input feature dimensions for each hierarchical scale
+  hidden_dim: 128
+  env_dim: 0
+  env_mlp: false
+  n_blocks: 2  # Number of GNN blocks per scale
+  layers_per_block: 3  # Number of layers per block
+  edge_attr_dims: [0, 0, 0]  # Edge attribute dimensions for each scale
+  jk_mode: "attention"  # Jumping knowledge aggregation mode
+  node_out_dim: 3  # Node-level output dimension (e.g., forces)
+  graph_out_dim: 19  # Graph-level output dimension (e.g., QM9 properties)
+  cross_scale_exchange: true  # Enable cross-scale attention
+  dropout: 0.2
+  n_heads_cs: 4  # Number of attention heads for cross-scale attention
+  edge_dim_cs: 0  # Edge dimension for cross-scale attention
+  pool_type: "mean"  # Global pooling type
+
+# Hierarchical graph processing
+hierarchical:
+  coarsener:
+    n_levels: 3
+    coarsening_ratios: [1.0, 0.5, 0.25]
+    clustering_method: "functional_groups"  # Use functional groups for molecular coarsening
+    preserve_connectivity: true
+    min_cluster_size: 2
+    max_cluster_size: 10
+  processor:
+    include_cross_scale_edges: true
+    cross_scale_edge_threshold: 5.0
+    cache_hierarchical: true
+
+# Loss configuration
+loss:
+  type: "mse"  # Mean squared error for regression tasks
+  reduction: "mean"
+
+# Callbacks
+early_stopping:
+  enabled: true
+  patience: 15
+  min_delta: 1e-4
+  mode: "min"
+
+checkpointing:
+  enabled: true
+  filepath: "hmgnn_checkpoint.pt"
+  save_best_only: true
+  monitor: "val_loss"
+  mode: "min"
+
+# Learning rate scheduling
+lr_scheduler:
+  enabled: true
+  type: "reduce_on_plateau"
+  factor: 0.5
+  patience: 10
+  min_lr: 1e-6
+  mode: "min"
+
+# Multi-scale loss weighting
+scale_loss_weights:
+  scale_0: 1.0  # Fine scale (atom-level)
+  scale_1: 0.5  # Medium scale (functional groups)
+  scale_2: 0.25  # Coarse scale (molecular fragments)
+
+# Regularization
+regularization:
+  dropout: 0.2
+  weight_decay: 1e-5
+  gradient_clip: 1.0
+
+# Evaluation
+evaluation:
+  metrics: ["mae", "rmse", "r2"]
+  eval_every: 5
+  save_predictions: false
+
+# Data preprocessing
+preprocessing:
+  normalize_features: true
+  normalize_targets: true
+  add_self_loops: false
+
+# Molecular feature configuration
+molecular_features:
+  use_atom_features: true
+  use_bond_features: false  # Start with no edge features
+  use_3d_coordinates: false
+  use_partial_charges: false
+
+# Cross-scale attention configuration
+cross_scale_attention:
+  enabled: true
+  n_heads: 4
+  hidden_dim: 128
+  dropout: 0.1
+  residual_connection: true
+  layer_norm: true
+
+# Training monitoring
+monitoring:
+  log_every: 10
+  plot_training_curves: true
+  save_attention_weights: false  # Set to true for analysis
+  track_gradients: false
+
+# Hardware configuration
+hardware:
+  device: "auto"  # auto, cpu, cuda
+  mixed_precision: false
+  compile_model: false  # PyTorch 2.0 model compilation
+
+# Reproducibility
+seed: 42
+deterministic: true
+
+# Dataset-specific configurations
+dataset_configs:
+  qm9:
+    target_properties: [
+      "mu", "alpha", "homo", "lumo", "gap", "r2", "zpve", 
+      "U0", "U", "H", "G", "Cv", "U0_atom", "U_atom", 
+      "H_atom", "G_atom", "A", "B", "C"
+    ]
+    regression: true
+  
+  spice:
+    predict_forces: true
+    predict_energy: true
+    regression: true
+  
+  pfas:
+    custom_properties: true
+    regression: true
+
+# Hierarchical-specific configurations
+hierarchical_specific:
+  # Graph coarsening parameters
+  functional_group_patterns:
+    use_rdkit: true
+    custom_patterns: []
+  
+  # Cross-scale edge generation
+  cross_scale_edges:
+    method: "mapping_based"  # mapping_based, distance_based
+    edge_attr_dim: 1
+  
+  # Scale-specific processing
+  scale_processing:
+    independent_embedding: false  # Share embeddings across scales
+    scale_specific_heads: true    # Different prediction heads per scale

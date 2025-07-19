@@ -1,0 +1,165 @@
+# joint_training.yaml
+# Configuration for joint DJMGNN and HMGNN training
+
+# Training phases
+pretraining_epochs: 10
+joint_training_epochs: 50
+fine_tuning_epochs: 20
+
+# Enable/disable pretraining
+pretrain_djmgnn: true
+pretrain_hmgnn: true
+
+# Training strategy for joint phase
+training_strategy: "joint"  # Options: "joint", "alternating"
+
+# Data configuration
+batch_size: 8
+num_workers: 4
+val_split: 0.1
+
+# Optimizer configuration
+optimizer: "adam"
+joint_lr: 1e-3
+djmgnn_lr: 1e-3
+hmgnn_lr: 1e-3
+weight_decay: 1e-5
+max_grad_norm: 1.0
+
+# DJMGNN configuration
+djmgnn:
+  in_node_dim: 29
+  hidden_dim: 128
+  n_blocks: 4
+  layers_per_block: 6
+  in_edge_dim: 0
+  jk_mode: "attention"
+  node_output_dims: 3
+  graph_output_dims: 19
+  energy_output_dims: 1
+  dropout: 0.1
+  pool_type: "mean"
+  p_dropedge: 0.1
+  use_supernode: true
+  use_rbf: true
+  rbf_K: 32
+
+# HMGNN configuration
+hmgnn:
+  scale_dims: [29, 29, 29]  # Input dimensions for each scale
+  hidden_dim: 128
+  env_dim: 0
+  env_mlp: false
+  n_blocks: 2
+  layers_per_block: 3
+  edge_attr_dims: [0, 0, 0]  # Edge attribute dims for each scale
+  jk_mode: "attention"
+  node_out_dim: 3
+  graph_out_dim: 19
+  cross_scale_exchange: true
+  dropout: 0.2
+  n_heads_cs: 4
+  edge_dim_cs: 0
+  pool_type: "mean"
+
+# Joint model configuration
+joint:
+  fusion_dim: 256
+  n_fusion_heads: 8
+  fusion_dropout: 0.1
+  alpha: 0.5  # Weight balance between DJMGNN and HMGNN
+  cross_model_weight: 0.1  # Weight for cross-model consistency loss
+  pool_type: "mean"
+
+# Multi-task configuration
+task_configs:
+  qm9_properties:
+    output_dim: 19
+    hidden_dims: [128]
+  force_field:
+    output_dim: 3
+    hidden_dims: [128]
+  pfas_properties:
+    output_dim: 5
+    hidden_dims: [128]
+  treatment_efficacy:
+    output_dim: 1
+    hidden_dims: [64]
+
+# Task weights for multi-task learning
+task_weights:
+  qm9_properties: 1.0
+  force_field: 1000.0  # Higher weight for force predictions
+  pfas_properties: 1.0
+  treatment_efficacy: 1.0
+
+# Hierarchical processing configuration
+hierarchical:
+  coarsener:
+    n_levels: 3
+    coarsening_ratios: [1.0, 0.5, 0.25]
+    clustering_method: "functional_groups"  # Options: "graclus", "functional_groups", "spectral"
+    preserve_connectivity: true
+    min_cluster_size: 2
+    max_cluster_size: 10
+  processor:
+    include_cross_scale_edges: true
+    cross_scale_edge_threshold: 5.0
+    cache_hierarchical: true
+
+# Alternating training configuration (for alternating strategy)
+alternating_config:
+  strategy: "fixed_alternating"  # Options: "fixed_alternating", "adaptive", "phase_based"
+  switch_frequency: 10
+  patience: 5
+  min_improvement: 1e-4
+
+# Callbacks and monitoring
+early_stopping:
+  enabled: true
+  patience: 15
+  min_delta: 1e-4
+
+checkpointing:
+  enabled: true
+  filepath: "joint_mgnn_checkpoint.pt"
+  save_best_only: true
+  save_every: 1000
+
+# Learning rate scheduling
+lr_scheduler:
+  enabled: true
+  type: "reduce_on_plateau"  # Options: "reduce_on_plateau", "cosine", "step"
+  factor: 0.5
+  patience: 10
+  min_lr: 1e-6
+
+# Regularization
+regularization:
+  dropout: 0.2
+  weight_decay: 1e-5
+  gradient_clip: 1.0
+  label_smoothing: 0.0
+
+# Distributed training (if available)
+distributed:
+  enabled: false
+  backend: "nccl"
+  world_size: 1
+  rank: 0
+
+# Evaluation configuration
+evaluation:
+  metrics: ["mae", "rmse", "r2"]
+  eval_every: 5  # Evaluate every N epochs
+  save_predictions: true
+
+# Data augmentation
+augmentation:
+  enabled: false
+  noise_std: 0.01
+  rotation_angle: 15
+  
+# Environment
+seed: 42
+deterministic: true

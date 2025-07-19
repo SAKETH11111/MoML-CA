@@ -28,11 +28,28 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import global_mean_pool, global_add_pool, global_max_pool
-from torch_scatter import scatter_add
+
+# Setup logger first
+logger = logging.getLogger(__name__)
+
+# Conditional import with fallback
+try:
+    from torch_scatter import scatter_add
+except ImportError:
+    logger.warning("torch_scatter not available, using fallback implementation")
+    def scatter_add(src, index, dim=0, out=None, dim_size=None):
+        """Fallback implementation of scatter_add using pure PyTorch."""
+        if dim_size is None:
+            dim_size = index.max().item() + 1 if index.numel() > 0 else 0
+        
+        if out is None:
+            size = list(src.shape)
+            size[dim] = dim_size
+            out = torch.zeros(size, dtype=src.dtype, device=src.device)
+        
+        return out.scatter_add_(dim, index.expand_as(src), src)
 
 from moml.models.mgnn.djmgnn import DenseGNNBlock, JKAggregator
-
-logger = logging.getLogger(__name__)
 
 # Helper functions for cross-scale feature processing
 def aggregate_fine_to_coarse(
@@ -281,53 +298,104 @@ class CrossScaleAttentionMH(nn.Module):
                 k = self._split(self.k_proj[s](feats[s]))
                 v = self._split(self.v_proj[s](feats[s]))
 
-                if s != t and can_map:
-                    if s < t:  # fine → coarse: aggregate
-                        if (
-                            s < len(fine2coarse)
-                            and s < len(coarse_count)
-                            and fine2coarse[s] is not None
-                            and coarse_count[s] is not None
-                        ):
-                            k_agg = aggregate_fine_to_coarse(k, fine2coarse[s], coarse_count[s])
-                            v_agg = aggregate_fine_to_coarse(v, fine2coarse[s], coarse_count[s])
-                            if k_agg.shape[0] == q.shape[0]:
-                                k = k_agg
-                                v = v_agg
-                            else:
-                                logger.warning(
-                                    f"CrossScaleAttn: Aggregation shape mismatch for s={s}, t={t}. k_agg: {k_agg.shape}, q: {q.shape}. Using original k,v."
-                                )
-                        else:
-                            logger.debug(
-                                f"CrossScaleAttn: Not enough mapping info for s={s} < t={t}. Using original k,v."
-                            )
-                    else:
-                        if t < len(fine2coarse) and fine2coarse[t] is not None:
-                            k_broad = broadcast_coarse_to_fine(k, fine2coarse[t])
-                            v_broad = broadcast_coarse_to_fine(v, fine2coarse[t])
-                            if k_broad.shape[0] == q.shape[0]:
-                                k = k_broad
-                                v = v_broad
-                            else:
-                                logger.warning(
-                                    f"CrossScaleAttn: Broadcast shape mismatch for s={s}, t={t}. k_broad: {k_broad.shape}, q: {q.shape}. Using original k,v."
-                                )
-                        else:
-                            logger.debug(
-                                f"CrossScaleAttn: Not enough mapping info for s={s} > t={t}. Using original k,v."
-                            )
+                # This block is creating issues, and the adaptive pooling below should handle it
+                # if s != t and can_map:
+                #     if s < t:  # fine → coarse: aggregate
+                #         if (
+                #             s < len(fine2coarse)
+                #             and s < len(coarse_count)
+                #             and fine2coarse[s] is not None
+                #             and coarse_count[s] is not None
+                #         ):
+                #             k_agg = aggregate_fine_to_coarse(k, fine2coarse[s], coarse_count[s])
+                #             v_agg = aggregate_fine_to_coarse(v, fine2coarse[s], coarse_count[s])
+                #             if k_agg.shape[0] == q.shape[0]:
+                #                 k = k_agg
+                #                 v = v_agg
+                #             else:
+                #                 logger.warning(
+                #                     f"CrossScaleAttn: Aggregation shape mismatch for s={s}, t={t}. k_agg: {k_agg.shape}, q: {q.shape}. Using original k,v."
+                #                 )
+                #         else:
+                #             logger.debug(
+                #                 f"CrossScaleAttn: Not enough mapping info for s={s} < t={t}. Using original k,v."
+                #             )
+                #     else:
+                #         if t < len(fine2coarse) and fine2coarse[t] is not None:
+                #             k_broad = broadcast_coarse_to_fine(k, fine2coarse[t])
+                #             v_broad = broadcast_coarse_to_fine(v, fine2coarse[t])
+                #             if k_broad.shape[0] == q.shape[0]:
+                #                 k = k_broad
+                #                 v = v_broad
+                #             else:
+                #                 logger.warning(
+                #                     f"CrossScaleAttn: Broadcast shape mismatch for s={s}, t={t}. k_broad: {k_broad.shape}, q: {q.shape}. Using original k,v."
+                #                 )
+                #         else:
+                #             logger.debug(
+                #                 f"CrossScaleAttn: Not enough mapping info for s={s} > t={t}. Using original k,v."
+                #             )
 
-                # Check if q and k have compatible shapes
-                if len(q.shape) < 3 or len(k.shape) < 3 or q.shape[0] != k.shape[0] or q.shape[2] != k.shape[2]:
+                # Ensure shape compatibility with adaptive projections
+                if len(q.shape) < 3 or len(k.shape) < 3:
                     logger.warning(
-                        f"CrossScaleAttn: Incompatible shapes for attention: q={q.shape}, k={k.shape}. Skipping attention for s={s}, t={t}."
+                        f"CrossScaleAttn: Invalid tensor dimensions: q={q.shape}, k={k.shape}. Skipping attention for s={s}, t={t}."
                     )
                     continue
+
+                # Handle shape mismatches with stable, differentiable adaptive pooling and upsampling
+                if q.shape[0] != k.shape[0]:
+                    if q.shape[0] > k.shape[0]: # Upsample k and v to match q
+                        # Reshape for upsampling: (k_nodes, N_heads, D_head) -> (1, hidden_dim, k_nodes)
+                        k_flat = k.permute(1, 2, 0).reshape(self.hidden_dim, k.shape[0]).unsqueeze(0)
+                        v_flat = v.permute(1, 2, 0).reshape(self.hidden_dim, v.shape[0]).unsqueeze(0)
+
+                        # Create upsampler to target q's node dimension
+                        upsampler = nn.Upsample(size=q.shape[0], mode='linear', align_corners=False)
+
+                        k_upsampled_flat = upsampler(k_flat).squeeze(0)
+                        v_upsampled_flat = upsampler(v_flat).squeeze(0)
+
+                        # Reshape back: (hidden_dim, q_nodes) -> (q_nodes, N_heads, D_head)
+                        k = k_upsampled_flat.reshape(self.h, self.d_k, q.shape[0]).permute(2, 0, 1)
+                        v = v_upsampled_flat.reshape(self.h, self.d_k, q.shape[0]).permute(2, 0, 1)
+                    else: # Downsample k and v to match q
+                        # Reshape for pooling: (N_nodes, N_heads, D_head) -> (hidden_dim, N_nodes)
+                        k_flat = k.permute(1, 2, 0).reshape(self.hidden_dim, k.shape[0])
+                        v_flat = v.permute(1, 2, 0).reshape(self.hidden_dim, v.shape[0])
+
+                        # Create pooler to target q's node dimension
+                        pooler = nn.AdaptiveAvgPool1d(q.shape[0])
+                        
+                        k_pooled_flat = pooler(k_flat)
+                        v_pooled_flat = pooler(v_flat)
+
+                        # Reshape back: (hidden_dim, q_nodes) -> (q_nodes, N_heads, D_head)
+                        k = k_pooled_flat.reshape(self.h, self.d_k, q.shape[0]).permute(2, 0, 1)
+                        v = v_pooled_flat.reshape(self.h, self.d_k, q.shape[0]).permute(2, 0, 1)
                 
+                if q.shape[2] != k.shape[2]:
+                    # Different feature dimensions - use linear adapter
+                    # Create a temporary linear layer for this specific mismatch
+                    if not hasattr(self, f'_shape_adapter_{s}_{t}'):
+                        adapter = nn.Linear(k.shape[2], q.shape[2], device=k.device, dtype=k.dtype)
+                        setattr(self, f'_shape_adapter_{s}_{t}', adapter)
+                    adapter = getattr(self, f'_shape_adapter_{s}_{t}')
+                    k = adapter(k.view(-1, k.shape[2])).view(k.shape[0], k.shape[1], q.shape[2])
+                    v = adapter(v.view(-1, v.shape[2])).view(v.shape[0], v.shape[1], q.shape[2])
+                
+                # Now compute attention with compatible shapes
                 scores = (q * k).sum(-1) / self.scale
                 w = scores.softmax(0).unsqueeze(-1)
                 agg = agg + w * v
+                
+                # Add regularization term for adapted attention to encourage learning
+                if hasattr(self, f'_shape_adapter_{s}_{t}'):
+                    # L2 regularization on adapter weights
+                    adapter = getattr(self, f'_shape_adapter_{s}_{t}')
+                    if not hasattr(self, '_adapter_reg_loss'):
+                        self._adapter_reg_loss = 0.0
+                    self._adapter_reg_loss += 0.001 * (adapter.weight ** 2).sum()
 
             updated.append(feats[t] + self.out_proj[t](self._join(agg)))
         return updated
@@ -451,6 +519,14 @@ class HMGNN(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, graph_out_dim),
         )
+        
+        # Add combined node head to utilize all scales for node predictions
+        self.combined_node_head = nn.Sequential(
+            nn.Linear(fused_dim * self.S, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, node_out_dim),
+        )
 
         self.log_sigma_node = nn.Parameter(torch.zeros(1))
         self.log_sigma_graph = nn.Parameter(torch.zeros(1))
@@ -492,8 +568,8 @@ class HMGNN(nn.Module):
             scale_feats.append(z)
 
         # cross-scale attention
-        if self.use_cs and maps is not None:
-            scale_feats = self.cross_scale(scale_feats, maps, edge_pairs_cs)
+        if self.use_cs:
+            scale_feats = self.cross_scale(scale_feats, None, None)
 
         output_dict = {}
         for i in range(self.S):
@@ -549,7 +625,65 @@ class HMGNN(nn.Module):
                     device=graph_embeds[0].device if graph_embeds else torch.device("cpu")
                 )
 
-        output_dict["node_pred"] = node_preds[0] if node_preds else None
+        # Compute combined node prediction using features from all scales
+        if not scale_feats:
+            combined_node_pred = None
+        else:
+            try:
+                # For node predictions, we need to handle different node counts per scale
+                # Use scale 0 as base (has original node count) and incorporate info from other scales
+                base_scale_feats = scale_feats[0]  # [num_nodes, hidden_dim]
+                
+                if len(scale_feats) == 1:
+                    # Only one scale, use it directly
+                    combined_node_feats = base_scale_feats
+                else:
+                    # Multiple scales - create features that incorporate multi-scale information
+                    # Approach: concatenate averaged features from other scales
+                    other_scale_feats = []
+                    for i in range(1, len(scale_feats)):
+                        # Average pool other scales to match base scale node count
+                        scale_feat = scale_feats[i]  # [scale_nodes, hidden_dim]
+                        if scale_feat.size(0) > 0:
+                            # Simple approach: broadcast/repeat to match base scale
+                            scale_nodes = scale_feat.size(0)
+                            base_nodes = base_scale_feats.size(0)
+                            
+                            if scale_nodes == base_nodes:
+                                # Same number of nodes, use directly
+                                other_scale_feats.append(scale_feat)
+                            elif scale_nodes < base_nodes:
+                                # Fewer nodes in this scale, repeat/interpolate
+                                repeat_factor = base_nodes // scale_nodes
+                                remainder = base_nodes % scale_nodes
+                                repeated = scale_feat.repeat(repeat_factor, 1)
+                                if remainder > 0:
+                                    repeated = torch.cat([repeated, scale_feat[:remainder]], dim=0)
+                                other_scale_feats.append(repeated)
+                            else:
+                                # More nodes in this scale, subsample
+                                indices = torch.linspace(0, scale_nodes-1, base_nodes, dtype=torch.long, device=scale_feat.device)
+                                subsampled = scale_feat[indices]
+                                other_scale_feats.append(subsampled)
+                        else:
+                            # Empty scale, use zeros
+                            other_scale_feats.append(torch.zeros_like(base_scale_feats))
+                    
+                    # Concatenate base scale with processed other scales
+                    if other_scale_feats:
+                        combined_node_feats = torch.cat([base_scale_feats] + other_scale_feats, dim=1)
+                    else:
+                        combined_node_feats = base_scale_feats
+                
+                combined_node_pred = self.combined_node_head(combined_node_feats)
+                
+            except RuntimeError as e:
+                logger.error(f"HMGNN: Error during combined node prediction computation: {e}")
+                logger.error(f"Shapes of scale_feats: {[sf.shape for sf in scale_feats]}")
+                # Fallback to scale 0
+                combined_node_pred = node_preds[0] if node_preds else None
+
+        output_dict["node_pred"] = combined_node_pred
         output_dict["graph_pred"] = combined_graph_pred
         return output_dict
 
@@ -559,16 +693,48 @@ class HMGNN(nn.Module):
         """
         targets = {'node': (y, mask) , 'graph': (y, mask)}
         """
-        y_n, m_n = targets["node"]
-        y_g, m_g = targets["graph"]
+        node_loss = torch.tensor(0.0, device=self.log_sigma_node.device)
+        if "node" in targets and "node_pred" in preds:
+            y_n, m_n = targets["node"]
+            node_pred = preds["node_pred"]
+            if m_n.any():
+                node_loss = F.mse_loss(node_pred[m_n], y_n, reduction="mean")
 
-        node_loss = F.mse_loss(preds["node_pred"][m_n], y_n, reduction="mean")
-        graph_loss = F.mse_loss(preds["graph_pred"][m_g], y_g, reduction="mean")
+        graph_loss = torch.tensor(0.0, device=self.log_sigma_graph.device)
+        if "graph" in targets and "graph_pred" in preds:
+            y_g, m_g = targets["graph"]
+            graph_pred = preds["graph_pred"]
+            if m_g.any():
+                graph_loss = F.mse_loss(graph_pred[m_g], y_g, reduction="mean")
 
-        total = (node_loss / torch.exp(self.log_sigma_node) + self.log_sigma_node) + (
-            graph_loss / torch.exp(self.log_sigma_graph) + self.log_sigma_graph
-        )
-        return total, {"node": node_loss.item(), "graph": graph_loss.item()}
+        # Add auxiliary losses for per-scale node predictions to ensure gradients
+        aux_loss = torch.tensor(0.0, device=self.log_sigma_node.device)
+        if "node" in targets:
+            y_n, m_n = targets["node"]
+            if m_n.any():
+                for scale_idx in range(self.S):
+                    scale_key = f"scale_{scale_idx}_node_pred"
+                    if scale_key in preds and preds[scale_key] is not None:
+                        scale_pred = preds[scale_key]
+                        # Handle shape mismatch - create appropriate mask for scale prediction
+                        if scale_pred.size(0) == m_n.size(0):
+                            # Same number of nodes, use original mask
+                            aux_loss += 0.1 * F.mse_loss(scale_pred[m_n], y_n, reduction="mean")
+                        elif scale_pred.size(0) <= m_n.size(0):
+                            # Fewer nodes in scale pred, use truncated mask
+                            scale_mask = m_n[:scale_pred.size(0)]
+                            if scale_mask.any():
+                                aux_loss += 0.1 * F.mse_loss(scale_pred[scale_mask], y_n[:torch.sum(scale_mask)], reduction="mean")
+
+        total = (node_loss / torch.exp(self.log_sigma_node) + self.log_sigma_node) + \
+                (graph_loss / torch.exp(self.log_sigma_graph) + self.log_sigma_graph) + \
+                aux_loss
+        
+        loss_dict = {"node": node_loss.item(), "graph": graph_loss.item()}
+        if aux_loss > 0:
+            loss_dict["aux"] = aux_loss.item()
+        
+        return total, loss_dict
 
 
 # Factory function

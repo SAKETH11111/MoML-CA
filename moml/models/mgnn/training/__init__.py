@@ -20,6 +20,13 @@ from moml.models.mgnn.training.trainer import (
     create_trainer,
 )
 
+# Import joint trainer functionality
+from moml.models.mgnn.training.joint_trainer import (
+    JointMGNNTrainer,
+    AlternatingTrainingStrategy,
+    create_joint_trainer,
+)
+
 # Import callback functionality
 from moml.models.mgnn.training.callbacks import (
     EarlyStopping, 
@@ -33,6 +40,10 @@ __all__ = [
     "MGNNTrainer",
     "train_epoch", 
     "create_trainer",
+    # Joint training classes and functions
+    "JointMGNNTrainer",
+    "AlternatingTrainingStrategy",
+    "create_joint_trainer",
     # Callback classes
     "EarlyStopping",
     "ModelCheckpoint",

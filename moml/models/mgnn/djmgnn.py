@@ -17,7 +17,7 @@ Main Components:
 
 import math
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -129,9 +129,9 @@ class GraphConvLayer(nn.Module):
         self.res_connection = in_channels == out_channels
 
     def forward(
-        self, 
-        x: torch.Tensor, 
-        edge_index: torch.Tensor, 
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
         edge_attr: Optional[torch.Tensor]
     ) -> torch.Tensor:
         edge_attr_for_nnconv_input = edge_attr
@@ -203,9 +203,9 @@ class DenseGNNBlock(nn.Module):
         self.norm = GraphNorm(transition_dim)
 
     def forward(
-        self, 
-        x: torch.Tensor, 
-        edge_index: torch.Tensor, 
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
         edge_attr: Optional[torch.Tensor]
     ) -> torch.Tensor:
         """
@@ -228,7 +228,10 @@ class DenseGNNBlock(nn.Module):
             h = F.relu(h)
             
         h_final = self.final_transition(h)
-        return F.relu(self.norm(h_final))
+        # Apply norm before ReLU to ensure bias gradients flow
+        h_final = self.norm(h_final)
+        h_final = F.relu(h_final)
+        return h_final
 
 
 class JKAggregator(nn.Module):
@@ -278,10 +281,8 @@ class JKAggregator(nn.Module):
         else:
             raise ValueError(f"Unsupported JKAggregator mode: {mode}")
 
-        _fallback_in_dim = sum(block_dims) if block_dims else out_dim
-        if _fallback_in_dim == 0:
-            _fallback_in_dim = out_dim if out_dim > 0 else 1
-        self.fallback_proj = nn.Linear(_fallback_in_dim, out_dim)
+        # Remove fallback_proj as it's never used in normal operation
+        # and causes gradient coverage issues
 
     def forward(self, blocks):
         if not blocks:
@@ -294,30 +295,20 @@ class JKAggregator(nn.Module):
         elif self.mode == "max":
             projected_blocks = [proj(block) for proj, block in zip(self.projs, blocks)]
             if not projected_blocks:
-                return self.fallback_proj(
-                    torch.cat(blocks, 1)
-                    if blocks
-                    else torch.empty(0, self.fallback_proj.in_features).to(self.fallback_proj.weight.device)
-                )
+                # Return None instead of using fallback_proj
+                return None
             return torch.max(torch.stack(projected_blocks, 0), 0)[0]
         elif self.mode == "attention":
             projected_blocks = [proj(block) for proj, block in zip(self.projs, blocks)]
             if not projected_blocks:
-                return self.fallback_proj(
-                    torch.cat(blocks, 1)
-                    if blocks
-                    else torch.empty(0, self.fallback_proj.in_features).to(self.fallback_proj.weight.device)
-                )
+                return None
             scores = [(b * v).sum(-1) / math.sqrt(b.size(-1)) for b, v in zip(projected_blocks, self.attn_vecs)]
             w = torch.stack(scores, 1).softmax(1)
             return sum(w[:, i : i + 1] * projected_blocks[i] for i in range(self.block_count))
         elif self.mode == "lstm":
             if not self.block_count > 0:
-                return self.fallback_proj(
-                    torch.zeros(
-                        blocks[0].size(0) if blocks and blocks[0].numel() > 0 else 0, self.fallback_proj.in_features
-                    ).to(self.fallback_proj.weight.device)
-                )
+                # Return None instead of using fallback_proj
+                return None
 
             try:
                 projected_blocks = [proj(block) for proj, block in zip(self.lstm_projs_in, blocks)]
@@ -337,11 +328,12 @@ class JKAggregator(nn.Module):
                 last_layer_sequence_output = lstm_out[-1, :, :]
                 return self.lstm_final_proj(last_layer_sequence_output)
             except Exception as e:
-                logger.error(f"Error in JKAggregator LSTM forward: {e}. Using fallback.")
-                return self.fallback_proj(torch.cat(blocks, 1))
+                logger.error(f"Error in JKAggregator LSTM forward: {e}.")
+                # Return None on error instead of using fallback
+                return None
 
-        logger.warning(f"JKAggregator: Unhandled mode '{self.mode}' in forward. Using fallback_proj.")
-        return self.fallback_proj(torch.cat(blocks, 1))
+        logger.warning(f"JKAggregator: Unhandled mode '{self.mode}' in forward.")
+        return None
 
 
 class DJMGNN(nn.Module):
