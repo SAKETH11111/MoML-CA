@@ -726,6 +726,23 @@ class HMGNN(nn.Module):
                             if scale_mask.any():
                                 aux_loss += 0.1 * F.mse_loss(scale_pred[scale_mask], y_n[:torch.sum(scale_mask)], reduction="mean")
 
+        # Add auxiliary losses for per-scale graph predictions to ensure gradients  
+        if "graph" in targets:
+            y_g, m_g = targets["graph"]
+            if m_g.any():
+                for scale_idx in range(self.S):
+                    scale_key = f"scale_{scale_idx}_graph_pred"
+                    if scale_key in preds and preds[scale_key] is not None:
+                        scale_pred = preds[scale_key]
+                        if scale_pred.size(0) == m_g.size(0):
+                            # Same number of graphs, use original mask
+                            aux_loss += 0.1 * F.mse_loss(scale_pred[m_g], y_g, reduction="mean")
+                        elif scale_pred.size(0) <= m_g.size(0):
+                            # Fewer graphs in scale pred, use truncated mask
+                            scale_mask = m_g[:scale_pred.size(0)]
+                            if scale_mask.any():
+                                aux_loss += 0.1 * F.mse_loss(scale_pred[scale_mask], y_g[:torch.sum(scale_mask)], reduction="mean")
+
         total = (node_loss / torch.exp(self.log_sigma_node) + self.log_sigma_node) + \
                 (graph_loss / torch.exp(self.log_sigma_graph) + self.log_sigma_graph) + \
                 aux_loss

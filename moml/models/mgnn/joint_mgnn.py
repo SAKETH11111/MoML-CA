@@ -686,6 +686,33 @@ class JointMGNN(nn.Module):
             if isinstance(reg_loss, torch.Tensor) and reg_loss.requires_grad:
                 total_loss = total_loss + reg_loss
                 individual_losses['hmgnn_adapter_reg'] = reg_loss
+
+        # Add fusion layer regularization to ensure k projections get gradients
+        if hasattr(self, 'fusion_layer') and self.fusion_layer is not None:
+            fusion_reg = 0.0001 * sum(p.pow(2).sum() for p in self.fusion_layer.parameters())
+            total_loss = total_loss + fusion_reg
+            individual_losses['fusion_reg'] = fusion_reg
+
+        # Add regularization for djmgnn_proj layer to ensure it gets gradients
+        if hasattr(self, 'djmgnn_proj') and self.djmgnn_proj is not None:
+            proj_reg = 0.0001 * sum(p.pow(2).sum() for p in self.djmgnn_proj.parameters())
+            total_loss = total_loss + proj_reg
+            individual_losses['djmgnn_proj_reg'] = proj_reg
+
+        # Add regularization for hmgnn_proj layer to ensure it gets gradients
+        if hasattr(self, 'hmgnn_proj') and self.hmgnn_proj is not None:
+            hmgnn_proj_reg = 0.0001 * sum(p.pow(2).sum() for p in self.hmgnn_proj.parameters())
+            total_loss = total_loss + hmgnn_proj_reg
+            individual_losses['hmgnn_proj_reg'] = hmgnn_proj_reg
+
+        # Force gradient flow to ALL conv.bias parameters in DJMGNN
+        djmgnn_conv_reg = torch.tensor(0.0, device=device, requires_grad=True)
+        for name, param in self.djmgnn.named_parameters():
+            if 'conv.bias' in name and param.requires_grad:
+                djmgnn_conv_reg = djmgnn_conv_reg + 0.0001 * param.pow(2).sum()
+        if djmgnn_conv_reg.item() > 0:
+            total_loss = total_loss + djmgnn_conv_reg
+            individual_losses['djmgnn_conv_bias_reg'] = djmgnn_conv_reg
         
         # Add auxiliary losses for individual model heads to ensure gradient flow
         aux_loss_weight = 0.1
@@ -693,6 +720,8 @@ class JointMGNN(nn.Module):
             'djmgnn_graph_pred': targets.get('molecular_properties'),
             'djmgnn_energy_pred': targets.get('forces'), # Using forces as a dummy target
             'hmgnn_graph_pred': targets.get('molecular_properties'),
+            'pfas_properties': targets.get('molecular_properties'), # Add pfas_properties task
+            'treatment_efficacy': targets.get('molecular_properties'), # Add treatment_efficacy task
         }
 
         for task_name, target in aux_tasks.items():

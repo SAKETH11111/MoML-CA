@@ -1,0 +1,272 @@
+# validation.yaml
+# Optimized configuration for Joint MGNN validation experiments
+# This config is designed for quick validation while ensuring meaningful results
+
+# Experiment metadata
+experiment_name: "joint_mgnn_validation"
+description: "Small-scale validation to verify joint training effectiveness"
+version: "1.0"
+
+# Dataset configuration
+dataset:
+  name: "qm9"
+  root: "data"
+  subset_size: 500  # Small subset for quick validation
+  val_split: 0.2
+  test_split: 0.0  # Skip test set for validation
+  seed: 42
+
+# Training configuration
+training:
+  epochs: 5  # Short training for validation
+  batch_size: 4  # Small batches to reduce memory usage
+  num_workers: 0  # Avoid multiprocessing issues
+  learning_rate: 1e-3
+  weight_decay: 1e-5
+  gradient_clip: 1.0
+  
+  # Validation-specific optimizations
+  log_interval: 2  # Log every 2 batches
+  eval_interval: 1  # Evaluate every epoch
+  early_stopping:
+    enabled: false  # Disable for validation
+    patience: 10
+
+# Model configurations (reduced complexity for validation)
+djmgnn:
+  in_node_dim: 29
+  hidden_dim: 64  # Reduced from typical 128
+  n_blocks: 2     # Reduced from typical 4
+  layers_per_block: 3  # Reduced from typical 6
+  in_edge_dim: 0
+  jk_mode: "attention"
+  node_output_dims: 3
+  graph_output_dims: 19
+  energy_output_dims: 1
+  dropout: 0.1
+  pool_type: "mean"
+  p_dropedge: 0.0  # Disable for validation
+  use_supernode: false  # Disable for validation
+  use_rbf: false  # Disable for validation
+  rbf_K: 16
+
+hmgnn:
+  scale_dims: [29, 29, 29]
+  hidden_dim: 64  # Reduced from typical 128
+  env_dim: 0
+  env_mlp: false
+  n_blocks: 2     # Reduced from typical 3
+  layers_per_block: 2  # Reduced from typical 3
+  edge_attr_dims: [0, 0, 0]
+  jk_mode: "attention"
+  node_out_dim: 3
+  graph_out_dim: 19
+  cross_scale_exchange: true
+  dropout: 0.1
+  n_heads_cs: 4  # Reduced from typical 8
+  edge_dim_cs: 0
+  pool_type: "mean"
+
+# Joint model configuration
+joint:
+  fusion_dim: 128  # Reduced from typical 256
+  n_fusion_heads: 4  # Reduced from typical 8
+  fusion_dropout: 0.1
+  alpha: 0.5  # Equal weight to both models
+  cross_model_weight: 0.1
+  pool_type: "mean"
+
+# Task configurations for multi-task heads
+task_configs:
+  molecular_properties:
+    output_dim: 19
+    hidden_dims: [64]  # Reduced complexity
+  forces:
+    output_dim: 3
+    hidden_dims: [64]
+  pfas_properties:
+    output_dim: 5
+    hidden_dims: [64]
+  treatment_efficacy:
+    output_dim: 1
+    hidden_dims: [32]
+
+# Task weights for loss computation
+task_weights:
+  molecular_properties: 1.0
+  forces: 100.0  # Higher weight for node-level tasks
+  pfas_properties: 1.0
+  treatment_efficacy: 1.0
+
+# Hierarchical processing (simplified for validation)
+hierarchical:
+  coarsener:
+    n_levels: 3
+    coarsening_ratios: [1.0, 0.5, 0.25]
+    clustering_method: "functional_groups"
+    preserve_connectivity: true
+    min_cluster_size: 2
+    max_cluster_size: 8  # Reduced for validation
+  processor:
+    include_cross_scale_edges: false  # Disable for validation
+    cross_scale_edge_threshold: 3.0
+    cache_hierarchical: false  # Disable caching for validation
+
+# Validation-specific settings
+validation:
+  # Success criteria for validation experiment
+  success_criteria:
+    gradient_coverage_threshold: 95.0  # Minimum gradient coverage percentage
+    convergence_threshold: 0.1  # Minimum relative loss improvement
+    joint_improvement_threshold: 2.0  # Minimum % improvement over individuals
+    max_training_time: 300  # Maximum training time in seconds
+  
+  # Monitoring settings
+  monitor_gradients: true
+  gradient_analysis_interval: 1  # Analyze gradients every epoch
+  memory_monitoring: true
+  
+  # Output settings
+  save_models: false  # Don't save models for validation
+  save_plots: true
+  save_detailed_logs: true
+  
+  # Comparison settings
+  run_individual_baselines: true  # Compare against DJMGNN and HMGNN
+  statistical_significance: true  # Compute significance tests
+
+# Device and compute settings
+compute:
+  device: "auto"  # Will select CUDA if available, else CPU
+  mixed_precision: false  # Disable for validation to avoid issues
+  compile_model: false  # Disable PyTorch 2.0 compilation for validation
+  deterministic: true  # Ensure reproducible results
+  benchmark: false  # Disable cudnn benchmarking
+
+# Logging configuration
+logging:
+  level: "INFO"
+  log_to_file: true
+  log_file: "validation_experiment.log"
+  log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # Metrics to track
+  track_metrics:
+    - "loss"
+    - "gradient_coverage"
+    - "gradient_norms"
+    - "parameter_utilization"
+    - "training_time"
+    - "memory_usage"
+
+# Output configuration
+output:
+  base_dir: "validation_results"
+  experiment_subdir: true  # Create subdirectory with timestamp
+  save_config: true
+  save_results_json: true
+  save_results_csv: true
+  save_plots: true
+  save_model_summaries: true
+
+# Quick validation preset (even faster settings)
+quick_validation:
+  dataset:
+    subset_size: 100  # Very small subset
+  training:
+    epochs: 3  # Very short training
+    batch_size: 2  # Very small batches
+  djmgnn:
+    hidden_dim: 32  # Very small model
+    n_blocks: 1
+  hmgnn:
+    hidden_dim: 32
+    n_blocks: 1
+  joint:
+    fusion_dim: 64
+    n_fusion_heads: 2
+
+# Server deployment settings
+deployment:
+  # Resource limits for server deployment
+  max_memory_gb: 8  # Maximum memory usage
+  max_gpu_memory_gb: 4  # Maximum GPU memory usage
+  max_training_time_minutes: 30  # Maximum total training time
+  
+  # Error handling
+  continue_on_error: true  # Continue validation even if individual models fail
+  timeout_individual_models: 600  # Timeout for individual model training (seconds)
+  
+  # Progress reporting
+  progress_file: "validation_progress.json"  # File to track progress
+  update_interval: 10  # Update progress every N batches
+  
+  # Environment checks
+  check_dependencies: true  # Verify all dependencies are available
+  check_data_availability: true  # Verify datasets are accessible
+  check_compute_resources: true  # Verify compute resources are sufficient
+
+# Expected validation outcomes
+expected_results:
+  # These are rough estimates for validation success
+  min_gradient_coverage: 90.0  # Minimum acceptable gradient coverage
+  max_individual_model_loss: 10.0  # Maximum acceptable loss for individual models
+  min_joint_model_improvement: 1.0  # Minimum improvement percentage expected
+  max_training_time_per_epoch: 60.0  # Maximum time per epoch (seconds)
+  
+  # Warnings thresholds
+  gradient_coverage_warning: 95.0
+  loss_convergence_warning: 0.05
+  training_time_warning: 30.0
+
+# Troubleshooting guidance
+troubleshooting:
+  common_issues:
+    gradient_coverage_low:
+      - "Add L2 regularization to unused parameters"
+      - "Check for unused task heads"
+      - "Verify fusion layer connectivity"
+    
+    training_not_converging:
+      - "Reduce learning rate"
+      - "Increase batch size"
+      - "Check gradient clipping"
+    
+    memory_issues:
+      - "Reduce batch size"
+      - "Reduce model dimensions"
+      - "Use gradient checkpointing"
+    
+    slow_training:
+      - "Reduce model complexity"
+      - "Disable expensive features"
+      - "Check data loading efficiency"
+
+# Version compatibility
+compatibility:
+  pytorch_min_version: "1.12.0"
+  torch_geometric_min_version: "2.0.0"
+  python_min_version: "3.8"
+  
+# Data augmentation (disabled for validation)
+augmentation:
+  enabled: false
+  noise_std: 0.0
+  rotation_enabled: false
+
+# Advanced validation settings
+advanced:
+  # Statistical analysis
+  run_multiple_seeds: false  # Run with multiple random seeds
+  seeds: [42, 123, 456]
+  statistical_tests: false  # Run statistical significance tests
+  
+  # Profiling
+  profile_training: false  # Profile training performance
+  profile_memory: false  # Profile memory usage
+  profile_gradients: true  # Profile gradient computation
+  
+  # Debugging
+  debug_mode: false
+  save_intermediate_states: false
+  validate_every_step: false

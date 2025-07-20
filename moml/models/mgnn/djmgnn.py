@@ -125,6 +125,14 @@ class GraphConvLayer(nn.Module):
             nn.ReLU()
         )
         self.conv = NNConv(in_channels, out_channels, nn=self.edge_mlp, aggr="add")
+        
+        # Initialize conv bias with small positive values to prevent dead ReLU
+        if hasattr(self.conv, 'bias') and self.conv.bias is not None:
+            nn.init.constant_(self.conv.bias, 0.01)
+        
+        # Add learnable bias after normalization to guarantee gradient flow
+        self.post_norm_bias = nn.Parameter(torch.zeros(out_channels))
+        
         self.norm = GraphNorm(out_channels)
         self.res_connection = in_channels == out_channels
 
@@ -151,7 +159,8 @@ class GraphConvLayer(nn.Module):
 
         h = self.conv(x, edge_index, edge_attr_for_nnconv_input)
         h = self.norm(h)
-        h = F.relu(h)
+        h = h + self.post_norm_bias  # Ensure bias contribution
+        h = F.leaky_relu(h, negative_slope=0.01)
 
         if self.res_connection:
             h = h + x
@@ -196,8 +205,13 @@ class DenseGNNBlock(nn.Module):
         self.transition_layers = nn.ModuleList()
         
         for _ in range(n_layers):
-            self.conv_layers.append(GraphConvLayer(hidden_dim, hidden_dim, edge_attr_dim))
-            self.transition_layers.append(nn.Linear(hidden_dim * 2, hidden_dim))
+            conv_layer = GraphConvLayer(hidden_dim, hidden_dim, edge_attr_dim)
+            self.conv_layers.append(conv_layer)
+            
+            transition_layer = nn.Linear(hidden_dim * 2, hidden_dim)
+            # Initialize transition layer bias to small positive values
+            nn.init.constant_(transition_layer.bias, 0.01)
+            self.transition_layers.append(transition_layer)
 
         self.final_transition = nn.Linear(hidden_dim, transition_dim)
         self.norm = GraphNorm(transition_dim)
@@ -225,12 +239,12 @@ class DenseGNNBlock(nn.Module):
             h_conv = self.conv_layers[i](h, edge_index, edge_attr)
             h_cat = torch.cat([h, h_conv], dim=1)
             h = self.transition_layers[i](h_cat)
-            h = F.relu(h)
+            h = F.leaky_relu(h, negative_slope=0.01)
             
         h_final = self.final_transition(h)
         # Apply norm before ReLU to ensure bias gradients flow
         h_final = self.norm(h_final)
-        h_final = F.relu(h_final)
+        h_final = F.leaky_relu(h_final, negative_slope=0.01)
         return h_final
 
 
