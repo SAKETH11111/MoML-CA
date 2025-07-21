@@ -438,7 +438,7 @@ class HierarchicalGraphCoarsener:
         self, 
         data: Data, 
         mol: Optional[Any] = None
-    ) -> Tuple[List[Data], List[torch.Tensor], List[torch.Tensor]]:
+    ) -> Tuple[List[Data], List[torch.Tensor], List[torch.Tensor], List[Tuple[torch.Tensor, torch.Tensor]]]:
         """
         Create complete hierarchical representation of a graph.
         
@@ -466,7 +466,8 @@ class HierarchicalGraphCoarsener:
             if level < self.n_levels - 1:
                 current_data = coarsened_data
         
-        return scale_data, mappings, cluster_counts
+        cross_scale_edges = self._generate_cross_scale_edges(scale_data, mappings)
+        return scale_data, mappings, cluster_counts, cross_scale_edges
 
 
 class HierarchicalDataProcessor:

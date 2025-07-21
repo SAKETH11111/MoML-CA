@@ -508,11 +508,38 @@ class JointMGNN(nn.Module):
         djmgnn_raw_features = djmgnn_out['node_pred'] if djmgnn_out['node_pred'].numel() > 0 else None
         hmgnn_raw_features = hmgnn_out['node_pred'] if hmgnn_out['node_pred'] is not None and hmgnn_out['node_pred'].numel() > 0 else None
         
-        # Cross-model fusion - always run fusion to keep parameters in computation graph
-        if use_fusion and djmgnn_raw_features is not None and hmgnn_raw_features is not None:
+        # Smart fusion: only fuse when both models are confident and compatible
+        # Calculate model confidence based on prediction consistency  
+        djmgnn_confidence = 1.0
+        hmgnn_confidence = 1.0
+        
+        if djmgnn_raw_features is not None and hmgnn_raw_features is not None:
+            # Check feature stability (low variance indicates confidence)
+            dj_variance = torch.var(djmgnn_raw_features, dim=0).mean()
+            hm_variance = torch.var(hmgnn_raw_features, dim=0).mean()
+            
+            # Normalize confidences (lower variance = higher confidence)
+            djmgnn_confidence = 1.0 / (1.0 + dj_variance)
+            hmgnn_confidence = 1.0 / (1.0 + hm_variance)
+            
+            # Only use fusion if both models are reasonably confident
+            confidence_threshold = 0.3
+            use_smart_fusion = (djmgnn_confidence > confidence_threshold and 
+                              hmgnn_confidence > confidence_threshold and
+                              use_fusion)
+        else:
+            use_smart_fusion = False
+        
+        # Cross-model fusion - only when smart fusion criteria are met
+        if use_smart_fusion:
+            # Pre-fusion normalization and alignment
+            # Normalize features to have similar scales before fusion
+            dj_normalized = F.layer_norm(djmgnn_raw_features, djmgnn_raw_features.shape[-1:])
+            hm_normalized = F.layer_norm(hmgnn_raw_features, hmgnn_raw_features.shape[-1:])
+            
             # Reshape for fusion layer
-            dj_reshaped = djmgnn_raw_features.unsqueeze(0)
-            hm_reshaped = hmgnn_raw_features.unsqueeze(0)
+            dj_reshaped = dj_normalized.unsqueeze(0)
+            hm_reshaped = hm_normalized.unsqueeze(0)
             
             dj_fused, hm_fused = self.fusion_layer(dj_reshaped, hm_reshaped)
             
@@ -520,27 +547,58 @@ class JointMGNN(nn.Module):
             dj_fused = dj_fused.squeeze(0)
             hm_fused = hm_fused.squeeze(0)
 
-            # Weighted average of fused features
-            fused_features = self.alpha * dj_fused + (1 - self.alpha) * hm_fused
+            # Adaptive weighted average based on feature quality
+            # Detect potential HMGNN issues by checking for abnormal patterns
+            dj_norm = torch.norm(dj_fused, dim=-1).mean()
+            hm_norm = torch.norm(hm_fused, dim=-1).mean()
+            
+            # Improved adaptive alpha: balanced weighting with stability checks
+            if hm_norm > 0 and dj_norm > 0:
+                ratio = dj_norm / hm_norm
+                if 0.5 <= ratio <= 2.0:  # Features are well-balanced, use original alpha
+                    adaptive_alpha = self.alpha
+                elif ratio > 2.0:  # DJMGNN features larger, slightly favor DJMGNN
+                    adaptive_alpha = min(0.8, self.alpha * 1.2)
+                else:  # ratio < 0.5, HMGNN features larger, slightly favor HMGNN
+                    adaptive_alpha = max(0.2, self.alpha * 0.8)
+            else:
+                # If one model produces zero features, fully weight the working one
+                adaptive_alpha = 1.0 if hm_norm == 0 else 0.0
+            
+            fused_features = adaptive_alpha * dj_fused + (1 - adaptive_alpha) * hm_fused
         else:
-            # No fusion - project raw features to fusion_dim and combine
-            if djmgnn_raw_features is not None:
-                djmgnn_projected = self.djmgnn_proj(djmgnn_raw_features)
-            else:
-                djmgnn_projected = torch.empty(0, self.fusion_dim, device=x.device)
-            
-            if hmgnn_raw_features is not None:
-                hmgnn_projected = self.hmgnn_proj(hmgnn_raw_features)
-            else:
-                hmgnn_projected = torch.empty(0, self.fusion_dim, device=x.device)
-            
-            # Simple weighted combination
-            if djmgnn_projected.numel() > 0 and hmgnn_projected.numel() > 0:
-                fused_features = self.alpha * djmgnn_projected + (1 - self.alpha) * hmgnn_projected
-            elif djmgnn_projected.numel() > 0:
-                fused_features = djmgnn_projected
-            elif hmgnn_projected.numel() > 0:
-                fused_features = hmgnn_projected
+            # Smart model selection: choose the most confident model or simple combination
+            if djmgnn_raw_features is not None and hmgnn_raw_features is not None:
+                # Use confidence-weighted selection instead of complex fusion
+                if djmgnn_confidence > hmgnn_confidence * 1.5:
+                    # DJMGNN is significantly more confident, use it primarily
+                    dj_normalized = F.layer_norm(djmgnn_raw_features, djmgnn_raw_features.shape[-1:])
+                    fused_features = self.djmgnn_proj(dj_normalized)
+                elif hmgnn_confidence > djmgnn_confidence * 1.5:
+                    # HMGNN is significantly more confident, use it primarily  
+                    hm_normalized = F.layer_norm(hmgnn_raw_features, hmgnn_raw_features.shape[-1:])
+                    fused_features = self.hmgnn_proj(hm_normalized)
+                else:
+                    # Similar confidence, use simple confidence-weighted combination
+                    dj_normalized = F.layer_norm(djmgnn_raw_features, djmgnn_raw_features.shape[-1:])
+                    hm_normalized = F.layer_norm(hmgnn_raw_features, hmgnn_raw_features.shape[-1:])
+                    
+                    djmgnn_projected = self.djmgnn_proj(dj_normalized)
+                    hmgnn_projected = self.hmgnn_proj(hm_normalized)
+                    
+                    # Confidence-based weighting (no complex ratio analysis)
+                    total_confidence = djmgnn_confidence + hmgnn_confidence
+                    dj_weight = djmgnn_confidence / total_confidence
+                    hm_weight = hmgnn_confidence / total_confidence
+                    
+                    fused_features = dj_weight * djmgnn_projected + hm_weight * hmgnn_projected
+                    
+            elif djmgnn_raw_features is not None:
+                dj_normalized = F.layer_norm(djmgnn_raw_features, djmgnn_raw_features.shape[-1:])
+                fused_features = self.djmgnn_proj(dj_normalized)
+            elif hmgnn_raw_features is not None:
+                hm_normalized = F.layer_norm(hmgnn_raw_features, hmgnn_raw_features.shape[-1:])
+                fused_features = self.hmgnn_proj(hm_normalized)
             else:
                 fused_features = torch.empty(0, self.fusion_dim, device=x.device)
         

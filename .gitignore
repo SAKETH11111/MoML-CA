@@ -126,3 +126,4 @@ MoML-CA/data/
 data/spice/processed/
 *.pt
 data/*/processed/*.pt
+huggingface_models/

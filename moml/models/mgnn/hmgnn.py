@@ -291,50 +291,47 @@ class CrossScaleAttentionMH(nn.Module):
             agg = torch.zeros_like(q)
 
             for s in range(self.S):  # source scale
-                # Only allow self-attention if no cross-scale mapping available
-                if not can_map and s != t:
-                    continue
 
                 k = self._split(self.k_proj[s](feats[s]))
                 v = self._split(self.v_proj[s](feats[s]))
 
-                # This block is creating issues, and the adaptive pooling below should handle it
-                # if s != t and can_map:
-                #     if s < t:  # fine → coarse: aggregate
-                #         if (
-                #             s < len(fine2coarse)
-                #             and s < len(coarse_count)
-                #             and fine2coarse[s] is not None
-                #             and coarse_count[s] is not None
-                #         ):
-                #             k_agg = aggregate_fine_to_coarse(k, fine2coarse[s], coarse_count[s])
-                #             v_agg = aggregate_fine_to_coarse(v, fine2coarse[s], coarse_count[s])
-                #             if k_agg.shape[0] == q.shape[0]:
-                #                 k = k_agg
-                #                 v = v_agg
-                #             else:
-                #                 logger.warning(
-                #                     f"CrossScaleAttn: Aggregation shape mismatch for s={s}, t={t}. k_agg: {k_agg.shape}, q: {q.shape}. Using original k,v."
-                #                 )
-                #         else:
-                #             logger.debug(
-                #                 f"CrossScaleAttn: Not enough mapping info for s={s} < t={t}. Using original k,v."
-                #             )
-                #     else:
-                #         if t < len(fine2coarse) and fine2coarse[t] is not None:
-                #             k_broad = broadcast_coarse_to_fine(k, fine2coarse[t])
-                #             v_broad = broadcast_coarse_to_fine(v, fine2coarse[t])
-                #             if k_broad.shape[0] == q.shape[0]:
-                #                 k = k_broad
-                #                 v = v_broad
-                #             else:
-                #                 logger.warning(
-                #                     f"CrossScaleAttn: Broadcast shape mismatch for s={s}, t={t}. k_broad: {k_broad.shape}, q: {q.shape}. Using original k,v."
-                #                 )
-                #         else:
-                #             logger.debug(
-                #                 f"CrossScaleAttn: Not enough mapping info for s={s} > t={t}. Using original k,v."
-                #             )
+                if s != t and can_map:
+                   if s < t:  # fine → coarse: aggregate
+                       if (
+                           s < len(fine2coarse)
+                           and s < len(coarse_count)
+                           and fine2coarse[s] is not None
+                           and coarse_count[s] is not None
+                       ):
+                           k_agg = aggregate_fine_to_coarse(k, fine2coarse[s], coarse_count[s])
+                           v_agg = aggregate_fine_to_coarse(v, fine2coarse[s], coarse_count[s])
+                           if k_agg.shape[0] == q.shape[0]:
+                               k = k_agg
+                               v = v_agg
+                           else:
+                               logger.warning(
+                                   f"CrossScaleAttn: Aggregation shape mismatch for s={s}, t={t}. k_agg: {k_agg.shape}, q: {q.shape}. Using original k,v."
+                               )
+                       else:
+                           logger.debug(
+                               f"CrossScaleAttn: Not enough mapping info for s={s} < t={t}. Using original k,v."
+                           )
+                   else:
+                       if t < len(fine2coarse) and fine2coarse[t] is not None:
+                           k_broad = broadcast_coarse_to_fine(k, fine2coarse[t])
+                           v_broad = broadcast_coarse_to_fine(v, fine2coarse[t])
+                           if k_broad.shape[0] == q.shape[0]:
+                               k = k_broad
+                               v = v_broad
+                           else:
+                               logger.warning(
+                                   f"CrossScaleAttn: Broadcast shape mismatch for s={s}, t={t}. k_broad: {k_broad.shape}, q: {q.shape}. Using original k,v."
+                               )
+                       else:
+                           logger.debug(
+                               f"CrossScaleAttn: Not enough mapping info for s={s} > t={t}. Using original k,v."
+                           )
+
 
                 # Ensure shape compatibility with adaptive projections
                 if len(q.shape) < 3 or len(k.shape) < 3:
@@ -344,6 +341,9 @@ class CrossScaleAttentionMH(nn.Module):
                     continue
 
                 # Handle shape mismatches with stable, differentiable adaptive pooling and upsampling
+                if q.numel() == 0 or k.numel() == 0 or v.numel() == 0:
+                    continue
+
                 if q.shape[0] != k.shape[0]:
                     if q.shape[0] > k.shape[0]: # Upsample k and v to match q
                         # Reshape for upsampling: (k_nodes, N_heads, D_head) -> (1, hidden_dim, k_nodes)
@@ -569,9 +569,22 @@ class HMGNN(nn.Module):
 
         # cross-scale attention
         if self.use_cs:
-            scale_feats = self.cross_scale(scale_feats, None, None)
+            scale_feats = self.cross_scale(scale_feats, maps, edge_pairs_cs)
 
         output_dict = {}
+        # Determine the batch size from the most reliable source
+        batch_size = -1
+        if scale_data and scale_data[0].get('batch') is not None and scale_data[0]['batch'].numel() > 0:
+            batch_size = int(scale_data[0]['batch'].max()) + 1
+        elif env_vec is not None:
+            batch_size = env_vec.shape[0]
+        else:
+            for i in range(self.S):
+                if scale_data[i].get('batch') is not None and scale_data[i]['batch'].numel() > 0:
+                    batch_size = int(scale_data[i]['batch'].max()) + 1
+                    break
+        if batch_size == -1: batch_size = 1
+
         for i in range(self.S):
             batch_vec = scale_data[i].get("batch", None)
             current_scale_node_feats = scale_feats[i]
@@ -581,26 +594,28 @@ class HMGNN(nn.Module):
             output_dict[f"scale_{i}_node_pred"] = current_node_pred
 
             if current_scale_node_feats.size(0) == 0:
-                num_graphs_in_batch = 1
-                if batch_vec is not None and batch_vec.numel() > 0:
-                    num_graphs_in_batch = batch_vec.max().item() + 1
-
-                g_emb = torch.zeros((num_graphs_in_batch, self.hidden_dim), device=current_scale_node_feats.device)
-                current_graph_pred = torch.zeros(
-                    (num_graphs_in_batch, self.graph_out_dim), device=current_scale_node_feats.device
-                )
+                g_emb = torch.zeros((0, self.hidden_dim), device=current_scale_node_feats.device)
             else:
                 g_emb = (
                     current_scale_node_feats.mean(0, keepdim=True)
                     if batch_vec is None
                     else self.graph_pool(current_scale_node_feats, batch_vec)
                 )
-                if self.env_dim:
-                    if env_vec is None:
-                        env_vec = torch.zeros(g_emb.size(0), self.env_dim, device=g_emb.device)
-                    env_emb = self.env_proj(env_vec) if self.env_proj else env_vec
-                    g_emb = torch.cat([g_emb, env_emb], dim=1)
-                current_graph_pred = self.graph_heads[i](g_emb)
+
+            # Pad g_emb to ensure consistent batch size
+            if g_emb.shape[0] < batch_size:
+                padding = torch.zeros(batch_size - g_emb.shape[0], g_emb.shape[1], device=g_emb.device, dtype=g_emb.dtype)
+                g_emb = torch.cat([g_emb, padding], dim=0)
+
+            if self.env_dim:
+                if env_vec is None:
+                    env_vec_ = torch.zeros(g_emb.size(0), self.env_dim, device=g_emb.device)
+                else:
+                    env_vec_ = env_vec
+                env_emb = self.env_proj(env_vec_) if self.env_proj else env_vec_
+                g_emb = torch.cat([g_emb, env_emb], dim=1)
+
+            current_graph_pred = self.graph_heads[i](g_emb)
             graph_embeds.append(g_emb)
             graph_preds.append(current_graph_pred)
             output_dict[f"scale_{i}_graph_pred"] = current_graph_pred
@@ -650,21 +665,24 @@ class HMGNN(nn.Module):
                             base_nodes = base_scale_feats.size(0)
                             
                             if scale_nodes == base_nodes:
-                                # Same number of nodes, use directly
                                 other_scale_feats.append(scale_feat)
-                            elif scale_nodes < base_nodes:
-                                # Fewer nodes in this scale, repeat/interpolate
-                                repeat_factor = base_nodes // scale_nodes
-                                remainder = base_nodes % scale_nodes
-                                repeated = scale_feat.repeat(repeat_factor, 1)
-                                if remainder > 0:
-                                    repeated = torch.cat([repeated, scale_feat[:remainder]], dim=0)
-                                other_scale_feats.append(repeated)
                             else:
-                                # More nodes in this scale, subsample
-                                indices = torch.linspace(0, scale_nodes-1, base_nodes, dtype=torch.long, device=scale_feat.device)
-                                subsampled = scale_feat[indices]
-                                other_scale_feats.append(subsampled)
+                                # Adapt scale_feat to have the same number of nodes as base_scale_feats
+                                # Reshape for 1D pooling/upsampling: [N, D] -> [1, D, N]
+                                scale_feat_flat = scale_feat.permute(1, 0).unsqueeze(0)
+                                
+                                if scale_nodes < base_nodes:
+                                    # Upsample
+                                    resizer = nn.Upsample(size=base_nodes, mode='linear', align_corners=False)
+                                else:
+                                    # Downsample
+                                    resizer = nn.AdaptiveAvgPool1d(base_nodes)
+                                
+                                resized_flat = resizer(scale_feat_flat).squeeze(0)
+                                
+                                # Reshape back: [D, N_base] -> [N_base, D]
+                                resized_feat = resized_flat.permute(1, 0)
+                                other_scale_feats.append(resized_feat)
                         else:
                             # Empty scale, use zeros
                             other_scale_feats.append(torch.zeros_like(base_scale_feats))
@@ -686,6 +704,7 @@ class HMGNN(nn.Module):
         output_dict["node_pred"] = combined_node_pred
         output_dict["graph_pred"] = combined_graph_pred
         return output_dict
+
 
     def compute_losses(
         self, preds: Dict[str, Any], targets: Dict[str, Tuple[torch.Tensor, torch.Tensor]]
