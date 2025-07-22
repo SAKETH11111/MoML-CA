@@ -1,0 +1,193 @@
+{
+  "validation_time": 64.87035799026489,
+  "qm9_molecular_properties": {
+    "dataset": "QM9",
+    "task": "molecular_properties",
+    "predictions_shape": [
+      1000,
+      19
+    ],
+    "targets_shape": [
+      1000,
+      19
+    ],
+    "property_metrics": [
+      {
+        "property_index": 0,
+        "r2_score": 0.041509807109832764,
+        "mae": 0.7526182532310486,
+        "mse": 1.0330661535263062,
+        "rmse": 1.016398619403975,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 1,
+        "r2_score": -0.11415517330169678,
+        "mae": 0.7970060110092163,
+        "mse": 1.0627632141113281,
+        "rmse": 1.0309040760959907,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 2,
+        "r2_score": 0.03044337034225464,
+        "mae": 0.7114224433898926,
+        "mse": 0.9317454099655151,
+        "rmse": 0.9652696048076491,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 3,
+        "r2_score": 0.026234686374664307,
+        "mae": 0.8098174929618835,
+        "mse": 0.9595533609390259,
+        "rmse": 0.9795679460553136,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 4,
+        "r2_score": 0.023178815841674805,
+        "mae": 0.8172520995140076,
+        "mse": 0.9467576742172241,
+        "rmse": 0.9730147348407546,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 5,
+        "r2_score": -0.08233332633972168,
+        "mae": 0.7331234216690063,
+        "mse": 0.909447431564331,
+        "rmse": 0.9536495328810952,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 6,
+        "r2_score": -0.01187598705291748,
+        "mae": 0.7835590839385986,
+        "mse": 0.9567854404449463,
+        "rmse": 0.9781540985166634,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 7,
+        "r2_score": 0.002772808074951172,
+        "mae": 0.78963303565979,
+        "mse": 1.0546066761016846,
+        "rmse": 1.0269404442817922,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 8,
+        "r2_score": 0.01251918077468872,
+        "mae": 0.7832638621330261,
+        "mse": 1.0442982912063599,
+        "rmse": 1.0219091403869327,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 9,
+        "r2_score": 0.0017643570899963379,
+        "mae": 0.7889646291732788,
+        "mse": 1.0556719303131104,
+        "rmse": 1.0274589677029007,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 10,
+        "r2_score": 0.0026946663856506348,
+        "mae": 0.7898024916648865,
+        "mse": 1.0546904802322388,
+        "rmse": 1.026981246290427,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 11,
+        "r2_score": -0.15043127536773682,
+        "mae": 0.8375710248947144,
+        "mse": 1.1249983310699463,
+        "rmse": 1.0606593850383572,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 12,
+        "r2_score": -0.05109453201293945,
+        "mae": 0.7977834939956665,
+        "mse": 1.0110106468200684,
+        "rmse": 1.0054902519766507,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 13,
+        "r2_score": -0.051144957542419434,
+        "mae": 0.7968810796737671,
+        "mse": 1.0109009742736816,
+        "rmse": 1.0054357136454233,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 14,
+        "r2_score": -0.05824589729309082,
+        "mae": 0.8002201914787292,
+        "mse": 1.0176509618759155,
+        "rmse": 1.00878687634005,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 15,
+        "r2_score": -0.05708193778991699,
+        "mae": 0.7988894581794739,
+        "mse": 1.0170954465866089,
+        "rmse": 1.0085115004731522,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 16,
+        "r2_score": -2309.679931640625,
+        "mae": 0.06250780075788498,
+        "mse": 0.004162546247243881,
+        "rmse": 0.06451779791068415,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 17,
+        "r2_score": -0.1410367488861084,
+        "mae": 0.22684861719608307,
+        "mse": 0.09550661593675613,
+        "rmse": 0.3090414469561585,
+        "valid_samples": "1000"
+      },
+      {
+        "property_index": 18,
+        "r2_score": -0.2157958745956421,
+        "mae": 0.24076245725154877,
+        "mse": 0.12942464649677277,
+        "rmse": 0.35975637103013586,
+        "valid_samples": "1000"
+      }
+    ],
+    "overall": {
+      "mean_r2": -121.60378998204281,
+      "median_r2": -0.05109453201293945,
+      "min_r2": -2309.679931640625,
+      "max_r2": 0.041509807109832764,
+      "properties_above_90_percent": 0,
+      "properties_above_95_percent": 0,
+      "total_properties": 19
+    }
+  },
+  "spice_atomic_forces": {
+    "dataset": "SPICE",
+    "task": "atomic_forces",
+    "valid": false,
+    "error": "Raw SPICE dataset not found at data/spice/raw/SPICE-1.1.4.hdf5"
+  },
+  "assessment": {
+    "claim_validated": false,
+    "evidence": [
+      "\u26a0\ufe0f Mean R\u00b2 across molecular properties: -121.604 < 0.95",
+      "\u26a0\ufe0f Only 0/19 properties have R\u00b2 > 0.95",
+      "\u26a0\ufe0f Could not validate force predictions"
+    ],
+    "interpretation": "\u26a0\ufe0f 95% accuracy claim needs clarification - specify metric and task"
+  }
+}
