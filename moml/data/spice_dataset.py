@@ -34,7 +34,7 @@ from torch_geometric.data import Data, InMemoryDataset
 # Constants
 DEFAULT_SPLIT = "train"
 DEFAULT_CUTOFF = 3.0
-MAX_MOLECULES_LIMIT = 100  # Limit for testing/development
+MAX_MOLECULES_LIMIT = None  # NO LIMIT for production training - use ALL molecules
 RAW_FILENAME = "SPICE-1.1.4.hdf5"
 
 # Configure module logger
@@ -139,6 +139,22 @@ class SpiceDataset(InMemoryDataset):
         
         if os.path.exists(processed_file):
             try:
+                # Add safe globals for torch_geometric Data structures and their internal attributes
+                try:
+                    import torch_geometric.data.data as tgd_data
+                    safe_globals = [Data]
+                    
+                    # Add all torch_geometric.data.data classes that might be in saved tensors
+                    for attr_name in dir(tgd_data):
+                        attr = getattr(tgd_data, attr_name)
+                        if isinstance(attr, type):
+                            safe_globals.append(attr)
+                    
+                    torch.serialization.add_safe_globals(safe_globals)
+                except Exception as e:
+                    logger.warning(f"Could not add all torch_geometric safe globals: {e}")
+                    # Fallback to just Data class
+                    torch.serialization.add_safe_globals([Data])
                 loaded_data = torch.load(processed_file, weights_only=True)
                 
                 # Check if data is valid (not None for empty datasets)
@@ -258,10 +274,12 @@ class SpiceDataset(InMemoryDataset):
         mol_keys = list(mol_container.keys())
         logger.info(f"Found {len(mol_keys)} molecules in dataset")
         
-        # Limit molecules for development/testing
-        if len(mol_keys) > MAX_MOLECULES_LIMIT:
+        # Remove any artificial limits for production training
+        if MAX_MOLECULES_LIMIT is not None and len(mol_keys) > MAX_MOLECULES_LIMIT:
             mol_keys = mol_keys[:MAX_MOLECULES_LIMIT]
             logger.warning(f"Limited to {MAX_MOLECULES_LIMIT} molecules for processing")
+        else:
+            logger.info(f"Using ALL {len(mol_keys)} molecules from SPICE dataset")
         
         total_conformers = 0
         

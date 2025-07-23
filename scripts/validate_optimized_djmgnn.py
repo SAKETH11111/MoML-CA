@@ -189,21 +189,20 @@ class OptimizedDJMGNNPredictor:
             
             # Collect graph-level predictions and targets
             if "graph_pred" in outputs and hasattr(batch, "y"):
-                # Denormalize predictions
+                # Denormalize predictions (model outputs normalized predictions)
                 graph_preds = self.denormalize_graph_predictions(outputs["graph_pred"])
                 all_graph_preds.append(graph_preds.cpu().numpy())
                 
-                # Denormalize targets (they're also normalized in the dataset)
-                graph_targets = self.denormalize_graph_predictions(batch.y.to(self.device))
-                all_graph_targets.append(graph_targets.cpu().numpy())
+                # Targets are NOT normalized in validation dataset, use as-is
+                all_graph_targets.append(batch.y.cpu().numpy())
             
-            # Collect node-level predictions and targets  
+            # Collect node-level predictions and targets
             if "node_pred" in outputs and hasattr(batch, "node_y"):
                 node_preds = self.denormalize_node_predictions(outputs["node_pred"])
                 all_node_preds.append(node_preds.cpu().numpy())
                 
-                node_targets = self.denormalize_node_predictions(batch.node_y.to(self.device))
-                all_node_targets.append(node_targets.cpu().numpy())
+                # Node targets are NOT normalized in validation dataset, use as-is
+                all_node_targets.append(batch.node_y.cpu().numpy())
         
         results = {}
         
@@ -212,7 +211,7 @@ class OptimizedDJMGNNPredictor:
             results["graph_targets"] = np.concatenate(all_graph_targets, axis=0)
         
         if all_node_preds:
-            results["node_predictions"] = np.concatenate(all_node_preds, axis=0)  
+            results["node_predictions"] = np.concatenate(all_node_preds, axis=0)
             results["node_targets"] = np.concatenate(all_node_targets, axis=0)
         
         return results

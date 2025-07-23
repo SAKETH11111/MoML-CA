@@ -1,0 +1,9 @@
+metric,value
+total_time_hours,3.9391914553112453
+final_loss,0.07974819093942642
+node_steps,9500
+graph_steps,28500
+best_loss,0.0014178174315020442
+checkpoint_dir,production_checkpoints
+metrics_csv,production_checkpoints/training_metrics_20250722_215450.csv
+phase_csv,production_checkpoints/phase_summary_20250722_215450.csv
