@@ -50,7 +50,181 @@ from moml.models.mgnn.djmgnn import DJMGNN
 DEFAULT_NODE_FEATURE_DIM = 29
 LOG_FILE_NAME = "alternating_training_optimized.log"
 
+# 3-Phase Curriculum Constants
+PHASE_1_END_STEP = 2000   # Train only PIMEH
+PHASE_2_END_STEP = 6000   # Train base DJMGNN
+# Phase 3 starts at PHASE_2_END_STEP and continues until max_steps (joint training)
+
 logger = logging.getLogger(__name__)
+
+
+class CurriculumManager:
+    """
+    Manages 3-phase curriculum training for DJMGNN with PIMEH integration.
+    
+    Phase 1 (0-2000 steps): Train only PIMEH, freeze base DJMGNN
+    Phase 2 (2000-6000 steps): Train base DJMGNN, freeze PIMEH  
+    Phase 3 (6000+ steps): Joint training of everything
+    """
+    
+    def __init__(self, model: DJMGNN, enhanced_logger: 'EnhancedTrainingLogger'):
+        self.model = model
+        self.logger = enhanced_logger
+        self.current_phase = None  # Initialize to None so first update always triggers change
+        self.phase_weights = {
+            1: {'physics': 2.0, 'others': 0.1},    # Phase 1: Focus on physics loss
+            2: {'physics': 0.1, 'others': 1.0},    # Phase 2: Focus on other losses
+            3: {'physics': 1.0, 'others': 1.0}     # Phase 3: Balanced via GradNorm
+        }
+        
+        # Track parameter counts for logging
+        self._count_parameters()
+        
+    def _count_parameters(self):
+        """Count parameters in different model components."""
+        self.param_counts = {
+            'pimeh': sum(p.numel() for p in self.model.pimeh_head.parameters()),
+            'base': sum(p.numel() for p in self.model.parameters()) - sum(p.numel() for p in self.model.pimeh_head.parameters()),
+            'total': sum(p.numel() for p in self.model.parameters())
+        }
+        
+    def get_current_phase(self, step: int) -> int:
+        """Determine current curriculum phase based on step."""
+        if step < PHASE_1_END_STEP:
+            return 1
+        elif step < PHASE_2_END_STEP:
+            return 2
+        else:
+            return 3
+    
+    def freeze_base_model(self):
+        """Freeze all DJMGNN parameters except PIMEH (Phase 1)."""
+        frozen_count = 0
+        for name, param in self.model.named_parameters():
+            if not name.startswith('pimeh_head'):
+                param.requires_grad = False
+                frozen_count += param.numel()
+            else:
+                param.requires_grad = True
+        
+        logger.info(f"Phase 1: Frozen base model parameters ({frozen_count:,}), active PIMEH ({self.param_counts['pimeh']:,})")
+        return frozen_count, self.param_counts['pimeh']
+    
+    def freeze_pimeh(self):
+        """Freeze only PIMEH parameters (Phase 2)."""
+        frozen_count = 0
+        for name, param in self.model.named_parameters():
+            if name.startswith('pimeh_head'):
+                param.requires_grad = False
+                frozen_count += param.numel()
+            else:
+                param.requires_grad = True
+        
+        logger.info(f"Phase 2: Frozen PIMEH parameters ({frozen_count:,}), active base model ({self.param_counts['base']:,})")
+        return frozen_count, self.param_counts['base']
+    
+    def unfreeze_all(self):
+        """Unfreeze all parameters (Phase 3)."""
+        for param in self.model.parameters():
+            param.requires_grad = True
+        
+        logger.info(f"Phase 3: All parameters unfrozen ({self.param_counts['total']:,})")
+        return 0, self.param_counts['total']
+    
+    def update_phase(self, step: int, optimizer: optim.Optimizer) -> bool:
+        """
+        Update training phase based on current step.
+        
+        Returns:
+            bool: True if phase changed, False otherwise
+        """
+        new_phase = self.get_current_phase(step)
+        
+        if new_phase != self.current_phase:
+            old_phase = self.current_phase
+            self.current_phase = new_phase
+            
+            # Apply parameter freezing based on new phase
+            if new_phase == 1:
+                frozen, active = self.freeze_base_model()
+                phase_desc = "PIMEH Only Training"
+                reason = f"Step {step} < {PHASE_1_END_STEP} (Phase 1 threshold)"
+            elif new_phase == 2:
+                frozen, active = self.freeze_pimeh()
+                phase_desc = "Base DJMGNN Training"
+                reason = f"Step {step} >= {PHASE_1_END_STEP} and < {PHASE_2_END_STEP} (Phase 2 threshold)"
+            else:  # Phase 3
+                frozen, active = self.unfreeze_all()
+                phase_desc = "Joint Training"
+                reason = f"Step {step} >= {PHASE_2_END_STEP} (Phase 3 threshold)"
+            
+            # Update optimizer parameter groups (important for momentum/adam states)
+            self._update_optimizer_groups(optimizer)
+            
+            # Log phase transition
+            physics_weight = self.phase_weights[new_phase]['physics']
+            self.logger.log_curriculum_transition(
+                step=step,
+                phase=new_phase,
+                phase_description=phase_desc,
+                frozen_params=frozen,
+                active_params=active,
+                physics_weight=physics_weight,
+                reason=reason
+            )
+            
+            # Console notification
+            logger.info("=" * 80)
+            logger.info(f"CURRICULUM PHASE TRANSITION: {old_phase} -> {new_phase}")
+            logger.info(f"   Description: {phase_desc}")
+            logger.info(f"   Frozen Parameters: {frozen:,}")
+            logger.info(f"   Active Parameters: {active:,}")
+            logger.info(f"   Physics Loss Weight: {physics_weight:.1f}")
+            logger.info(f"   Reason: {reason}")
+            logger.info("=" * 80)
+            
+            return True
+        
+        return False
+    
+    def _update_optimizer_groups(self, optimizer: optim.Optimizer):
+        """Update optimizer parameter groups after freezing/unfreezing."""
+        # Clear momentum/adam states for frozen parameters
+        # This prevents stale gradients from affecting training
+        active_params = []
+        for param in self.model.parameters():
+            if param.requires_grad:
+                active_params.append(param)
+        
+        # Update optimizer's param_groups
+        optimizer.param_groups[0]['params'] = active_params
+        
+        # Clear state for parameters that are no longer active
+        # In PyTorch optimizers, state keys are the actual parameter tensors
+        params_to_remove = []
+        for param_tensor in optimizer.state.keys():
+            if not param_tensor.requires_grad:
+                params_to_remove.append(param_tensor)
+        
+        for param_tensor in params_to_remove:
+            del optimizer.state[param_tensor]
+    
+    def get_loss_weights(self, step: int) -> Dict[str, float]:
+        """Get phase-specific loss weights."""
+        phase = self.get_current_phase(step)
+        weights = self.phase_weights[phase]
+        
+        return {
+            'physics_loss': weights['physics'],
+            'node_loss': weights['others'],
+            'graph_loss': weights['others'],
+            'energy_loss': weights['others']
+        }
+    
+    def should_skip_gradnorm(self, step: int) -> bool:
+        """Determine if GradNorm should be skipped for this phase."""
+        # Skip GradNorm in phases 1 and 2, only use in phase 3
+        return self.get_current_phase(step) < 3
 
 
 def setup_logging():
@@ -121,6 +295,7 @@ class EnhancedTrainingLogger:
             'node': deque(maxlen=100),
             'graph': deque(maxlen=100), 
             'energy': deque(maxlen=100),
+            'physics': deque(maxlen=100),  # New physics loss tracking
             'total': deque(maxlen=100),
             'lr': deque(maxlen=100),
             'steps_per_sec': deque(maxlen=10)
@@ -130,6 +305,10 @@ class EnhancedTrainingLogger:
         self.phase_counts = {'node': 0, 'graph': 0}
         self.current_phase = None
         self.phase_history = deque(maxlen=20)  # Track recent phases
+        
+        # Curriculum phase tracking
+        self.curriculum_phase = None  # Will be set on first update
+        self.phase_transitions = []  # Track phase transitions with timestamps
         
         # Progress tracking
         self.progress = Progress(
@@ -168,15 +347,22 @@ class EnhancedTrainingLogger:
         self.metrics_csv_path = self.log_dir / f"training_metrics_{timestamp}.csv"
         self.metrics_csv_headers = [
             'step', 'timestamp', 'phase', 'total_loss', 'node_loss', 'graph_loss', 
-            'energy_loss', 'learning_rate', 'steps_per_sec', 'elapsed_time',
-            'weight_node', 'weight_graph', 'weight_energy'
+            'energy_loss', 'physics_loss', 'learning_rate', 'steps_per_sec', 'elapsed_time',
+            'weight_node', 'weight_graph', 'weight_energy', 'weight_physics'
         ]
         
         # Phase summary log  
         self.phase_csv_path = self.log_dir / f"phase_summary_{timestamp}.csv"
         self.phase_csv_headers = [
             'step', 'timestamp', 'phase', 'phase_count_node', 'phase_count_graph',
-            'avg_loss_last_10', 'best_loss_so_far', 'time_in_phase'
+            'avg_loss_last_10', 'best_loss_so_far', 'time_in_phase', 'curriculum_phase'
+        ]
+        
+        # Curriculum phase log
+        self.curriculum_csv_path = self.log_dir / f"curriculum_phases_{timestamp}.csv"
+        self.curriculum_csv_headers = [
+            'step', 'timestamp', 'curriculum_phase', 'phase_description', 'frozen_parameters', 
+            'active_parameters', 'physics_loss_weight', 'transition_reason'
         ]
         
         # Initialize CSV files with headers
@@ -187,6 +373,10 @@ class EnhancedTrainingLogger:
         with open(self.phase_csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(self.phase_csv_headers)
+            
+        with open(self.curriculum_csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(self.curriculum_csv_headers)
             
         # Track best loss for CSV logging
         self.best_loss_so_far = float('inf')
@@ -277,8 +467,19 @@ class EnhancedTrainingLogger:
         
         # Current phase
         if self.current_phase:
-            phase_emoji = "🧬" if self.current_phase == "node" else "📈"
-            phase_text.append(f"Current: {phase_emoji} {self.current_phase.upper()}\n", style="bold white")
+            phase_text.append(f"Current: {self.current_phase.upper()}\n", style="bold white")
+        
+        # Curriculum phase
+        if self.curriculum_phase is not None:
+            curriculum_info = {
+                1: "PHASE 1: PIMEH Only",
+                2: "PHASE 2: Base DJMGNN", 
+                3: "PHASE 3: Joint Training"
+            }
+            curriculum_desc = curriculum_info.get(self.curriculum_phase, f"Phase {self.curriculum_phase}")
+            phase_text.append(f"\n{curriculum_desc}\n", style="bold magenta")
+        else:
+            phase_text.append(f"\nCurriculum: Initializing\n", style="bold magenta")
         
         # Phase counts
         phase_text.append(f"NODE: {self.phase_counts['node']:,} steps\n", style="cyan")
@@ -294,7 +495,24 @@ class EnhancedTrainingLogger:
         
         return Panel(phase_text, title="[bold yellow]⚡ Phase Status", border_style="yellow")
     
-    def update(self, step: int, task_type: str, losses: Dict[str, float], lr: float):
+    def log_curriculum_transition(self, step: int, phase: int, phase_description: str, 
+                                 frozen_params: int, active_params: int, physics_weight: float, reason: str):
+        """Log curriculum phase transition."""
+        try:
+            current_time = time.time()
+            transition_row = [
+                step, current_time, phase, phase_description, frozen_params,
+                active_params, physics_weight, reason
+            ]
+            
+            with open(self.curriculum_csv_path, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(transition_row)
+                
+        except Exception as e:
+            logger.warning(f"Curriculum transition logging failed: {e}")
+    
+    def update(self, step: int, task_type: str, losses: Dict[str, float], lr: float, curriculum_phase: int = None):
         """Update the logger with new step information."""
         current_time = time.time()
         elapsed_time = current_time - self.start_time
@@ -312,10 +530,21 @@ class EnhancedTrainingLogger:
         self.phase_counts[task_type] += 1
         self.phase_history.append(task_type)
         
+        # Update curriculum phase if provided
+        if curriculum_phase is not None and curriculum_phase != self.curriculum_phase:
+            self.phase_transitions.append({
+                'step': step,
+                'timestamp': current_time,
+                'old_phase': self.curriculum_phase,
+                'new_phase': curriculum_phase
+            })
+            self.curriculum_phase = curriculum_phase
+        
         # Update metrics
         self.metrics_history['node'].append(losses['node_loss'])
         self.metrics_history['graph'].append(losses['graph_loss'])
         self.metrics_history['energy'].append(losses['energy_loss'])
+        self.metrics_history['physics'].append(losses['physics_loss'])  # New physics loss
         self.metrics_history['total'].append(losses['total_loss'])
         self.metrics_history['lr'].append(lr)
         
@@ -349,6 +578,7 @@ class EnhancedTrainingLogger:
                 f"🧬 Node: {losses['node_loss']:6.4f} | "
                 f"📈 Graph: {losses['graph_loss']:6.4f} | "
                 f"⚡ Energy: {losses['energy_loss']:6.4f} | "
+                f"🌀 Physics: {losses['physics_loss']:6.4f} | "
                 f"⚖️ W: {[f'{w:.2f}' for w in losses.get('weights', [])]} | "
                 f"📚 LR: {lr:8.2e} | "
                 f"🕐 ETA: {eta_seconds/3600:.1f}h"
@@ -361,17 +591,18 @@ class EnhancedTrainingLogger:
             # Get current steps per second
             current_sps = self.metrics_history['steps_per_sec'][-1] if self.metrics_history['steps_per_sec'] else 0.0
             
-            # Get weights (handle missing weights gracefully)
-            weights = losses.get('weights', [1.0, 1.0, 1.0])
+            # Get weights (handle missing weights gracefully) - now 4 weights
+            weights = losses.get('weights', [1.0, 1.0, 1.0, 1.0])
             weight_node = weights[0] if len(weights) > 0 else 1.0
             weight_graph = weights[1] if len(weights) > 1 else 1.0  
             weight_energy = weights[2] if len(weights) > 2 else 1.0
+            weight_physics = weights[3] if len(weights) > 3 else 1.0
             
             # Main metrics CSV
             metrics_row = [
                 step, current_time, task_type, losses['total_loss'], losses['node_loss'],
-                losses['graph_loss'], losses['energy_loss'], lr, current_sps, elapsed_time,
-                weight_node, weight_graph, weight_energy
+                losses['graph_loss'], losses['energy_loss'], losses['physics_loss'], 
+                lr, current_sps, elapsed_time, weight_node, weight_graph, weight_energy, weight_physics
             ]
             
             with open(self.metrics_csv_path, 'a', newline='') as f:
@@ -386,7 +617,7 @@ class EnhancedTrainingLogger:
                 phase_row = [
                     step, current_time, task_type, self.phase_counts['node'],
                     self.phase_counts['graph'], avg_loss_last_10, self.best_loss_so_far,
-                    time_in_current_phase
+                    time_in_current_phase, self.curriculum_phase if self.curriculum_phase is not None else 0
                 ]
                 
                 with open(self.phase_csv_path, 'a', newline='') as f:
@@ -409,8 +640,10 @@ class EnhancedTrainingLogger:
         completion_text.append(f"🧬 NODE Steps: {self.phase_counts['node']:,}\n", style="cyan")
         completion_text.append(f"📈 GRAPH Steps: {self.phase_counts['graph']:,}\n", style="green")
         completion_text.append(f"📁 Checkpoints: {checkpoint_dir}\n", style="blue")
-        completion_text.append(f"📊 CSV Logs: {self.metrics_csv_path.name}\n", style="magenta")
-        completion_text.append(f"📈 Phase Log: {self.phase_csv_path.name}\n", style="magenta")
+        completion_text.append(f"CSV Logs: {self.metrics_csv_path.name}\n", style="magenta")
+        completion_text.append(f"Phase Log: {self.phase_csv_path.name}\n", style="magenta")
+        completion_text.append(f"Curriculum Log: {self.curriculum_csv_path.name}\n", style="magenta")
+        completion_text.append(f"Phase Transitions: {len(self.phase_transitions)}\n", style="cyan")
         
         panel = Panel(
             completion_text,
@@ -498,14 +731,20 @@ class CycleIterator:
 def compute_losses(
     model: DJMGNN, batch: Batch, device: torch.device, task_type: str
 ) -> Dict[str, torch.Tensor]:
-    """Compute and return the losses for a given batch and task type."""
+    """Compute and return the losses for a given batch and task type.
+    
+    Now includes separate loss computation for rotational constants:
+    - Regular graph properties (indices 0-15): graph_loss
+    - Rotational constants (indices 16-18): physics_loss (rotational_loss)
+    """
     batch = batch.to(device)
     if not hasattr(batch, "x") or batch.x is None:
         logger.warning("Batch is missing 'x' attribute. Skipping loss computation.")
         return {
             "node_loss": torch.tensor(0.0, device=device),
             "graph_loss": torch.tensor(0.0, device=device), 
-            "energy_loss": torch.tensor(0.0, device=device)
+            "energy_loss": torch.tensor(0.0, device=device),
+            "physics_loss": torch.tensor(0.0, device=device)  # New rotational constants loss
         }
 
     out = model(
@@ -514,12 +753,14 @@ def compute_losses(
         edge_attr=getattr(batch, "edge_attr", None),
         batch=getattr(batch, "batch", None),
         dist=getattr(batch, "dist", None),
+        pos=getattr(batch, "pos", None),  # Add positions for PIMEH rotational constants
     )
 
     losses = {
         "node_loss": torch.tensor(0.0, device=device),
         "graph_loss": torch.tensor(0.0, device=device),
-        "energy_loss": torch.tensor(0.0, device=device)
+        "energy_loss": torch.tensor(0.0, device=device),
+        "physics_loss": torch.tensor(0.0, device=device)  # New rotational constants loss
     }
 
     # Node-level force prediction loss (e.g., for SPICE)
@@ -527,10 +768,24 @@ def compute_losses(
         if batch.node_y.numel() > 0 and out["node_pred"].shape == batch.node_y.shape:
             losses["node_loss"] = nn.MSELoss()(out["node_pred"], batch.node_y)
 
-    # Graph-level property prediction loss (e.g., for QM9)  
+    # Graph-level property prediction loss - SPLIT INTO TWO PARTS
     if task_type == "graph" and "graph_pred" in out and hasattr(batch, "y"):
         if batch.y.numel() > 0 and out["graph_pred"].shape == batch.y.shape:
-            losses["graph_loss"] = nn.MSELoss()(out["graph_pred"], batch.y)
+            # Split predictions and targets
+            pred_regular = out["graph_pred"][:, 0:16]  # Regular properties (indices 0-15)
+            pred_rotational = out["graph_pred"][:, 16:19]  # Rotational constants (indices 16-18)
+            
+            target_regular = batch.y[:, 0:16]  # Regular property targets
+            target_rotational = batch.y[:, 16:19]  # Rotational constant targets
+            
+            # Compute separate MSE losses
+            losses["graph_loss"] = nn.MSELoss()(pred_regular, target_regular)
+            losses["physics_loss"] = nn.MSELoss()(pred_rotational, target_rotational)
+            
+            # Optional: Apply scaling factor for rotational constants
+            # Rotational constants are in GHz and may need different weighting
+            # This is handled by GradNorm, but we can apply initial scaling if needed
+            # losses["physics_loss"] = losses["physics_loss"] * 0.1  # Initial lower weight
 
     # Graph-level energy prediction loss (e.g., for SPICE)
     if task_type == "node" and "energy_pred" in out and hasattr(batch, "y_graph"):
@@ -549,44 +804,86 @@ def train_step(
     batch: Batch,
     device: torch.device,
     task_type: str,
+    curriculum_manager: Optional[CurriculumManager] = None,
+    step: int = 0,
 ) -> Dict[str, float]:
-    """Perform a single training step with proper GradNorm loss balancing."""
+    """Perform a single training step with curriculum-aware loss balancing.
+    
+    Now handles 4 losses with 3-phase curriculum:
+    - Phase 1: Focus on physics_loss (PIMEH training)
+    - Phase 2: Focus on other losses (base DJMGNN training)  
+    - Phase 3: Balanced GradNorm training
+    """
     model.train()
     optimizer.zero_grad()
 
     losses_dict = compute_losses(model, batch, device, task_type)
     
-    # Convert to tensor format expected by GradNormLossWeighter
+    # Convert to tensor format expected by GradNormLossWeighter (now 4 losses)
     losses_tensor = torch.stack([
         losses_dict["node_loss"],
         losses_dict["graph_loss"], 
-        losses_dict["energy_loss"]
+        losses_dict["energy_loss"],
+        losses_dict["physics_loss"]  # New rotational constants loss
     ])
     
+    # Apply phase-specific loss weighting if curriculum manager provided
+    if curriculum_manager is not None:
+        phase_weights = curriculum_manager.get_loss_weights(step)
+        
+        # Apply weights to losses
+        weighted_losses = torch.stack([
+            losses_dict["node_loss"] * phase_weights['node_loss'],
+            losses_dict["graph_loss"] * phase_weights['graph_loss'],
+            losses_dict["energy_loss"] * phase_weights['energy_loss'],
+            losses_dict["physics_loss"] * phase_weights['physics_loss']
+        ])
+        
+        # Use weighted losses for backward pass calculation
+        final_losses = weighted_losses
+    else:
+        final_losses = losses_tensor
+    
     # Check for finite losses
-    if not torch.isfinite(losses_tensor).all():
-        logger.warning(f"Non-finite losses detected: {losses_tensor}. Skipping step.")
+    if not torch.isfinite(final_losses).all():
+        logger.warning(f"Non-finite losses detected: {final_losses}. Skipping step.")
         return {
             "total_loss": float('nan'),
             "node_loss": losses_dict["node_loss"].item(),
             "graph_loss": losses_dict["graph_loss"].item(),
             "energy_loss": losses_dict["energy_loss"].item(),
-            "weights": loss_weighter.loss_weights.detach().cpu().tolist()
+            "physics_loss": losses_dict["physics_loss"].item(),  # Include physics loss
+            "weights": loss_weighter.loss_weights.detach().cpu().tolist() if curriculum_manager is None or not curriculum_manager.should_skip_gradnorm(step) else [1.0, 1.0, 1.0, 1.0]
         }
     
-    # Use proper GradNorm backward implementation
-    loss_weighter.backward(losses_tensor, retain_graph=False)
+    # Use GradNorm or manual weighting based on curriculum phase
+    if curriculum_manager is not None and curriculum_manager.should_skip_gradnorm(step):
+        # Phases 1 & 2: Use manual weighting, skip GradNorm
+        total_loss = final_losses.sum()
+        total_loss.backward()
+        current_weights = [
+            curriculum_manager.get_loss_weights(step)['node_loss'],
+            curriculum_manager.get_loss_weights(step)['graph_loss'],
+            curriculum_manager.get_loss_weights(step)['energy_loss'],
+            curriculum_manager.get_loss_weights(step)['physics_loss']
+        ]
+    else:
+        # Phase 3: Use GradNorm for automatic balancing
+        loss_weighter.backward(losses_tensor, retain_graph=False)
+        total_loss = torch.sum(losses_tensor * loss_weighter.loss_weights)
+        current_weights = loss_weighter.loss_weights.detach().cpu().tolist()
     
     # Clip gradients and step optimizer
     nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
 
     return {
-        "total_loss": torch.sum(losses_tensor * loss_weighter.loss_weights).item(),
+        "total_loss": total_loss.item(),
         "node_loss": losses_dict["node_loss"].item(),
         "graph_loss": losses_dict["graph_loss"].item(),
         "energy_loss": losses_dict["energy_loss"].item(),
-        "weights": loss_weighter.loss_weights.detach().cpu().tolist()
+        "physics_loss": losses_dict["physics_loss"].item(),
+        "weights": current_weights
     }
 
 
@@ -743,7 +1040,7 @@ def main():
         node_output_dims=mgnn_config.get("node_output_dims", 3),
         graph_output_dims=mgnn_config.get("graph_output_dims", 19),
         energy_output_dims=mgnn_config.get("energy_output_dims", 1),
-        hidden_dim=mgnn_config.get("hidden_channels", 128),
+        hidden_dim=mgnn_config.get("hidden_channels", 160),
         n_blocks=mgnn_config.get("num_layers", 4),
     ).to(device)
     
@@ -757,8 +1054,9 @@ def main():
     backbone_parameter = model.blocks[-1].transition_layers[-1].weight  # Last transition layer weight
     
     # Proper GradNorm loss balancer using lucidrains implementation
+    # Updated to handle 4 losses: node_loss, graph_loss, energy_loss, physics_loss
     loss_weighter = GradNormLossWeighter(
-        num_losses=3,  # node_loss, graph_loss, energy_loss
+        num_losses=4,  # node_loss, graph_loss, energy_loss, physics_loss (rotational)
         learning_rate=1e-4,
         restoring_force_alpha=0.5,  # o3-pro recommended alpha
         grad_norm_parameters=backbone_parameter
@@ -794,6 +1092,12 @@ def main():
     )
     enhanced_logger.start()
     
+    # Initialize curriculum manager for 3-phase training
+    curriculum_manager = CurriculumManager(model, enhanced_logger)
+    
+    # Set initial phase (Phase 1: PIMEH only)
+    curriculum_manager.update_phase(start_step, optimizer)
+    
     print(f"\n🚀 STARTING 40K TRAINING RUN - TARGET: 95% ACCURACY")
     print(f"📊 Datasets: QM9 ({len(ds_graph):,}) + SPICE ({len(ds_node):,}) = {len(ds_graph) + len(ds_node):,} total")
     print(f"⏱️  Expected Runtime: ~3-4 hours\n")
@@ -812,9 +1116,13 @@ def main():
                 logger.error("Data iterator exhausted")
                 break
 
-            # Perform training step  
+            # Update curriculum phase if needed
+            phase_changed = curriculum_manager.update_phase(step, optimizer)
+            
+            # Perform training step with curriculum management
             losses = train_step(
-                model, optimizer, loss_weighter, batch, device, task_type
+                model, optimizer, loss_weighter, batch, device, task_type,
+                curriculum_manager=curriculum_manager, step=step
             )
             
             # Update scheduler
@@ -823,7 +1131,7 @@ def main():
             # Update enhanced logger with current step information
             lr = scheduler.get_last_lr()[0]
             try:
-                enhanced_logger.update(step, task_type, losses, lr)
+                enhanced_logger.update(step, task_type, losses, lr, curriculum_manager.current_phase)
             except Exception as e:
                 logger.warning(f"Enhanced logger update failed: {e}")
                 # Fallback to basic logging

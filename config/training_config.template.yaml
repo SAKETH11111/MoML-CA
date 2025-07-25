@@ -8,8 +8,8 @@ training:
   validation_split: 0.2
 
 mgnn:
-  hidden_channels: 128
-  num_layers: 3
+  hidden_channels: 160
+  num_layers: 4
   dropout: 0.2
   readout: "mean"
   jk_mode: "cat"

@@ -245,7 +245,7 @@ def main():
         node_output_dims=mgnn_config.get("node_output_dims", 3),
         graph_output_dims=mgnn_config.get("graph_output_dims", 19),
         energy_output_dims=mgnn_config.get("energy_output_dims", 1),
-        hidden_dim=mgnn_config.get("hidden_channels", 128),
+        hidden_dim=mgnn_config.get("hidden_channels", 160),
         n_blocks=mgnn_config.get("num_layers", 4),
     ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)

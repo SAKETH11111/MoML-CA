@@ -37,20 +37,37 @@ from moml.models.mgnn.joint_mgnn import (
     create_joint_mgnn,
 )
 
-# Import training utilities
-from moml.models.mgnn.training import (
-    MGNNTrainer,
-    create_trainer,
-    JointMGNNTrainer,
-    AlternatingTrainingStrategy,
-    create_joint_trainer,
-    EarlyStopping,
-    ModelCheckpoint, 
-    LearningRateScheduler
-)
+# Import training utilities (optional, may require extra dependencies)
+try:
+    from moml.models.mgnn.training import (
+        MGNNTrainer,
+        create_trainer,
+        JointMGNNTrainer,
+        AlternatingTrainingStrategy,
+        create_joint_trainer,
+        EarlyStopping,
+        ModelCheckpoint,
+        LearningRateScheduler,
+    )
+except ModuleNotFoundError as e:
+    # Gracefully degrade if optional dependencies like matplotlib are missing
+    import logging
+    logging.getLogger(__name__).warning(
+        "Optional MGNN training utilities could not be imported (%s)."
+        " Training-related functionality will be unavailable.", e
+    )
+    MGNNTrainer = create_trainer = JointMGNNTrainer = AlternatingTrainingStrategy = create_joint_trainer = None
+    EarlyStopping = ModelCheckpoint = LearningRateScheduler = None
 
-# Import evaluation utilities
-from moml.models.mgnn.evaluation import MGNNPredictor
+# Import evaluation utilities (optional)
+try:
+    from moml.models.mgnn.evaluation import MGNNPredictor  # noqa: F401
+except ModuleNotFoundError as e:
+    import logging
+    logging.getLogger(__name__).warning(
+        "Optional MGNN evaluation utilities could not be imported (%s).", e
+    )
+    MGNNPredictor = None
 
 # Model registry for factory functions
 MODEL_REGISTRY = {

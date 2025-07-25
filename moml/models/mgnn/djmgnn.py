@@ -22,6 +22,7 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .pimeh import PhysicsInformedMinimalEquivariantHead
 
 # Conditional imports for torch_geometric
 try:
@@ -417,11 +418,16 @@ class DJMGNN(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, node_output_dims)
         )
+        # Reduce graph_head to predict only 16 properties (not 19)
+        # Properties 16-18 (rotational constants) will come from PIMEH
         self.graph_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, graph_output_dims)
+            nn.Linear(hidden_dim, 16)  # Reduced from graph_output_dims to 16
         )
+        
+        # Add PIMEH head for rotational constants
+        self.pimeh_head = PhysicsInformedMinimalEquivariantHead(hidden_dim)
         self.head_energy = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -432,6 +438,12 @@ class DJMGNN(nn.Module):
         )
 
     def add_supernode(self, x, edge_index, edge_attr, batch):
+        # Gracefully handle None or empty edge_index by creating an empty long tensor
+        if edge_index is None or edge_index.numel() == 0 or edge_index.size(0) != 2:
+            # Create a valid empty edge_index with the expected shape (2, 0)
+            edge_index = x.new_zeros(2, 0, dtype=torch.long)
+        elif edge_index.dtype != torch.long:
+            edge_index = edge_index.to(torch.long)
         if not self.use_super or x.numel() == 0:
             return x, edge_index, edge_attr, batch
 
@@ -446,7 +458,7 @@ class DJMGNN(nn.Module):
         x_with_super = torch.cat([x, super_feat], 0)
 
         device = x.device
-        row = torch.arange(num_nodes_original, device=device)
+        row = torch.arange(num_nodes_original, dtype=torch.long, device=device)
         col_batch_indices = (
             batch[:num_nodes_original]
             if batch.numel() >= num_nodes_original
@@ -482,7 +494,7 @@ class DJMGNN(nn.Module):
         mask = torch.rand(edge_index.size(1), device=edge_index.device) > self.p_dropedge
         return edge_index[:, mask], (edge_attr[mask] if edge_attr is not None and edge_attr.numel() > 0 else edge_attr)
 
-    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None):
+    def forward(self, x, edge_index, edge_attr=None, batch=None, dist=None, pos=None):
         if x is None or x.numel() == 0:
             return {
                 "node_pred": torch.empty(0, self.node_output_dims).to(x.device), 
@@ -582,7 +594,88 @@ class DJMGNN(nn.Module):
         graph_emb_input = h_aggregated 
         graph_emb = self.pool(graph_emb_input, current_batch)
         
-        out_graph = self.graph_head(graph_emb)
+        # Compute base graph predictions (16 properties)
+        base_graph_pred = self.graph_head(graph_emb)  # [batch_size, 16]
+        
+        # Compute rotational constants using PIMEH (properties 16-18)
+        try:
+            if pos is not None and pos.numel() > 0 and node_emb_for_head.numel() > 0:
+                # Ensure pos and node embeddings have consistent batch mapping
+                if pos.size(0) == node_emb_for_head.size(0):
+                    # Use original batch for PIMEH (before supernode addition)
+                    original_batch = batch if batch is not None else x.new_zeros(x.size(0), dtype=torch.long)
+                    if original_batch.size(0) > x.size(0):
+                        original_batch = original_batch[:x.size(0)]
+                    
+                    rotational_constants = self.pimeh_head(
+                        h=node_emb_for_head,
+                        pos=pos,
+                        batch=original_batch
+                    )  # [batch_size, 3]
+                    
+                    # Ensure same device and batch size consistency
+                    batch_size = base_graph_pred.size(0)
+                    if rotational_constants.size(0) != batch_size:
+                        logger.warning(
+                            f"PIMEH batch size mismatch: expected {batch_size}, got {rotational_constants.size(0)}. "
+                            f"Using fallback rotational constants."
+                        )
+                        rotational_constants = torch.full(
+                            (batch_size, 3), 10.0, device=base_graph_pred.device, dtype=base_graph_pred.dtype
+                        )
+                    else:
+                        rotational_constants = rotational_constants.to(
+                            device=base_graph_pred.device, dtype=base_graph_pred.dtype
+                        )
+                else:
+                    # Position and node embedding size mismatch
+                    logger.warning(
+                        f"Position-embedding size mismatch: pos.size(0)={pos.size(0)}, "
+                        f"node_emb.size(0)={node_emb_for_head.size(0)}. Using fallback rotational constants."
+                    )
+                    batch_size = base_graph_pred.size(0)
+                    rotational_constants = torch.full(
+                        (batch_size, 3), 10.0, device=base_graph_pred.device, dtype=base_graph_pred.dtype
+                    )
+            else:
+                # No positions available or empty tensors - use fallback
+                batch_size = base_graph_pred.size(0)
+                rotational_constants = torch.full(
+                    (batch_size, 3), 10.0, device=base_graph_pred.device, dtype=base_graph_pred.dtype
+                )
+                if pos is None:
+                    logger.debug("No positions provided to DJMGNN.forward(), using fallback rotational constants.")
+                elif pos.numel() == 0:
+                    logger.debug("Empty positions tensor provided, using fallback rotational constants.")
+                    
+        except Exception as e:
+            # Robust error handling - always provide fallback
+            logger.error(f"Error computing rotational constants with PIMEH: {e}. Using fallback values.")
+            batch_size = base_graph_pred.size(0)
+            rotational_constants = torch.full(
+                (batch_size, 3), 10.0, device=base_graph_pred.device, dtype=base_graph_pred.dtype
+            )
+        
+        # Combine base predictions with rotational constants
+        out_graph = torch.cat([base_graph_pred, rotational_constants], dim=1)  # [batch_size, 19]
+        
+        # Ensure output has correct shape
+        expected_graph_dims = self.graph_output_dims
+        if out_graph.size(1) != expected_graph_dims:
+            logger.error(
+                f"Graph output dimension mismatch: expected {expected_graph_dims}, got {out_graph.size(1)}. "
+                f"This indicates a critical integration bug."
+            )
+            # Emergency fallback - pad or truncate to correct size
+            if out_graph.size(1) < expected_graph_dims:
+                padding_size = expected_graph_dims - out_graph.size(1)
+                padding = torch.zeros(
+                    out_graph.size(0), padding_size, device=out_graph.device, dtype=out_graph.dtype
+                )
+                out_graph = torch.cat([out_graph, padding], dim=1)
+            else:
+                out_graph = out_graph[:, :expected_graph_dims]
+        
         out_energy = self.head_energy(graph_emb)
         
         return {"node_pred": out_node, "graph_pred": out_graph, "energy_pred": out_energy}
