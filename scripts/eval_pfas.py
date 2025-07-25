@@ -48,7 +48,7 @@ def evaluate_checkpoint(
         node_output_dims=mgnn_config.get("node_output_dims", 3),
         graph_output_dims=mgnn_config.get("graph_output_dims", 19),
         energy_output_dims=mgnn_config.get("energy_output_dims", 1),
-        hidden_dim=mgnn_config.get("hidden_channels", 128),
+        hidden_dim=mgnn_config.get("hidden_channels", 160),
         n_blocks=mgnn_config.get("num_layers", 4),
     )
     checkpoint = torch.load(str(ckpt_path), map_location=device)

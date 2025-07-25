@@ -29,7 +29,7 @@ max_grad_norm: 1.0
 # DJMGNN configuration
 djmgnn:
   in_node_dim: 29
-  hidden_dim: 128
+  hidden_dim: 160
   n_blocks: 4
   layers_per_block: 6
   in_edge_dim: 0
