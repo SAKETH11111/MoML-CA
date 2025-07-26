@@ -1,0 +1,2 @@
+step,timestamp,curriculum_phase,phase_description,frozen_parameters,active_parameters,physics_loss_weight,transition_reason
+0,1753488890.5420086,1,PIMEH Only Training,22539060,12961,2.0,Step 0 < 2000 (Phase 1 threshold)

@@ -11,6 +11,7 @@ preparation tasks commonly needed for molecular machine learning.
 Classes:
     CreateEdges: Creates graph edges based on distance cutoffs
     FeaturizeNodes: Adds atomic features to graph nodes
+    AddPositionalFeatures: Adds position-based features (centered positions, r_squared)
     PadQM9Features: Pads feature vectors to target dimensions
     StandardizeTargets: Standardizes target values using statistics
 
@@ -21,7 +22,8 @@ Example:
     >>> transforms = Compose([
     ...     CreateEdges(cutoff=3.5),
     ...     FeaturizeNodes(),
-    ...     PadQM9Features(target_dim=32)
+    ...     AddPositionalFeatures(),
+    ...     PadQM9Features(target_dim=36)
     ... ])
     >>> dataset = SomeDataset(transform=transforms)
 """
@@ -35,7 +37,7 @@ from torch_geometric.data import Data
 
 # Constants
 DEFAULT_DISTANCE_CUTOFF = 3.0
-DEFAULT_TARGET_DIM = 29
+DEFAULT_TARGET_DIM = 33  # Updated: 29 (original) + 4 (positional features)
 DEFAULT_STATS_PATH = "data/target_stats.yaml"
 DEFAULT_DATASET_NAME = "qm9"
 
@@ -643,3 +645,151 @@ class StandardizeTargets:
             return "y"
         else:
             return "y_graph"
+
+
+class AddPositionalFeatures:
+    """
+    Transform to add position-based features to molecular graphs.
+    
+    This transform computes centered positions and squared distance features
+    from atomic 3D coordinates and concatenates them to existing node features.
+    These features are essential for physics-informed models like PIMEH that
+    require spatial information for rotational constant calculations.
+    
+    The transform adds:
+    - centered_pos: Position vectors relative to molecular center of mass [3 features]
+    - r_squared: Squared distance from center of mass [1 feature]
+    
+    This increases the node feature dimension by 4 (from 29 to 33).
+    
+    Attributes:
+        None (stateless transform)
+    
+    Example:
+        >>> transform = AddPositionalFeatures()
+        >>> # Apply to data with existing node features and positions
+        >>> enhanced_data = transform(molecular_graph_data)
+        >>> print(enhanced_data.x.shape[1])  # Should be original_dim + 4
+    
+    Note:
+        Requires the input data to have both 'x' (node features) and 'pos'
+        (3D atomic coordinates) attributes. The transform gracefully handles
+        missing position data by adding zero features.
+    """
+
+    def __init__(self):
+        """
+        Initialize the positional features transform.
+        
+        This transform is stateless and requires no configuration.
+        """
+        logger.debug("Initialized AddPositionalFeatures transform")
+
+    def __call__(self, data: Data) -> Data:
+        """
+        Apply positional feature enhancement to molecular graph data.
+        
+        Computes centered positions and r_squared features from 3D coordinates
+        and concatenates them to existing node features. Uses center of mass
+        for centering, which is physically meaningful for molecular systems.
+        
+        Args:
+            data: PyTorch Geometric Data object with node features and positions
+            
+        Returns:
+            Data object with enhanced node features (dimension increased by 4)
+        """
+        # Check for existing node features
+        if not hasattr(data, "x") or data.x is None:
+            logger.warning("No node features found, skipping positional enhancement")
+            return data
+
+        # Check for positional coordinates
+        if not hasattr(data, "pos") or data.pos is None:
+            logger.debug("No positions found, adding zero positional features")
+            return self._add_zero_positional_features(data)
+
+        try:
+            num_atoms = data.x.shape[0]
+            device = data.x.device
+            dtype = data.x.dtype
+
+            # Validate position tensor dimensions
+            if data.pos.shape != (num_atoms, 3):
+                logger.error(
+                    f"Position tensor shape mismatch: expected ({num_atoms}, 3), "
+                    f"got {data.pos.shape}. Adding zero features."
+                )
+                return self._add_zero_positional_features(data)
+
+            # Compute center of mass (assuming unit masses for simplicity)
+            # For more accurate physics, atomic masses could be incorporated
+            center_of_mass = data.pos.mean(dim=0, keepdim=True)  # [1, 3]
+            
+            # Compute centered positions
+            centered_pos = data.pos - center_of_mass  # [num_atoms, 3]
+            
+            # Compute squared distance from center of mass
+            r_squared = (centered_pos ** 2).sum(dim=1, keepdim=True)  # [num_atoms, 1]
+            
+            # Ensure consistent device and dtype
+            centered_pos = centered_pos.to(device=device, dtype=dtype)
+            r_squared = r_squared.to(device=device, dtype=dtype)
+            
+            # Concatenate new features to existing features
+            # Order: [original_features, centered_pos_x, centered_pos_y, centered_pos_z, r_squared]
+            enhanced_features = torch.cat([
+                data.x,           # Original features [num_atoms, 29]
+                centered_pos,     # Centered positions [num_atoms, 3]  
+                r_squared         # Squared distances [num_atoms, 1]
+            ], dim=1)           # Final shape: [num_atoms, 33]
+            
+            data.x = enhanced_features
+            
+            logger.debug(
+                f"Added positional features: {data.x.shape[1] - 4} -> {data.x.shape[1]} dimensions"
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to add positional features: {e}")
+            # Fallback to zero features to maintain consistent dimensions
+            return self._add_zero_positional_features(data)
+        
+        return data
+
+    def _add_zero_positional_features(self, data: Data) -> Data:
+        """
+        Add zero-valued positional features as fallback.
+        
+        This method ensures consistent feature dimensions even when
+        position data is missing or corrupted, which is crucial for
+        batch processing and model compatibility.
+        
+        Args:
+            data: Data object with existing node features
+            
+        Returns:
+            Data object with zero positional features added
+        """
+        try:
+            num_atoms = data.x.shape[0]
+            device = data.x.device
+            dtype = data.x.dtype
+            
+            # Create zero positional features: [centered_pos (3) + r_squared (1)]
+            zero_features = torch.zeros(
+                (num_atoms, 4), 
+                device=device, 
+                dtype=dtype
+            )
+            
+            # Concatenate to existing features
+            data.x = torch.cat([data.x, zero_features], dim=1)
+            
+            logger.debug(f"Added zero positional features to maintain dimension consistency")
+            
+        except Exception as e:
+            logger.error(f"Failed to add zero positional features: {e}")
+            # If even this fails, leave data unchanged to prevent crashes
+        
+        return data

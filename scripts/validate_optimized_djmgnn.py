@@ -14,8 +14,9 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import yaml
 from torch_geometric.loader import DataLoader as GraphDataLoader
-from torchvision.transforms import Compose
+from torch_geometric.transforms import Compose
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from scipy.stats import spearmanr
 
@@ -24,7 +25,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
 
 from moml.data.dataset import get_dataset
-from moml.data.feature_transforms import CreateEdges, FeaturizeNodes, StandardizeTargets
+from moml.data.feature_transforms import CreateEdges, AddPositionalFeatures, StandardizeTargets
+try:
+    from moml.data.feature_transforms import FeaturizeNodes
+except ImportError:
+    class FeaturizeNodes:
+        def __call__(self, data): return data
 from moml.models.mgnn.djmgnn import DJMGNN
 
 logger = logging.getLogger(__name__)
@@ -70,56 +76,37 @@ class OptimizedDJMGNNPredictor:
         logger.info(f"Checkpoint seed: {self.checkpoint.get('seed', 'unknown')}")
         
     def _initialize_model_from_checkpoint(self) -> DJMGNN:
-        """Initialize model architecture from checkpoint state dict."""
-        # Analyze state dict to determine model architecture
-        state_dict = self.checkpoint["model_state_dict"]
+        """Initialize model architecture from training configuration."""
+        # Load configuration from joint_training.yaml
+        config_path = PROJECT_ROOT / "config" / "joint_training.yaml"
         
-        # Extract dimensions from first layer
-        first_layer_weight = None
-        for key, tensor in state_dict.items():
-            if "weight" in key and len(tensor.shape) == 2:
-                first_layer_weight = tensor
-                break
+        if not config_path.exists():
+            raise FileNotFoundError(f"Training configuration not found at {config_path}")
         
-        if first_layer_weight is None:
-            raise ValueError("Could not determine input dimension from checkpoint")
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
         
-        in_node_dim = first_layer_weight.shape[1]
-        hidden_dim = first_layer_weight.shape[0]
+        # Extract DJMGNN configuration
+        djmgnn_config = config.get("djmgnn", {})
         
-        # Find output dimensions by examining final layers
-        graph_output_dims = 19  # QM9 default
-        node_output_dims = 3   # Force dimensions
-        energy_output_dims = 1 # Energy dimension
+        # Get model parameters from configuration
+        in_node_dim = djmgnn_config.get("in_node_dim", 33)
+        in_edge_dim = djmgnn_config.get("in_edge_dim", 0)
+        hidden_dim = djmgnn_config.get("hidden_dim", 160)
+        n_blocks = djmgnn_config.get("n_blocks", 4)
+        node_output_dims = djmgnn_config.get("node_output_dims", 3)
+        graph_output_dims = djmgnn_config.get("graph_output_dims", 19)
+        energy_output_dims = djmgnn_config.get("energy_output_dims", 1)
         
-        # Look for graph prediction head
-        for key, tensor in state_dict.items():
-            if "graph_pred" in key and "weight" in key and len(tensor.shape) == 2:
-                graph_output_dims = tensor.shape[0]
-            elif "node_pred" in key and "weight" in key and len(tensor.shape) == 2:
-                node_output_dims = tensor.shape[0]
-            elif "energy_pred" in key and "weight" in key and len(tensor.shape) == 2:
-                energy_output_dims = tensor.shape[0]
-        
-        # Count number of blocks by counting repeated patterns
-        n_blocks = 4  # Default fallback
-        block_count = 0
-        for key in state_dict.keys():
-            if "blocks." in key:
-                block_idx = int(key.split("blocks.")[1].split(".")[0])
-                block_count = max(block_count, block_idx + 1)
-        if block_count > 0:
-            n_blocks = block_count
-        
-        logger.info(f"Detected model architecture: in_node_dim={in_node_dim}, "
+        logger.info(f"Loading model architecture from config: in_node_dim={in_node_dim}, "
                    f"hidden_dim={hidden_dim}, n_blocks={n_blocks}")
         logger.info(f"Output dimensions: graph={graph_output_dims}, "
                    f"node={node_output_dims}, energy={energy_output_dims}")
         
-        # Initialize model
+        # Initialize model with configuration parameters
         model = DJMGNN(
             in_node_dim=in_node_dim,
-            in_edge_dim=0,  # Assume no edge features for now
+            in_edge_dim=in_edge_dim,
             node_output_dims=node_output_dims,
             graph_output_dims=graph_output_dims,
             energy_output_dims=energy_output_dims,
@@ -128,6 +115,7 @@ class OptimizedDJMGNNPredictor:
         ).to(self.device)
         
         # Load state dict
+        state_dict = self.checkpoint["model_state_dict"]
         model.load_state_dict(state_dict)
         
         return model
@@ -143,6 +131,7 @@ class OptimizedDJMGNNPredictor:
                 edge_attr=getattr(batch, "edge_attr", None),
                 batch=getattr(batch, "batch", None),
                 dist=getattr(batch, "dist", None),
+                pos=getattr(batch, "pos", None),
             )
         
         return outputs
@@ -250,7 +239,15 @@ def validate_qm9_properties(predictor: OptimizedDJMGNNPredictor, test_size: int 
     logger.info("Loading QM9 test dataset...")
     
     # Create test transform (no standardization - we'll handle that in predictor)
-    test_transform = Compose([CreateEdges(), FeaturizeNodes()])
+    # Must include AddPositionalFeatures to match training config (29 + 4 = 33 features)
+    # Fallback FeaturizeNodes if RDKit missing
+try:
+    featurize = FeaturizeNodes()
+except ImportError:
+    def featurize(data): return data
+from torch_geometric.transforms import Compose as GeomCompose
+# Compose transforms
+test_transform = GeomCompose([CreateEdges(), featurize, AddPositionalFeatures()])
     
     # Load test dataset  
     qm9_dataset = get_dataset("qm9", root="data", transform=test_transform)

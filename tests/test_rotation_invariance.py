@@ -345,13 +345,15 @@ def get_all_molecular_test_cases(device: torch.device = torch.device('cpu'),
 # Core Test Functions
 # =====================================================================
 
-def test_rotation_invariance(model: nn.Module, 
-                           h: torch.Tensor,
-                           pos: torch.Tensor,
-                           batch: torch.Tensor,
-                           rotations: List[Tuple[str, torch.Tensor]],
-                           tolerance: float = 1e-6,
-                           test_name: str = "generic") -> RotationTestResult:
+def _run_rotation_invariance_test(model: nn.Module,
+                                h: torch.Tensor,
+                                pos: torch.Tensor,
+                                batch: torch.Tensor,
+                                rotations: List[Tuple[str, torch.Tensor]],
+                                tolerance: float = 1e-6,
+                                test_name: str = "generic",
+                                edge_index: Optional[torch.Tensor] = None,
+                                dist: Optional[torch.Tensor] = None) -> RotationTestResult:
     """
     Test rotation invariance for a given model and molecular data.
     
@@ -372,11 +374,8 @@ def test_rotation_invariance(model: nn.Module,
     with torch.no_grad():
         # Get reference rotational constants
         if hasattr(model, 'physics_head'):  # DJMGNN case
-            output = model(x=h, edge_index=None, edge_attr=None, batch=batch, pos=pos)
-            if isinstance(output, dict) and 'graph_pred' in output:
-                ref_constants = output['graph_pred'][:, 16:19]  # Rotational constants columns
-            else:
-                ref_constants = output[:, 16:19]  # Assume output is tensor
+            output = model(x=h, edge_index=edge_index, edge_attr=None, batch=batch, pos=pos, dist=dist)
+            ref_constants = output['graph_pred'][:, 16:19]  # Rotational constants columns
         else:  # PIMEH case
             ref_constants = model(h, pos, batch)
         
@@ -389,11 +388,8 @@ def test_rotation_invariance(model: nn.Module,
             
             # Get rotational constants for rotated positions
             if hasattr(model, 'physics_head'):  # DJMGNN case
-                output = model(x=h, edge_index=None, edge_attr=None, batch=batch, pos=rotated_pos)
-                if isinstance(output, dict) and 'graph_pred' in output:
-                    rot_constants = output['graph_pred'][:, 16:19]
-                else:
-                    rot_constants = output[:, 16:19]
+                output = model(x=h, edge_index=edge_index, edge_attr=None, batch=batch, pos=rotated_pos, dist=dist)
+                rot_constants = output['graph_pred'][:, 16:19]
             else:  # PIMEH case
                 rot_constants = model(h, rotated_pos, batch)
             
@@ -448,11 +444,11 @@ class TestRotationInvariance:
         model = PhysicsInformedMinimalEquivariantHead(hidden_dim=128)
         return model.to(device)
     
-    @pytest.fixture 
+    @pytest.fixture
     def djmgnn_model(self, device):
         """Create DJMGNN model with PIMEH for testing."""
         model = DJMGNN(
-            in_node_dim=29,
+            in_node_dim=33,  # Updated to match config
             hidden_dim=160,
             n_blocks=4,
             layers_per_block=2,
@@ -489,7 +485,7 @@ class TestRotationInvariance:
         rotations = get_standard_rotations(device)
         
         # Test rotation invariance
-        result = test_rotation_invariance(
+        result = _run_rotation_invariance_test(
             pimeh_model, h, mol_case.positions, batch, rotations, tolerance,
             f"PIMEH_{molecule_case}"
         )
@@ -502,35 +498,44 @@ class TestRotationInvariance:
     ])
     def test_djmgnn_rotation_invariance(self, djmgnn_model, device, tolerance, molecule_case):
         """Test full DJMGNN with PIMEH rotation invariance."""
-        # Get molecular test case  
+        from torch_geometric.data import Data
+        from moml.data.feature_transforms import CreateEdges
+
+        # Get molecular test case
         test_cases = {case.name: case for case in get_all_molecular_test_cases(device)}
-        
+
         if molecule_case not in test_cases:
             pytest.skip(f"Molecule {molecule_case} not available")
-            
+
         mol_case = test_cases[molecule_case]
-        
+
         # Create full molecular graph data
         n_atoms = mol_case.positions.size(0)
-        h = torch.randn(n_atoms, 29, device=device)  # Full node features
+        h = torch.randn(n_atoms, 33, device=device)  # Full node features (33 dim)
         batch = torch.zeros(n_atoms, dtype=torch.long, device=device)
-        
+
+        # Create graph structure
+        data = Data(pos=mol_case.positions)
+        data = CreateEdges(cutoff=5.0)(data)
+        edge_index = data.edge_index.to(device)
+        dist = torch.norm(data.pos[edge_index[0]] - data.pos[edge_index[1]], p=2, dim=1).unsqueeze(-1).to(device)
+
         # Get subset of rotations (DJMGNN is slower)
         standard_rotations = get_standard_rotations(device)
         key_rotations = [
             standard_rotations[0],  # Identity
             standard_rotations[1],  # 90° X
-            standard_rotations[5],  # 180° Y  
+            standard_rotations[5],  # 180° Y
             standard_rotations[9],  # 270° Z
             standard_rotations[13], # Complex Euler
         ]
-        
+
         # Test rotation invariance
-        result = test_rotation_invariance(
+        result = _run_rotation_invariance_test(
             djmgnn_model, h, mol_case.positions, batch, key_rotations, tolerance,
-            f"DJMGNN_{molecule_case}"
+            f"DJMGNN_{molecule_case}", edge_index=edge_index, dist=dist
         )
-        
+
         assert result.passed, f"DJMGNN rotation invariance failed for {molecule_case}: max_error={result.max_error:.2e}"
         print(f"✅ DJMGNN {molecule_case}: max_error={result.max_error:.2e}, mean_error={result.mean_error:.2e}")
 
@@ -549,7 +554,7 @@ class TestRotationInvariance:
             R = random_rotation_matrix(device)
             random_rotations.append((f"Random_{i+1}", R))
         
-        result = test_rotation_invariance(
+        result = _run_rotation_invariance_test(
             pimeh_model, h, water.positions, batch, random_rotations, tolerance,
             "PIMEH_Random_Rotations"
         )
@@ -584,7 +589,7 @@ class TestRotationInvariance:
         # Test with key rotations
         key_rotations = get_standard_rotations(device)[:5]  # First 5 rotations
         
-        result = test_rotation_invariance(
+        result = _run_rotation_invariance_test(
             pimeh_model, h, pos, batch, key_rotations, tolerance,
             "PIMEH_Batch_Processing"
         )
@@ -601,8 +606,8 @@ class TestRotationInvariance:
         
         # Test single atom - should handle gracefully
         rotations = get_standard_rotations(device)[:3]  # Just a few rotations
-        result = test_rotation_invariance(
-            pimeh_model, h_single, single_atom.positions, batch_single, 
+        result = _run_rotation_invariance_test(
+            pimeh_model, h_single, single_atom.positions, batch_single,
             rotations, tolerance, "PIMEH_Single_Atom"
         )
         
@@ -615,7 +620,7 @@ class TestRotationInvariance:
         h_linear = torch.randn(n_atoms, 128, device=device)
         batch_linear = torch.zeros(n_atoms, dtype=torch.long, device=device)
         
-        result = test_rotation_invariance(
+        result = _run_rotation_invariance_test(
             pimeh_model, h_linear, co2.positions, batch_linear,
             rotations, tolerance, "PIMEH_Linear_CO2"
         )
@@ -670,8 +675,13 @@ def benchmark_rotation_invariance(model: nn.Module,
         start_time = time.time()
         
         with torch.no_grad():
-            result = test_rotation_invariance(
-                model, h, pos, batch, rotations, 1e-6, f"Benchmark_B{batch_size}"
+            from torch_geometric.data import Data
+            from moml.data.feature_transforms import CreateEdges
+            edge_index = CreateEdges(cutoff=5.0)(Data(pos=pos)).edge_index.to(device)
+            dist = torch.norm(pos[edge_index[0]] - pos[edge_index[1]], p=2, dim=1).unsqueeze(-1).to(device)
+            result = _run_rotation_invariance_test(
+                model, h, pos, batch, rotations, 1e-6, f"Benchmark_B{batch_size}",
+                edge_index=edge_index, dist=dist
             )
         
         elapsed = time.time() - start_time
@@ -714,7 +724,7 @@ if __name__ == "__main__":
         h = torch.randn(n_atoms, 128, device=device)
         batch = torch.zeros(n_atoms, dtype=torch.long, device=device)
         
-        result = test_rotation_invariance(
+        result = _run_rotation_invariance_test(
             pimeh, h, mol_case.positions, batch, rotations, 1e-6,
             f"PIMEH_{mol_case.name}"
         )

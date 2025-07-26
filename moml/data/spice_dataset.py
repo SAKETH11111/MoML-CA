@@ -39,6 +39,7 @@ RAW_FILENAME = "SPICE-1.1.4.hdf5"
 
 # Configure module logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Enable INFO level logging for progress updates
 
 try:
     import h5py  # type: ignore
@@ -246,8 +247,26 @@ class SpiceDataset(InMemoryDataset):
             
             # Apply pre-transforms if specified
             if self.pre_transform is not None:
-                logger.info("Applying pre-transforms")
-                data_list = [self.pre_transform(data) for data in data_list]
+                logger.info("Applying pre-transforms to all molecules...")
+                logger.info(f"Processing {len(data_list)} molecules with transforms")
+                
+                # Add progress logging to identify problematic molecules
+                transformed_list = []
+                for i, data in enumerate(data_list):
+                    if i % 1000 == 0:  # Log every 1000 molecules
+                        logger.info(f"Processing molecule {i+1}/{len(data_list)} ({(i+1)/len(data_list)*100:.1f}%)")
+                    
+                    try:
+                        transformed_data = self.pre_transform(data)
+                        transformed_list.append(transformed_data)
+                    except Exception as e:
+                        logger.error(f"Failed to transform molecule {i}: {e}")
+                        logger.error(f"Molecule info: atoms={data.z.shape[0] if hasattr(data, 'z') else 'unknown'}")
+                        # Skip problematic molecule and continue
+                        continue
+                
+                data_list = transformed_list
+                logger.info(f"✅ Successfully transformed {len(data_list)} molecules")
             
             # Save processed data
             self._save_processed_data(data_list)
@@ -283,7 +302,13 @@ class SpiceDataset(InMemoryDataset):
         
         total_conformers = 0
         
-        for mol_key in mol_keys:
+        for i, mol_key in enumerate(mol_keys):
+            # Progress logging every 1000 molecules
+            if i % 1000 == 0:
+                logger.info(f"Processing molecule {i+1}/{len(mol_keys)} ({(i+1)/len(mol_keys)*100:.1f}%) - Key: {mol_key}")
+            elif i % 100 == 0:  # More frequent logging for debugging
+                logger.debug(f"Processing molecule {i+1}/{len(mol_keys)} - Key: {mol_key}")
+                
             try:
                 mol_data = mol_container[mol_key]
                 conformers = self._process_single_molecule(mol_data, mol_key)
@@ -291,7 +316,7 @@ class SpiceDataset(InMemoryDataset):
                 total_conformers += len(conformers)
                 
             except Exception as e:
-                logger.warning(f"Error processing molecule {mol_key}: {e}")
+                logger.warning(f"Error processing molecule {mol_key} (index {i}): {e}")
                 continue
         
         logger.info(f"Processed {total_conformers} conformers from {len(mol_keys)} molecules")

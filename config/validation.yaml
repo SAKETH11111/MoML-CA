@@ -34,7 +34,7 @@ training:
 
 # Model configurations (reduced complexity for validation)
 djmgnn:
-  in_node_dim: 29
+  in_node_dim: 33
   hidden_dim: 64  # Reduced from typical 128
   n_blocks: 2     # Reduced from typical 4
   layers_per_block: 3  # Reduced from typical 6
@@ -51,7 +51,7 @@ djmgnn:
   rbf_K: 16
 
 hmgnn:
-  scale_dims: [29, 29, 29]
+  scale_dims: [33, 33, 33]
   hidden_dim: 64  # Reduced from typical 128
   env_dim: 0
   env_mlp: false

@@ -200,7 +200,7 @@ class MGNNTrainer:
                 x=batch.x,
                 edge_index=batch.edge_index,
                 edge_attr=getattr(batch, "edge_attr", None),
-                batch=getattr(batch, "batch", None),
+                batch=getattr(batch, "batch", None), pos=getattr(batch, "pos", None),
             )
 
             # Prepare targets
@@ -262,7 +262,7 @@ class MGNNTrainer:
                     x=batch.x,
                     edge_index=batch.edge_index,
                     edge_attr=getattr(batch, "edge_attr", None),
-                    batch=getattr(batch, "batch", None),
+                    batch=getattr(batch, "batch", None), pos=getattr(batch, "pos", None),
                 )
 
                 # Prepare targets
@@ -492,7 +492,7 @@ def train_epoch(
             x=batch.x,
             edge_index=batch.edge_index,
             edge_attr=getattr(batch, "edge_attr", None),
-            batch=getattr(batch, "batch", None),
+            batch=getattr(batch, "batch", None), pos=getattr(batch, "pos", None),
         )
 
         # Prepare targets

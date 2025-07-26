@@ -28,7 +28,7 @@ max_grad_norm: 1.0
 
 # DJMGNN configuration
 djmgnn:
-  in_node_dim: 29
+  in_node_dim: 33  # Updated: 29 (original) + 4 (positional features)
   hidden_dim: 160
   n_blocks: 4
   layers_per_block: 6
@@ -46,7 +46,7 @@ djmgnn:
 
 # HMGNN configuration
 hmgnn:
-  scale_dims: [29, 29, 29]  # Input dimensions for each scale
+  scale_dims: [33, 33, 33]  # Input dimensions for each scale (updated for positional features)
   hidden_dim: 128
   env_dim: 0
   env_mlp: false

@@ -21,6 +21,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.utils.data
 import yaml
 from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader as GraphDataLoader
@@ -44,10 +45,10 @@ sys.path.append(str(PROJECT_ROOT))
 
 from moml.data.dataset import get_dataset
 from moml.data.feature_transforms import (CreateEdges, FeaturizeNodes,
-                                          StandardizeTargets)
+                                          AddPositionalFeatures, StandardizeTargets)
 from moml.models.mgnn.djmgnn import DJMGNN
 
-DEFAULT_NODE_FEATURE_DIM = 29
+DEFAULT_NODE_FEATURE_DIM = 33  # Updated: 29 (original) + 4 (positional features)
 LOG_FILE_NAME = "alternating_training_optimized.log"
 
 # 3-Phase Curriculum Constants
@@ -56,6 +57,60 @@ PHASE_2_END_STEP = 6000   # Train base DJMGNN
 # Phase 3 starts at PHASE_2_END_STEP and continues until max_steps (joint training)
 
 logger = logging.getLogger(__name__)
+
+
+class EarlyStopping:
+    """
+    Early stopping mechanism to prevent overfitting and save computational resources.
+    
+    Monitors validation loss and stops training when no improvement is observed
+    for a specified number of consecutive validation checks (patience).
+    """
+    
+    def __init__(self, patience: int = 7, min_delta: float = 0.001):
+        """
+        Initialize EarlyStopping.
+        
+        Args:
+            patience (int): Number of validation checks to wait after last improvement
+            min_delta (float): Minimum change in validation loss to qualify as improvement
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = float('inf')
+        self.counter = 0
+        self.early_stop = False
+        self.best_step = 0
+        
+    def __call__(self, val_loss: float, step: int) -> bool:
+        """
+        Check if training should stop based on validation loss.
+        
+        Args:
+            val_loss (float): Current validation loss
+            step (int): Current training step
+            
+        Returns:
+            bool: True if training should stop, False otherwise
+        """
+        # Check if this is an improvement
+        if val_loss < self.best_loss - self.min_delta:
+            self.best_loss = val_loss
+            self.best_step = step
+            self.counter = 0
+            logger.info(f"🎯 New best validation loss: {val_loss:.6f} at step {step}")
+            return False
+        else:
+            self.counter += 1
+            logger.info(f"⏳ No improvement for {self.counter}/{self.patience} checks (best: {self.best_loss:.6f} at step {self.best_step})")
+            
+            if self.counter >= self.patience:
+                self.early_stop = True
+                logger.info(f"🛑 Early stopping triggered! No improvement for {self.patience} consecutive validation checks")
+                logger.info(f"📊 Best validation loss: {self.best_loss:.6f} achieved at step {self.best_step}")
+                return True
+                
+        return False
 
 
 class CurriculumManager:
@@ -341,6 +396,9 @@ class EnhancedTrainingLogger:
     
     def _setup_csv_logging(self):
         """Setup CSV logging for metrics tracking."""
+        # Ensure log directory exists
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         
         # Main metrics log
@@ -728,6 +786,62 @@ class CycleIterator:
         return batch, task_type
 
 
+def validate_model(
+    model: DJMGNN,
+    graph_loader: GraphDataLoader,
+    device: torch.device,
+    num_batches: int = 50
+) -> float:
+    """
+    Validate the model on a subset of the validation data.
+    
+    Args:
+        model: The DJMGNN model to validate
+        graph_loader: DataLoader for graph-level validation data
+        device: Device to run validation on
+        num_batches: Number of batches to use for validation
+        
+    Returns:
+        float: Average validation loss
+    """
+    model.eval()
+    total_loss = 0.0
+    total_samples = 0
+    
+    with torch.no_grad():
+        batch_count = 0
+        for batch in graph_loader:
+            if batch_count >= num_batches:
+                break
+                
+            batch = batch.to(device)
+            if not hasattr(batch, "x") or batch.x is None:
+                continue
+                
+            # Forward pass
+            out = model(
+                x=batch.x,
+                edge_index=batch.edge_index,
+                edge_attr=getattr(batch, "edge_attr", None),
+                batch=getattr(batch, "batch", None),
+                dist=getattr(batch, "dist", None),
+                pos=getattr(batch, "pos", None),
+            )
+            
+            # Compute validation loss (focusing on graph predictions)
+            if "graph_pred" in out and hasattr(batch, "y"):
+                if batch.y.numel() > 0 and out["graph_pred"].shape == batch.y.shape:
+                    # Compute total loss for all properties
+                    batch_loss = nn.MSELoss()(out["graph_pred"], batch.y)
+                    total_loss += batch_loss.item() * batch.y.size(0)
+                    total_samples += batch.y.size(0)
+            
+            batch_count += 1
+    
+    model.train()
+    return total_loss / total_samples if total_samples > 0 else float('inf')
+
+
 def compute_losses(
     model: DJMGNN, batch: Batch, device: torch.device, task_type: str
 ) -> Dict[str, torch.Tensor]:
@@ -860,6 +974,19 @@ def train_step(
     if curriculum_manager is not None and curriculum_manager.should_skip_gradnorm(step):
         # Phases 1 & 2: Use manual weighting, skip GradNorm
         total_loss = final_losses.sum()
+        
+        # Check if total_loss requires gradients before calling backward()
+        if not total_loss.requires_grad:
+            logger.warning(f"Step {step}: Loss tensor does not require gradients (likely due to frozen parameters in curriculum phase {curriculum_manager.current_phase}). Skipping backward pass for task '{task_type}'.")
+            return {
+                "total_loss": total_loss.item(),
+                "node_loss": losses_dict["node_loss"].item(),
+                "graph_loss": losses_dict["graph_loss"].item(),
+                "energy_loss": losses_dict["energy_loss"].item(),
+                "physics_loss": losses_dict["physics_loss"].item(),
+                "weights": [1.0, 1.0, 1.0, 1.0]  # Default weights when gradient computation is skipped
+            }
+        
         total_loss.backward()
         current_weights = [
             curriculum_manager.get_loss_weights(step)['node_loss'],
@@ -869,6 +996,19 @@ def train_step(
         ]
     else:
         # Phase 3: Use GradNorm for automatic balancing
+        # Check if any of the losses require gradients before calling GradNorm backward
+        if not any(loss.requires_grad for loss in losses_tensor):
+            logger.warning(f"Step {step}: No loss tensors require gradients. Skipping GradNorm backward pass for task '{task_type}'.")
+            total_loss = torch.sum(losses_tensor)
+            return {
+                "total_loss": total_loss.item(),
+                "node_loss": losses_dict["node_loss"].item(),
+                "graph_loss": losses_dict["graph_loss"].item(),
+                "energy_loss": losses_dict["energy_loss"].item(),
+                "physics_loss": losses_dict["physics_loss"].item(),
+                "weights": [1.0, 1.0, 1.0, 1.0]  # Default weights when gradient computation is skipped
+            }
+        
         loss_weighter.backward(losses_tensor, retain_graph=False)
         total_loss = torch.sum(losses_tensor * loss_weighter.loss_weights)
         current_weights = loss_weighter.loss_weights.detach().cpu().tolist()
@@ -895,11 +1035,17 @@ def save_checkpoint(
     step: int, 
     loss: float, 
     seed: int,
-    ckpt_dir: str
+    ckpt_dir: str,
+    is_best: bool = False,
+    val_loss: Optional[float] = None
 ):
     """Save a training checkpoint with scalers and metadata."""
     os.makedirs(ckpt_dir, exist_ok=True)
-    checkpoint_path = os.path.join(ckpt_dir, f"checkpoint_step_{step}.pt")
+    
+    if is_best:
+        checkpoint_path = os.path.join(ckpt_dir, "best_checkpoint.pt")
+    else:
+        checkpoint_path = os.path.join(ckpt_dir, f"checkpoint_step_{step}.pt")
     
     # Prepare scaler state
     scaler_state = {
@@ -917,19 +1063,26 @@ def save_checkpoint(
             "dataset_name": scaler_node.dataset_name
         }
     
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scaler_state": scaler_state,
-            "step": step,
-            "loss": loss,
-            "seed": seed,
-            "timestamp": time.time()
-        },
-        checkpoint_path,
-    )
-    logger.info(f"Checkpoint saved to {checkpoint_path} with scalers")
+    checkpoint_data = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scaler_state": scaler_state,
+        "step": step,
+        "loss": loss,
+        "seed": seed,
+        "timestamp": time.time()
+    }
+    
+    # Add validation loss if provided
+    if val_loss is not None:
+        checkpoint_data["val_loss"] = val_loss
+    
+    torch.save(checkpoint_data, checkpoint_path)
+    
+    if is_best:
+        logger.info(f"🏆 Best checkpoint saved to {checkpoint_path} (val_loss: {val_loss:.6f})")
+    else:
+        logger.info(f"Checkpoint saved to {checkpoint_path} with scalers")
 
 
 def load_checkpoint(
@@ -977,6 +1130,9 @@ def main():
     parser.add_argument("--resume_from_checkpoint", type=str, help="Path to a specific checkpoint to resume from.")
     parser.add_argument("--graph_dataset", type=str, default="qm9", help="Dataset for graph-level tasks.")
     parser.add_argument("--node_dataset", type=str, default="spice", help="Dataset for node-level tasks.")
+    parser.add_argument("--early_stopping_patience", type=int, default=5, help="Early stopping patience (validation checks).")
+    parser.add_argument("--early_stopping_min_delta", type=float, default=0.001, help="Minimum delta for early stopping.")
+    parser.add_argument("--validate_every", type=int, default=500, help="Frequency of validation checks.")
     args = parser.parse_args()
 
     setup_logging()
@@ -995,45 +1151,87 @@ def main():
     set_deterministic_training(args.seed)
 
     try:
-        with open(args.config_path, "r") as f:
+        config_path = 'config/joint_training.yaml'
+        with open(config_path, "r") as f:
             config = yaml.safe_load(f)
     except FileNotFoundError:
-        logger.error(f"Configuration file not found at {args.config_path}")
+        logger.error(f"Configuration file not found at {config_path}")
         sys.exit(1)
 
     device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
 
     # --- DataLoaders with Scalers ---
-    transform_graph = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.graph_dataset)])
+    transform_graph = Compose([CreateEdges(), FeaturizeNodes(), AddPositionalFeatures(), StandardizeTargets(dataset_name=args.graph_dataset)])
     ds_graph = get_dataset(args.graph_dataset, root="data", transform=transform_graph)
-    graph_loader = GraphDataLoader(ds_graph, batch_size=args.batch_graph, shuffle=True, num_workers=2)
     
-    # Store scaler for later serialization  
+    # Split dataset for training and validation (80/20 split)
+    train_size = int(0.8 * len(ds_graph))
+    val_size = len(ds_graph) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        ds_graph, [train_size, val_size], 
+        generator=torch.Generator().manual_seed(args.seed)
+    )
+    
+    graph_loader = GraphDataLoader(train_dataset, batch_size=args.batch_graph, shuffle=True, num_workers=0)
+    val_loader = GraphDataLoader(val_dataset, batch_size=args.batch_graph, shuffle=False, num_workers=0)
+    
+    # Store scaler for later serialization      
     graph_scaler = transform_graph.transforms[-1]  # StandardizeTargets is last
-    logger.info(f"Loaded {args.graph_dataset.upper()} dataset with {len(ds_graph)} samples.")
+    logger.info(f"Loaded {args.graph_dataset.upper()} dataset: {train_size} train, {val_size} validation samples.")
 
     node_scaler = None
     node_loader = None
     if args.node_dataset.lower() != "none":
         try:
-            transform_node = Compose([CreateEdges(), FeaturizeNodes(), StandardizeTargets(dataset_name=args.node_dataset)])
+            logger.info(f"🔧 Creating transform pipeline for {args.node_dataset.upper()}...")
+            transform_node = Compose([CreateEdges(), FeaturizeNodes(), AddPositionalFeatures(), StandardizeTargets(dataset_name=args.node_dataset)])
+            logger.info("✅ Transform pipeline created")
+            
+            logger.info(f"📦 Loading {args.node_dataset.upper()} dataset...")
+            logger.info("   This may take a few minutes for SPICE preprocessing...")
+            
             ds_node = get_dataset(args.node_dataset, root="data", split="train", transform=transform_node)
-            node_loader = GraphDataLoader(ds_node, batch_size=args.batch_node, shuffle=True, num_workers=2)
+            logger.info(f"✅ Dataset loaded: {len(ds_node)} samples")
+            
+            logger.info("🚛 Creating GraphDataLoader for node dataset...")
+            logger.info(f"   • Dataset size: {len(ds_node)}")
+            logger.info(f"   • Batch size: {args.batch_node}")
+            logger.info(f"   • Shuffle: True")
+            logger.info(f"   • Num workers: 0")
+            
+            node_loader = GraphDataLoader(ds_node, batch_size=args.batch_node, shuffle=True, num_workers=0)
+            logger.info("✅ GraphDataLoader created successfully!")
+            
             node_scaler = transform_node.transforms[-1]
             logger.info(f"Loaded {args.node_dataset.upper()} dataset with {len(ds_node)} samples.")
         except Exception as e:
             logger.warning(f"Could not load {args.node_dataset.upper()} dataset: {e}")
+            logger.error(f"Full error: {str(e)}", exc_info=True)
 
     # Create cycle iterator
+    logger.info("🔄 Creating cycle iterator...")
     cycle_iter = CycleIterator(
         node_loader, graph_loader,
         node_steps=args.node_cycle_steps,
         graph_steps=args.graph_cycle_steps
     )
+    logger.info("✅ Cycle iterator created successfully")
 
     # Model and Optimizer
+    logger.info("🏗️ Loading model configuration...")
     mgnn_config = config.get("mgnn", {})
+    logger.info(f"📋 Model config loaded: {mgnn_config}")
+    
+    logger.info("🧠 Creating DJMGNN model...")
+    logger.info(f"   • in_node_dim: {DEFAULT_NODE_FEATURE_DIM}")
+    logger.info(f"   • in_edge_dim: {mgnn_config.get('in_edge_dim', 0)}")
+    logger.info(f"   • node_output_dims: {mgnn_config.get('node_output_dims', 3)}")
+    logger.info(f"   • graph_output_dims: {mgnn_config.get('graph_output_dims', 19)}")
+    logger.info(f"   • energy_output_dims: {mgnn_config.get('energy_output_dims', 1)}")
+    logger.info(f"   • hidden_dim: {mgnn_config.get('hidden_channels', 160)}")
+    logger.info(f"   • n_blocks: {mgnn_config.get('num_layers', 4)}")
+    
     model = DJMGNN(
         in_node_dim=DEFAULT_NODE_FEATURE_DIM,
         in_edge_dim=mgnn_config.get("in_edge_dim", 0),
@@ -1042,27 +1240,42 @@ def main():
         energy_output_dims=mgnn_config.get("energy_output_dims", 1),
         hidden_dim=mgnn_config.get("hidden_channels", 160),
         n_blocks=mgnn_config.get("num_layers", 4),
-    ).to(device)
+    )
+    logger.info("✅ DJMGNN model created successfully")
+    
+    logger.info("🚀 Moving model to device...")
+    model = model.to(device)
+    logger.info("✅ Model moved to device successfully")
     
     # AdamW optimizer with cosine annealing
+    logger.info("⚙️ Creating optimizer...")
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    logger.info("✅ Optimizer created successfully")
+    
+    logger.info("📅 Creating scheduler...")
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.max_steps, eta_min=5e-6
     )
+    logger.info("✅ Scheduler created successfully")
     
     # Get shared parameter for GradNorm (backbone parameter from last block)
+    logger.info("🔗 Getting backbone parameter for GradNorm...")
     backbone_parameter = model.blocks[-1].transition_layers[-1].weight  # Last transition layer weight
+    logger.info("✅ Backbone parameter obtained successfully")
     
     # Proper GradNorm loss balancer using lucidrains implementation
     # Updated to handle 4 losses: node_loss, graph_loss, energy_loss, physics_loss
+    logger.info("⚖️ Creating GradNorm loss weighter...")
     loss_weighter = GradNormLossWeighter(
         num_losses=4,  # node_loss, graph_loss, energy_loss, physics_loss (rotational)
         learning_rate=1e-4,
         restoring_force_alpha=0.5,  # o3-pro recommended alpha
         grad_norm_parameters=backbone_parameter
     )
+    logger.info("✅ GradNorm loss weighter created successfully")
 
     # Resume from checkpoint if needed
+    logger.info("💾 Checking for checkpoint resume...")
     start_step = 0
     if not args.fresh_start:
         ckpt_path = args.resume_from_checkpoint
@@ -1076,6 +1289,7 @@ def main():
                 ckpt_path = checkpoints[0]
         if ckpt_path and os.path.exists(ckpt_path):
             start_step, _ = load_checkpoint(model, optimizer, str(ckpt_path))
+    logger.info("✅ Checkpoint check completed")
 
     # Training Loop
     logger.info("🎯 BEGINNING TRAINING LOOP")
@@ -1085,18 +1299,34 @@ def main():
     logger.info("=" * 80)
     
     # Initialize enhanced logger with checkpoint directory for CSV logs
+    logger.info("📊 Initializing enhanced logger...")
     enhanced_logger = EnhancedTrainingLogger(
         max_steps=args.max_steps, 
         log_every=args.log_every,
         log_dir=args.checkpoint_dir
     )
+    logger.info("✅ Enhanced logger initialized")
+    
+    logger.info("🎬 Starting enhanced logger display...")
     enhanced_logger.start()
+    logger.info("✅ Enhanced logger display started")
     
     # Initialize curriculum manager for 3-phase training
+    logger.info("📚 Initializing curriculum manager...")
     curriculum_manager = CurriculumManager(model, enhanced_logger)
+    logger.info("✅ Curriculum manager initialized")
     
     # Set initial phase (Phase 1: PIMEH only)
+    logger.info("⚡ Setting initial curriculum phase...")
     curriculum_manager.update_phase(start_step, optimizer)
+    logger.info("✅ Initial curriculum phase set")
+    
+    # Initialize early stopping
+    early_stopping = EarlyStopping(
+        patience=args.early_stopping_patience,
+        min_delta=args.early_stopping_min_delta
+    )
+    logger.info(f"🛑 Early stopping initialized: patience={args.early_stopping_patience}, min_delta={args.early_stopping_min_delta}")
     
     print(f"\n🚀 STARTING 40K TRAINING RUN - TARGET: 95% ACCURACY")
     print(f"📊 Datasets: QM9 ({len(ds_graph):,}) + SPICE ({len(ds_node):,}) = {len(ds_graph) + len(ds_node):,} total")
@@ -1107,6 +1337,15 @@ def main():
     
     start_time = time.time()
     best_loss = float('inf')
+    
+    # Initialize losses dictionary to prevent UnboundLocalError in finally block
+    losses = {
+        'total_loss': 0.0,
+        'node_loss': 0.0,
+        'graph_loss': 0.0,
+        'energy_loss': 0.0,
+        'physics_loss': 0.0
+    }
     
     try:
         for step in range(start_step, args.max_steps):
@@ -1139,22 +1378,36 @@ def main():
                     progress_pct = (step / args.max_steps) * 100
                     logger.info(f"🎯 {progress_pct:5.1f}% ({step:,}/{args.max_steps:,}) | 📋 {task_type.upper()} | Loss: {losses['total_loss']:.4f}")
 
-            # Save checkpoints
+            # Validation and early stopping check
+            if step % args.validate_every == 0 and step > 0:
+                logger.info(f"🔍 Running validation at step {step}...")
+                val_loss = validate_model(model, val_loader, device, num_batches=50)
+                logger.info(f"📊 Validation loss: {val_loss:.6f}")
+                
+                # Check early stopping and save best model if improved
+                # Note: early_stopping updates its best_loss internally when val_loss improves
+                previous_best = early_stopping.best_loss
+                should_stop = early_stopping(val_loss, step)
+                
+                # Save best model if validation improved (best_loss was updated)
+                if early_stopping.best_loss < previous_best:
+                    save_checkpoint(
+                        model, optimizer, graph_scaler, node_scaler,
+                        step, losses["total_loss"], args.seed, args.checkpoint_dir,
+                        is_best=True, val_loss=val_loss
+                    )
+                
+                # Stop training if early stopping triggered
+                if should_stop:
+                    logger.info("🛑 Early stopping triggered - terminating training")
+                    break
+
+            # Save regular checkpoints
             if step % args.save_every == 0 and step > 0:
                 save_checkpoint(
                     model, optimizer, graph_scaler, node_scaler,
                     step, losses["total_loss"], args.seed, args.checkpoint_dir
                 )
-                
-                # Save best checkpoint
-                if losses["total_loss"] < best_loss:
-                    best_loss = losses["total_loss"]
-                    best_path = os.path.join(args.checkpoint_dir, "best_checkpoint.pt")
-                    save_checkpoint(
-                        model, optimizer, graph_scaler, node_scaler,
-                        step, losses["total_loss"], args.seed, args.checkpoint_dir.replace("checkpoint_step_", "best_checkpoint")
-                    )
-                    logger.info(f"New best checkpoint saved with loss {best_loss:.4f}")
 
     except KeyboardInterrupt:
         logger.info("Training interrupted by user")
