@@ -312,14 +312,15 @@ class PhysicsInformedMinimalEquivariantHead(nn.Module):
             
             # Step 3: Compute eigenvalues with regularization for numerical stability
             # Add small regularization to ensure positive definite matrices
-            regularization = 1e-6 * torch.eye(3, device=device, dtype=dtype)
+            regularization = 1e-3 * torch.eye(3, device=device, dtype=dtype)
             regularized_tensors = inertia_tensors + regularization
             
             # Use eigvalsh for symmetric matrices (more stable than eig)
-            eigenvalues = torch.linalg.eigvalsh(regularized_tensors)  # [B, 3], ascending order
+            eigenvalues = torch.linalg.eigvalsh(regularized_tensors)
+            eigenvalues = torch.nan_to_num(eigenvalues, nan=1e-10, posinf=1e10, neginf=1e-10)  # Replace NaN/Inf  # [B, 3], ascending order
             
             # Ensure eigenvalues are positive (critical for rotational constants)
-            eigenvalues = torch.clamp(eigenvalues, min=1e-40)
+            eigenvalues = torch.clamp(eigenvalues, min=1e-10, max=1e10)
             
             # Step 4: Convert to rotational constants in GHz
             # Formula: A, B, C = h/(8π²c·I_a,b,c) where I_a ≤ I_b ≤ I_c
@@ -333,7 +334,7 @@ class PhysicsInformedMinimalEquivariantHead(nn.Module):
             
             # Step 5: Apply physical bounds for molecular rotational constants
             # Typical range: 0.01 GHz to 1000 GHz for small to medium molecules
-            rot_constants_clamped = torch.clamp(rot_constants_ordered, min=0.01, max=1000.0)
+            rot_constants_clamped = torch.clamp(rot_constants_ordered, min=0.01, max=100.0)
             
             return rot_constants_clamped
             

@@ -428,6 +428,13 @@ class DJMGNN(nn.Module):
         
         # Add PIMEH head for rotational constants
         self.pimeh_head = PhysicsInformedMinimalEquivariantHead(hidden_dim)
+        
+        # Add PIMEH adapter for refining embeddings from the frozen backbone
+        self.pimeh_adapter = nn.Sequential(
+            GraphConvLayer(hidden_dim, hidden_dim // 2, self.processed_edge_attr_dim),
+            nn.SiLU(),
+            GraphConvLayer(hidden_dim // 2, hidden_dim, self.processed_edge_attr_dim),
+        )
         self.head_energy = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -607,8 +614,28 @@ class DJMGNN(nn.Module):
                     if original_batch.size(0) > x.size(0):
                         original_batch = original_batch[:x.size(0)]
                     
+                    # Detach the embeddings to prevent gradients from flowing back to the frozen backbone during PIMEH fine-tuning
+                    node_embeddings_detached = node_emb_for_head.detach()
+                    
+                    # Reconstruct original edge attributes for adapter (before supernode addition)
+                    original_edge_attr_for_adapter = None
+                    if original_feat_part is not None and rbf_feat_part is not None:
+                        original_edge_attr_for_adapter = torch.cat([original_feat_part, rbf_feat_part], dim=1)
+                    elif original_feat_part is not None:
+                        original_edge_attr_for_adapter = original_feat_part
+                    elif rbf_feat_part is not None:
+                        original_edge_attr_for_adapter = rbf_feat_part
+                    
+                    # Pass the detached embeddings through the adapter to create a specialized representation
+                    adapted_embeddings = self.pimeh_adapter(
+                        node_embeddings_detached, 
+                        edge_index,  # Use original edge structure
+                        original_edge_attr_for_adapter
+                    )
+                    
+                    # Pass the adapted embeddings to the PIMEH head
                     rotational_constants = self.pimeh_head(
-                        h=node_emb_for_head,
+                        h=adapted_embeddings,  # Use the adapted embeddings
                         pos=pos,
                         batch=original_batch
                     )  # [batch_size, 3]
@@ -677,5 +704,10 @@ class DJMGNN(nn.Module):
                 out_graph = out_graph[:, :expected_graph_dims]
         
         out_energy = self.head_energy(graph_emb)
+
+        # Final NaN/Inf check on all outputs
+        out_node = torch.nan_to_num(out_node, nan=0.0, posinf=1e5, neginf=-1e5)
+        out_graph = torch.nan_to_num(out_graph, nan=0.0, posinf=1e5, neginf=-1e5)
+        out_energy = torch.nan_to_num(out_energy, nan=0.0, posinf=1e5, neginf=-1e5)
         
         return {"node_pred": out_node, "graph_pred": out_graph, "energy_pred": out_energy}

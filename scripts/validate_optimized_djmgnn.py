@@ -241,13 +241,14 @@ def validate_qm9_properties(predictor: OptimizedDJMGNNPredictor, test_size: int 
     # Create test transform (no standardization - we'll handle that in predictor)
     # Must include AddPositionalFeatures to match training config (29 + 4 = 33 features)
     # Fallback FeaturizeNodes if RDKit missing
-try:
-    featurize = FeaturizeNodes()
-except ImportError:
-    def featurize(data): return data
-from torch_geometric.transforms import Compose as GeomCompose
-# Compose transforms
-test_transform = GeomCompose([CreateEdges(), featurize, AddPositionalFeatures()])
+    try:
+        featurize = FeaturizeNodes()
+    except ImportError:
+        def featurize(data): return data
+    
+    from torch_geometric.transforms import Compose as GeomCompose
+    # Compose transforms
+    test_transform = GeomCompose([CreateEdges(), featurize, AddPositionalFeatures()])
     
     # Load test dataset  
     qm9_dataset = get_dataset("qm9", root="data", transform=test_transform)

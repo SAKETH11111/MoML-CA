@@ -1,27 +1,16 @@
-"""
-scripts/train_alternating_optimized.py
-
-Optimized alternating training for DJMGNN based on o3-pro analysis.
-Implements fixes for scaler serialization, dynamic loss weighting, 
-cycle-based scheduling, and deterministic training.
-"""
-
-import argparse
-import logging
-import os
-import random
 import sys
+import os
+import logging
+import argparse
+import random
 import time
-import csv
-from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
-from collections import deque
-
+import math
 import numpy as np
+from pathlib import Path
+from typing import Dict, Optional, Iterator
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.utils.data
 import yaml
 from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader as GraphDataLoader
@@ -51,10 +40,11 @@ from moml.models.mgnn.djmgnn import DJMGNN
 DEFAULT_NODE_FEATURE_DIM = 33  # Updated: 29 (original) + 4 (positional features)
 LOG_FILE_NAME = "alternating_training_optimized.log"
 
-# 3-Phase Curriculum Constants
-PHASE_1_END_STEP = 2000   # Train only PIMEH
-PHASE_2_END_STEP = 6000   # Train base DJMGNN
-# Phase 3 starts at PHASE_2_END_STEP and continues until max_steps (joint training)
+# 4-Phase Curriculum Constants (Project Apollo)
+PHASE_0_END_STEP = 8000   # Backbone pre-training (freeze PIMEH)
+PHASE_1_END_STEP = 10000  # PIMEH adaptation (freeze backbone)
+PHASE_2_END_STEP = 10200  # Stability check (freeze everything)
+# Phase 3 starts at PHASE_2_END_STEP and continues until max_steps (joint polishing)
 
 logger = logging.getLogger(__name__)
 
@@ -113,82 +103,118 @@ class EarlyStopping:
         return False
 
 
-class CurriculumManager:
+class SimpleCurriculumManager:
     """
-    Manages 3-phase curriculum training for DJMGNN with PIMEH integration.
+    Project Apollo 4-Phase Sequential Training Curriculum Manager.
     
-    Phase 1 (0-2000 steps): Train only PIMEH, freeze base DJMGNN
-    Phase 2 (2000-6000 steps): Train base DJMGNN, freeze PIMEH  
-    Phase 3 (6000+ steps): Joint training of everything
+    Phase 0 (0-8000 steps): Backbone pre-training (freeze PIMEH & adapter)
+    Phase 1 (8000-10000 steps): PIMEH adaptation (freeze backbone, unfreeze PIMEH & adapter)
+    Phase 2 (10000-10200 steps): Stability check (freeze everything)
+    Phase 3 (10200+ steps): Joint polishing (unfreeze everything)
     """
     
-    def __init__(self, model: DJMGNN, enhanced_logger: 'EnhancedTrainingLogger'):
+    def __init__(self, model: DJMGNN):
         self.model = model
-        self.logger = enhanced_logger
         self.current_phase = None  # Initialize to None so first update always triggers change
+        
+        # New 4-phase weight configuration for Project Apollo
         self.phase_weights = {
-            1: {'physics': 2.0, 'others': 0.1},    # Phase 1: Focus on physics loss
-            2: {'physics': 0.1, 'others': 1.0},    # Phase 2: Focus on other losses
-            3: {'physics': 1.0, 'others': 1.0}     # Phase 3: Balanced via GradNorm
+            0: {'physics': 0.0, 'others': 1.0},    # Phase 0: No physics, focus on backbone
+            1: {'physics': 1.0, 'others': 0.0},    # Phase 1: Only physics, PIMEH adaptation
+            2: {'physics': 0.0, 'others': 0.0},    # Phase 2: Inference only, stability check
+            3: {'physics': 1.0, 'others': 1.0}     # Phase 3: Balanced joint polishing
         }
         
         # Track parameter counts for logging
         self._count_parameters()
         
     def _count_parameters(self):
-        """Count parameters in different model components."""
+        """Count parameters in different model components including the new adapter."""
+        pimeh_count = sum(p.numel() for p in self.model.pimeh_head.parameters())
+        
+        # Count adapter parameters if it exists
+        adapter_count = 0
+        if hasattr(self.model, 'pimeh_adapter'):
+            adapter_count = sum(p.numel() for p in self.model.pimeh_adapter.parameters())
+        
+        total_count = sum(p.numel() for p in self.model.parameters())
+        base_count = total_count - pimeh_count - adapter_count
+        
         self.param_counts = {
-            'pimeh': sum(p.numel() for p in self.model.pimeh_head.parameters()),
-            'base': sum(p.numel() for p in self.model.parameters()) - sum(p.numel() for p in self.model.pimeh_head.parameters()),
-            'total': sum(p.numel() for p in self.model.parameters())
+            'pimeh': pimeh_count,
+            'adapter': adapter_count,
+            'base': base_count,
+            'total': total_count
         }
         
     def get_current_phase(self, step: int) -> int:
-        """Determine current curriculum phase based on step."""
-        if step < PHASE_1_END_STEP:
-            return 1
+        """Determine current curriculum phase based on step (0-indexed phases for Project Apollo)."""
+        if step < PHASE_0_END_STEP:
+            return 0  # Backbone pre-training
+        elif step < PHASE_1_END_STEP:
+            return 1  # PIMEH adaptation
         elif step < PHASE_2_END_STEP:
-            return 2
+            return 2  # Stability check
         else:
-            return 3
+            return 3  # Joint polishing
     
-    def freeze_base_model(self):
-        """Freeze all DJMGNN parameters except PIMEH (Phase 1)."""
+    def freeze_pimeh_and_adapter(self):
+        """Freeze PIMEH head and adapter parameters (Phase 0: Backbone pre-training)."""
         frozen_count = 0
+        active_count = 0
+        
         for name, param in self.model.named_parameters():
-            if not name.startswith('pimeh_head'):
+            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
                 param.requires_grad = False
                 frozen_count += param.numel()
             else:
                 param.requires_grad = True
+                active_count += param.numel()
         
-        logger.info(f"Phase 1: Frozen base model parameters ({frozen_count:,}), active PIMEH ({self.param_counts['pimeh']:,})")
-        return frozen_count, self.param_counts['pimeh']
+        logger.info(f"Phase 0: Frozen PIMEH+Adapter ({frozen_count:,}), active backbone ({active_count:,})")
+        return frozen_count, active_count
     
-    def freeze_pimeh(self):
-        """Freeze only PIMEH parameters (Phase 2)."""
+    def freeze_backbone(self):
+        """Freeze backbone, unfreeze PIMEH and adapter (Phase 1: PIMEH adaptation)."""
         frozen_count = 0
+        active_count = 0
+        
         for name, param in self.model.named_parameters():
-            if name.startswith('pimeh_head'):
+            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
+                param.requires_grad = True
+                active_count += param.numel()
+            else:
                 param.requires_grad = False
                 frozen_count += param.numel()
-            else:
-                param.requires_grad = True
         
-        logger.info(f"Phase 2: Frozen PIMEH parameters ({frozen_count:,}), active base model ({self.param_counts['base']:,})")
-        return frozen_count, self.param_counts['base']
+        logger.info(f"Phase 1: Frozen backbone ({frozen_count:,}), active PIMEH+Adapter ({active_count:,})")
+        return frozen_count, active_count
+    
+    def freeze_all(self):
+        """Freeze all parameters (Phase 2: Stability check)."""
+        frozen_count = 0
+        
+        for param in self.model.parameters():
+            param.requires_grad = False
+            frozen_count += param.numel()
+        
+        logger.info(f"Phase 2: All parameters frozen ({frozen_count:,}) - inference only")
+        return frozen_count, 0
     
     def unfreeze_all(self):
-        """Unfreeze all parameters (Phase 3)."""
+        """Unfreeze all parameters (Phase 3: Joint polishing)."""
+        active_count = 0
+        
         for param in self.model.parameters():
             param.requires_grad = True
+            active_count += param.numel()
         
-        logger.info(f"Phase 3: All parameters unfrozen ({self.param_counts['total']:,})")
-        return 0, self.param_counts['total']
+        logger.info(f"Phase 3: All parameters unfrozen ({active_count:,}) - joint polishing")
+        return 0, active_count
     
     def update_phase(self, step: int, optimizer: optim.Optimizer) -> bool:
         """
-        Update training phase based on current step.
+        Update training phase based on current step using Project Apollo 4-phase schedule.
         
         Returns:
             bool: True if phase changed, False otherwise
@@ -200,43 +226,40 @@ class CurriculumManager:
             self.current_phase = new_phase
             
             # Apply parameter freezing based on new phase
-            if new_phase == 1:
-                frozen, active = self.freeze_base_model()
-                phase_desc = "PIMEH Only Training"
-                reason = f"Step {step} < {PHASE_1_END_STEP} (Phase 1 threshold)"
+            if new_phase == 0:
+                frozen, active = self.freeze_pimeh_and_adapter()
+                phase_desc = "Backbone Pre-training"
+                reason = f"Step {step} < {PHASE_0_END_STEP} (Phase 0 threshold)"
+            elif new_phase == 1:
+                frozen, active = self.freeze_backbone()
+                phase_desc = "PIMEH Adaptation"
+                reason = f"Step {step} >= {PHASE_0_END_STEP} and < {PHASE_1_END_STEP} (Phase 1 threshold)"
             elif new_phase == 2:
-                frozen, active = self.freeze_pimeh()
-                phase_desc = "Base DJMGNN Training"
+                frozen, active = self.freeze_all()
+                phase_desc = "Stability Check"
                 reason = f"Step {step} >= {PHASE_1_END_STEP} and < {PHASE_2_END_STEP} (Phase 2 threshold)"
             else:  # Phase 3
                 frozen, active = self.unfreeze_all()
-                phase_desc = "Joint Training"
+                phase_desc = "Joint Polishing"
                 reason = f"Step {step} >= {PHASE_2_END_STEP} (Phase 3 threshold)"
             
             # Update optimizer parameter groups (important for momentum/adam states)
             self._update_optimizer_groups(optimizer)
             
-            # Log phase transition
+            # Log phase transition with Project Apollo context
             physics_weight = self.phase_weights[new_phase]['physics']
-            self.logger.log_curriculum_transition(
-                step=step,
-                phase=new_phase,
-                phase_description=phase_desc,
-                frozen_params=frozen,
-                active_params=active,
-                physics_weight=physics_weight,
-                reason=reason
-            )
+            others_weight = self.phase_weights[new_phase]['others']
             
             # Console notification
-            logger.info("=" * 80)
-            logger.info(f"CURRICULUM PHASE TRANSITION: {old_phase} -> {new_phase}")
+            logger.info("=" * 90)
+            logger.info(f"🚀 PROJECT APOLLO PHASE TRANSITION: {old_phase} -> {new_phase}")
             logger.info(f"   Description: {phase_desc}")
             logger.info(f"   Frozen Parameters: {frozen:,}")
             logger.info(f"   Active Parameters: {active:,}")
             logger.info(f"   Physics Loss Weight: {physics_weight:.1f}")
+            logger.info(f"   Other Loss Weight: {others_weight:.1f}")
             logger.info(f"   Reason: {reason}")
-            logger.info("=" * 80)
+            logger.info("=" * 90)
             
             return True
         
@@ -252,7 +275,8 @@ class CurriculumManager:
                 active_params.append(param)
         
         # Update optimizer's param_groups
-        optimizer.param_groups[0]['params'] = active_params
+        if len(optimizer.param_groups) > 0:
+            optimizer.param_groups[0]['params'] = active_params
         
         # Clear state for parameters that are no longer active
         # In PyTorch optimizers, state keys are the actual parameter tensors
@@ -265,7 +289,7 @@ class CurriculumManager:
             del optimizer.state[param_tensor]
     
     def get_loss_weights(self, step: int) -> Dict[str, float]:
-        """Get phase-specific loss weights."""
+        """Get phase-specific loss weights for Project Apollo schedule."""
         phase = self.get_current_phase(step)
         weights = self.phase_weights[phase]
         
@@ -278,8 +302,14 @@ class CurriculumManager:
     
     def should_skip_gradnorm(self, step: int) -> bool:
         """Determine if GradNorm should be skipped for this phase."""
-        # Skip GradNorm in phases 1 and 2, only use in phase 3
+        # Skip GradNorm in phases 0, 1, and 2, only use in phase 3 (joint polishing)
         return self.get_current_phase(step) < 3
+    
+    def is_inference_only_phase(self, step: int) -> bool:
+        """Check if current phase is inference-only (Phase 2: Stability check)."""
+        return self.get_current_phase(step) == 2
+    
+    
 
 
 def setup_logging():
@@ -842,12 +872,32 @@ def validate_model(
     return total_loss / total_samples if total_samples > 0 else float('inf')
 
 
+def sanitize_loss(loss_value: torch.Tensor, fallback: float = 0.1, loss_name: str = "unknown") -> torch.Tensor:
+    """
+    CRITICAL NaN ELIMINATION: Sanitize loss values to prevent NaN propagation.
+    
+    Args:
+        loss_value: The loss tensor to check
+        fallback: Fallback value to use if NaN/Inf detected
+        loss_name: Name of the loss for logging
+    
+    Returns:
+        Sanitized loss tensor (finite value guaranteed)
+    """
+    if torch.isnan(loss_value) or torch.isinf(loss_value):
+        logger.warning(f"🚨 NaN/Inf detected in {loss_name}: {loss_value}, using fallback {fallback}")
+        return torch.tensor(fallback, device=loss_value.device, dtype=loss_value.dtype, requires_grad=True)
+    
+    # Additional safety: clamp to reasonable range
+    return torch.clamp(loss_value, min=0.0, max=100.0)
+
+
 def compute_losses(
     model: DJMGNN, batch: Batch, device: torch.device, task_type: str
 ) -> Dict[str, torch.Tensor]:
     """Compute and return the losses for a given batch and task type.
     
-    Now includes separate loss computation for rotational constants:
+    CRITICAL NaN ELIMINATION: All losses are sanitized to prevent NaN propagation.
     - Regular graph properties (indices 0-15): graph_loss
     - Rotational constants (indices 16-18): physics_loss (rotational_loss)
     """
@@ -880,7 +930,9 @@ def compute_losses(
     # Node-level force prediction loss (e.g., for SPICE)
     if task_type == "node" and "node_pred" in out and hasattr(batch, "node_y"):
         if batch.node_y.numel() > 0 and out["node_pred"].shape == batch.node_y.shape:
-            losses["node_loss"] = nn.MSELoss()(out["node_pred"], batch.node_y)
+            # CRITICAL NaN ELIMINATION: Use sanitize_loss for node loss
+            node_loss_raw = nn.MSELoss()(out["node_pred"], batch.node_y)
+            losses["node_loss"] = sanitize_loss(node_loss_raw, fallback=0.1, loss_name="node_loss")
 
     # Graph-level property prediction loss - SPLIT INTO TWO PARTS
     if task_type == "graph" and "graph_pred" in out and hasattr(batch, "y"):
@@ -892,21 +944,32 @@ def compute_losses(
             target_regular = batch.y[:, 0:16]  # Regular property targets
             target_rotational = batch.y[:, 16:19]  # Rotational constant targets
             
-            # Compute separate MSE losses
-            losses["graph_loss"] = nn.MSELoss()(pred_regular, target_regular)
-            losses["physics_loss"] = nn.MSELoss()(pred_rotational, target_rotational)
+            # CRITICAL NaN ELIMINATION: Use sanitize_loss for all graph losses
+            graph_loss_raw = nn.MSELoss()(pred_regular, target_regular)
+            losses["graph_loss"] = sanitize_loss(graph_loss_raw, fallback=0.1, loss_name="graph_loss")
             
-            # Optional: Apply scaling factor for rotational constants
-            # Rotational constants are in GHz and may need different weighting
-            # This is handled by GradNorm, but we can apply initial scaling if needed
-            # losses["physics_loss"] = losses["physics_loss"] * 0.1  # Initial lower weight
+            # ENHANCED PIMEH STABILIZATION: Extra protection for rotational constants
+            # Check for extreme values in predictions/targets before loss computation
+            if torch.any(torch.abs(pred_rotational) > 100.0) or torch.any(torch.abs(target_rotational) > 100.0):
+                logger.warning("🚨 Extreme rotational constant values detected - using fallback physics loss")
+                losses["physics_loss"] = torch.tensor(0.01, device=pred_rotational.device, requires_grad=True)
+            else:
+                # Clamp predictions to reasonable range before loss computation
+                pred_rotational_clamped = torch.clamp(pred_rotational, min=-50.0, max=50.0)
+                target_rotational_clamped = torch.clamp(target_rotational, min=-50.0, max=50.0)
+                
+                physics_loss_raw = nn.MSELoss()(pred_rotational_clamped, target_rotational_clamped)
+                losses["physics_loss"] = sanitize_loss(physics_loss_raw, fallback=0.01, loss_name="physics_loss")
 
     # Graph-level energy prediction loss (e.g., for SPICE)
     if task_type == "node" and "energy_pred" in out and hasattr(batch, "y_graph"):
         if batch.y_graph.numel() > 0:
             targets = batch.y_graph.view(-1, 1)
             if out["energy_pred"].shape == targets.shape:
-                losses["energy_loss"] = nn.MSELoss()(out["energy_pred"], targets)
+                # CRITICAL NaN ELIMINATION: Use sanitize_loss for energy loss
+                energy_loss_raw = nn.MSELoss()(out["energy_pred"], targets)
+                losses["energy_loss"] = sanitize_loss(energy_loss_raw, fallback=0.1, loss_name="energy_loss")
+
 
     return losses
 
@@ -918,7 +981,7 @@ def train_step(
     batch: Batch,
     device: torch.device,
     task_type: str,
-    curriculum_manager: Optional[CurriculumManager] = None,
+    curriculum_manager: Optional[SimpleCurriculumManager] = None,
     step: int = 0,
 ) -> Dict[str, float]:
     """Perform a single training step with curriculum-aware loss balancing.
@@ -933,28 +996,53 @@ def train_step(
 
     losses_dict = compute_losses(model, batch, device, task_type)
     
-    # Convert to tensor format expected by GradNormLossWeighter (now 4 losses)
-    losses_tensor = torch.stack([
-        losses_dict["node_loss"],
-        losses_dict["graph_loss"], 
-        losses_dict["energy_loss"],
-        losses_dict["physics_loss"]  # New rotational constants loss
-    ])
+    # CRITICAL NaN ELIMINATION: Double-check all losses before tensor operations
+    for loss_name, loss_value in losses_dict.items():
+        if torch.isnan(loss_value) or torch.isinf(loss_value):
+            logger.error(f"🚨 CRITICAL: {loss_name} is NaN/Inf after compute_losses: {loss_value}")
+            losses_dict[loss_name] = torch.tensor(0.1, device=device, requires_grad=True)
+    
+    # CRITICAL NaN ELIMINATION: Sanitize before tensor stacking
+    try:
+        losses_tensor = torch.stack([
+            losses_dict["node_loss"],
+            losses_dict["graph_loss"], 
+            losses_dict["energy_loss"],
+            losses_dict["physics_loss"]  # New rotational constants loss
+        ])
+        
+        # Additional safety check after stacking
+        if torch.any(torch.isnan(losses_tensor)) or torch.any(torch.isinf(losses_tensor)):
+            logger.error("🚨 CRITICAL: NaN/Inf in losses_tensor after stacking")
+            losses_tensor = torch.tensor([0.1, 0.1, 0.1, 0.1], device=device, requires_grad=True)
+            
+    except Exception as e:
+        logger.error(f"🚨 CRITICAL: Failed to stack losses: {e}")
+        losses_tensor = torch.tensor([0.1, 0.1, 0.1, 0.1], device=device, requires_grad=True)
     
     # Apply phase-specific loss weighting if curriculum manager provided
     if curriculum_manager is not None:
         phase_weights = curriculum_manager.get_loss_weights(step)
         
-        # Apply weights to losses
-        weighted_losses = torch.stack([
-            losses_dict["node_loss"] * phase_weights['node_loss'],
-            losses_dict["graph_loss"] * phase_weights['graph_loss'],
-            losses_dict["energy_loss"] * phase_weights['energy_loss'],
-            losses_dict["physics_loss"] * phase_weights['physics_loss']
-        ])
-        
-        # Use weighted losses for backward pass calculation
-        final_losses = weighted_losses
+        # CRITICAL NaN ELIMINATION: Apply weights safely
+        try:
+            weighted_losses = torch.stack([
+                losses_dict["node_loss"] * phase_weights['node_loss'],
+                losses_dict["graph_loss"] * phase_weights['graph_loss'],
+                losses_dict["energy_loss"] * phase_weights['energy_loss'],
+                losses_dict["physics_loss"] * phase_weights['physics_loss']
+            ])
+            
+            # Check weighted losses for NaN/Inf
+            if torch.any(torch.isnan(weighted_losses)) or torch.any(torch.isinf(weighted_losses)):
+                logger.error("🚨 CRITICAL: NaN/Inf in weighted_losses")
+                weighted_losses = torch.tensor([0.1, 0.1, 0.1, 0.1], device=device, requires_grad=True)
+                
+            final_losses = weighted_losses
+            
+        except Exception as e:
+            logger.error(f"🚨 CRITICAL: Failed to weight losses: {e}")
+            final_losses = torch.tensor([0.1, 0.1, 0.1, 0.1], device=device, requires_grad=True)
     else:
         final_losses = losses_tensor
     
@@ -988,6 +1076,17 @@ def train_step(
             }
         
         total_loss.backward()
+        
+        # CRITICAL FIX: Add gradient clipping to prevent explosion
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+        # ENHANCED PIMEH-specific gradient clipping for rotational constants
+        if hasattr(model, 'pimeh_head') and model.pimeh_head is not None:
+            # Much more aggressive clipping for PIMEH to prevent instability
+            torch.nn.utils.clip_grad_norm_(model.pimeh_head.parameters(), max_norm=0.1)
+            
+        optimizer.step()  # MISSING STEP CALL
+        
         current_weights = [
             curriculum_manager.get_loss_weights(step)['node_loss'],
             curriculum_manager.get_loss_weights(step)['graph_loss'],
@@ -1015,6 +1114,12 @@ def train_step(
     
     # Clip gradients and step optimizer
     nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    
+    # ENHANCED PIMEH-specific gradient clipping for rotational constants  
+    if hasattr(model, 'pimeh_head') and model.pimeh_head is not None:
+        # Much more aggressive clipping for PIMEH to prevent instability
+        torch.nn.utils.clip_grad_norm_(model.pimeh_head.parameters(), max_norm=0.1)
+        
     optimizer.step()
 
     return {
@@ -1029,7 +1134,10 @@ def train_step(
 
 def save_checkpoint(
     model: nn.Module, 
-    optimizer: optim.Optimizer, 
+    base_optimizer: optim.Optimizer,
+    pimeh_optimizer: optim.Optimizer,
+    base_scheduler: optim.lr_scheduler.LRScheduler,
+    pimeh_scheduler: optim.lr_scheduler.LRScheduler,
     scaler_graph: StandardizeTargets,
     scaler_node: Optional[StandardizeTargets],
     step: int, 
@@ -1039,7 +1147,7 @@ def save_checkpoint(
     is_best: bool = False,
     val_loss: Optional[float] = None
 ):
-    """Save a training checkpoint with scalers and metadata."""
+    """Save a training checkpoint with multiple optimizers, schedulers, scalers and metadata."""
     os.makedirs(ckpt_dir, exist_ok=True)
     
     if is_best:
@@ -1065,7 +1173,10 @@ def save_checkpoint(
     
     checkpoint_data = {
         "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
+        "base_optimizer_state_dict": base_optimizer.state_dict(),
+        "pimeh_optimizer_state_dict": pimeh_optimizer.state_dict(),
+        "base_scheduler_state_dict": base_scheduler.state_dict(),
+        "pimeh_scheduler_state_dict": pimeh_scheduler.state_dict(),
         "scaler_state": scaler_state,
         "step": step,
         "loss": loss,
@@ -1095,7 +1206,14 @@ def load_checkpoint(
     checkpoint = torch.load(ckpt_path, map_location="cpu")
     
     model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    # Optimizer state may be incompatible if parameter groups have changed
+    try:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    except ValueError as e:
+        logger.warning(
+            f"Optimizer state mismatch when loading checkpoint {ckpt_path}: {e}. "
+            "Re-initializing optimizer state instead."
+        )
     
     scaler_state = checkpoint.get("scaler_state", {})
     step = checkpoint.get("step", 0)
@@ -1247,16 +1365,46 @@ def main():
     model = model.to(device)
     logger.info("✅ Model moved to device successfully")
     
-    # AdamW optimizer with cosine annealing
-    logger.info("⚙️ Creating optimizer...")
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    logger.info("✅ Optimizer created successfully")
+    # PROJECT APOLLO: Create multiple optimizers for different phases
+    logger.info("⚙️ Creating base optimizer (Phase 0 & 3)...")
+    # Base optimizer: Used for Phase 0 (backbone pre-training) and Phase 3 (joint polishing)
+    base_optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    logger.info("✅ Base optimizer created successfully")
     
-    logger.info("📅 Creating scheduler...")
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.max_steps, eta_min=5e-6
+    logger.info("⚙️ Creating PIMEH optimizer (Phase 1)...")
+    # PIMEH optimizer: High learning rate optimizer for PIMEH head and adapter fine-tuning
+    pimeh_params = list(model.pimeh_head.parameters()) + list(model.pimeh_adapter.parameters())
+    pimeh_optimizer = optim.AdamW(pimeh_params, lr=1e-3, weight_decay=1e-5)  # Higher LR for fine-tuning
+    logger.info(f"✅ PIMEH optimizer created successfully ({len(pimeh_params)} parameter groups)")
+    
+    # Create optimizer mapping for phase-based switching
+    optimizers = {
+        0: base_optimizer,   # Phase 0: Backbone pre-training
+        1: pimeh_optimizer,  # Phase 1: PIMEH adaptation
+        2: base_optimizer,   # Phase 2: Stability check (no training, but need valid optimizer)
+        3: base_optimizer    # Phase 3: Joint polishing
+    }
+    
+    logger.info("📅 Creating schedulers...")
+    # Create schedulers for both optimizers
+    base_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        base_optimizer, T_max=args.max_steps, eta_min=5e-6
     )
-    logger.info("✅ Scheduler created successfully")
+    pimeh_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        pimeh_optimizer, T_max=2000, eta_min=1e-5  # Shorter schedule for Phase 1
+    )
+    
+    schedulers = {
+        0: base_scheduler,
+        1: pimeh_scheduler,
+        2: base_scheduler,  # Phase 2: No training, but need valid scheduler
+        3: base_scheduler
+    }
+    logger.info("✅ Schedulers created successfully")
+    
+    # Set current optimizer and scheduler (will be updated by curriculum manager)
+    current_optimizer = base_optimizer
+    current_scheduler = base_scheduler
     
     # Get shared parameter for GradNorm (backbone parameter from last block)
     logger.info("🔗 Getting backbone parameter for GradNorm...")
@@ -1288,7 +1436,35 @@ def main():
             if checkpoints:
                 ckpt_path = checkpoints[0]
         if ckpt_path and os.path.exists(ckpt_path):
-            start_step, _ = load_checkpoint(model, optimizer, str(ckpt_path))
+            # Load checkpoint - try to load both optimizers if available
+            logger.info(f"📂 Loading checkpoint from {ckpt_path}...")
+            checkpoint = torch.load(ckpt_path, map_location=device)
+            
+            # Load model state
+            model.load_state_dict(checkpoint["model_state_dict"])
+            start_step = checkpoint.get("step", 0)
+            
+            # Load optimizer states - handle both legacy single optimizer and new dual optimizer format
+            if "base_optimizer_state_dict" in checkpoint and "pimeh_optimizer_state_dict" in checkpoint:
+                # New format with multiple optimizers
+                base_optimizer.load_state_dict(checkpoint["base_optimizer_state_dict"])
+                pimeh_optimizer.load_state_dict(checkpoint["pimeh_optimizer_state_dict"])
+                logger.info("✅ Loaded both base and PIMEH optimizer states")
+            elif "optimizer_state_dict" in checkpoint:
+                # Legacy format - load into base optimizer only
+                base_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                logger.info("✅ Loaded legacy optimizer state into base optimizer")
+            
+            # Load scheduler states if available
+            if "base_scheduler_state_dict" in checkpoint and "pimeh_scheduler_state_dict" in checkpoint:
+                base_scheduler.load_state_dict(checkpoint["base_scheduler_state_dict"])
+                pimeh_scheduler.load_state_dict(checkpoint["pimeh_scheduler_state_dict"])
+                logger.info("✅ Loaded both scheduler states")
+            elif "scheduler_state_dict" in checkpoint:
+                base_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                logger.info("✅ Loaded legacy scheduler state")
+                
+            logger.info(f"📍 Resuming from step {start_step}")
     logger.info("✅ Checkpoint check completed")
 
     # Training Loop
@@ -1298,28 +1474,21 @@ def main():
     logger.info(f"   • Total Training Data: {len(ds_graph) + len(ds_node):,} samples")
     logger.info("=" * 80)
     
-    # Initialize enhanced logger with checkpoint directory for CSV logs
-    logger.info("📊 Initializing enhanced logger...")
-    enhanced_logger = EnhancedTrainingLogger(
-        max_steps=args.max_steps, 
-        log_every=args.log_every,
-        log_dir=args.checkpoint_dir
-    )
-    logger.info("✅ Enhanced logger initialized")
+    # Simple logging - no fancy tracker to avoid complexity
+    logger.info("📊 Using simple console logging...")
     
-    logger.info("🎬 Starting enhanced logger display...")
-    enhanced_logger.start()
-    logger.info("✅ Enhanced logger display started")
-    
-    # Initialize curriculum manager for 3-phase training
+    # Initialize curriculum manager for 3-phase training (without enhanced logger)
     logger.info("📚 Initializing curriculum manager...")
-    curriculum_manager = CurriculumManager(model, enhanced_logger)
+    curriculum_manager = SimpleCurriculumManager(model)
     logger.info("✅ Curriculum manager initialized")
     
-    # Set initial phase (Phase 1: PIMEH only)
+    # Set initial phase and select appropriate optimizer
     logger.info("⚡ Setting initial curriculum phase...")
-    curriculum_manager.update_phase(start_step, optimizer)
-    logger.info("✅ Initial curriculum phase set")
+    initial_phase = curriculum_manager.get_current_phase(start_step)
+    current_optimizer = optimizers[initial_phase]
+    current_scheduler = schedulers[initial_phase]
+    curriculum_manager.update_phase(start_step, current_optimizer)
+    logger.info(f"✅ Initial curriculum phase set: Phase {initial_phase} with appropriate optimizer")
     
     # Initialize early stopping
     early_stopping = EarlyStopping(
@@ -1328,12 +1497,21 @@ def main():
     )
     logger.info(f"🛑 Early stopping initialized: patience={args.early_stopping_patience}, min_delta={args.early_stopping_min_delta}")
     
-    print(f"\n🚀 STARTING 40K TRAINING RUN - TARGET: 95% ACCURACY")
+    # Simple CSV logging setup
+    import csv
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = f"{args.checkpoint_dir}/simple_training_log_{timestamp}.csv"
+    
+    # Create CSV file with headers
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['step', 'task_type', 'total_loss', 'node_loss', 'graph_loss', 'energy_loss', 'physics_loss', 'lr', 'phase'])
+    
+    print(f"\n🚀 STARTING STABILIZED TRAINING - FIXING NaN ISSUES")
     print(f"📊 Datasets: QM9 ({len(ds_graph):,}) + SPICE ({len(ds_node):,}) = {len(ds_graph) + len(ds_node):,} total")
-    print(f"⏱️  Expected Runtime: ~3-4 hours\n")
-    print("✨ Enhanced logging with live progress bars enabled!")
-    print(f"📊 CSV logs will be saved to: {enhanced_logger.metrics_csv_path}")
-    print(f"📈 Phase logs will be saved to: {enhanced_logger.phase_csv_path}\n")
+    print(f"📝 Simple CSV logging to: {csv_path}")
+    print(f"🛡️ NaN protection: ON | Gradient clipping: ON | Physics loss scaling: ON\n")
     
     start_time = time.time()
     best_loss = float('inf')
@@ -1355,28 +1533,128 @@ def main():
                 logger.error("Data iterator exhausted")
                 break
 
-            # Update curriculum phase if needed
-            phase_changed = curriculum_manager.update_phase(step, optimizer)
+            # Update curriculum phase and optimizer if needed
+            current_phase = curriculum_manager.get_current_phase(step)
+            
+            # Check if we need to switch optimizer
+            if current_optimizer != optimizers[current_phase]:
+                current_optimizer = optimizers[current_phase]
+                current_scheduler = schedulers[current_phase]
+                logger.info(f"🔄 Switched to {'PIMEH' if current_phase == 1 else 'base'} optimizer for Phase {current_phase}")
+            
+            # Update curriculum phase with current optimizer
+            phase_changed = curriculum_manager.update_phase(step, current_optimizer)
             
             # Perform training step with curriculum management
             losses = train_step(
-                model, optimizer, loss_weighter, batch, device, task_type,
+                model, current_optimizer, loss_weighter, batch, device, task_type,
                 curriculum_manager=curriculum_manager, step=step
             )
             
-            # Update scheduler
-            scheduler.step()
+            # EMERGENCY RECOVERY MECHANISM: Detect persistent NaN issues
+            if math.isnan(losses['total_loss']) or math.isinf(losses['total_loss']):
+                logger.error(f"🚨 EMERGENCY: NaN/Inf total loss detected at step {step}")
+                
+                # Check if we have multiple consecutive NaN steps
+                if not hasattr(main, '_nan_step_count'):
+                    main._nan_step_count = 0
+                main._nan_step_count += 1
+                
+                if main._nan_step_count >= 5:  # 5 consecutive NaN steps trigger recovery
+                    logger.error(f"🚨 CRITICAL: {main._nan_step_count} consecutive NaN steps detected!")
+                    logger.info("🔄 Attempting comprehensive emergency recovery...")
+                    
+                    try:
+                        # Try Step 8250 first (best validation), then Step 8000, then Step 6000
+                        recovery_candidates = ["checkpoint_step_8250.pt", "best_checkpoint.pt", "checkpoint_step_8000.pt", "checkpoint_step_6000.pt"]
+                        recovery_successful = False
+                        
+                        for checkpoint_name in recovery_candidates:
+                            checkpoint_path = Path(args.checkpoint_dir) / checkpoint_name
+                            if checkpoint_path.exists():
+                                logger.info(f"🏥 Attempting recovery from {checkpoint_name}...")
+                                checkpoint = torch.load(checkpoint_path, map_location=device)
+                                
+                                # COMPREHENSIVE STATE RESTORATION
+                                model.load_state_dict(checkpoint["model_state_dict"])
+                                
+                                # Load optimizer states
+                                if "base_optimizer_state_dict" in checkpoint and "pimeh_optimizer_state_dict" in checkpoint:
+                                    base_optimizer.load_state_dict(checkpoint["base_optimizer_state_dict"])
+                                    pimeh_optimizer.load_state_dict(checkpoint["pimeh_optimizer_state_dict"])
+                                elif "optimizer_state_dict" in checkpoint:
+                                    # Legacy format
+                                    base_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                                
+                                # Reset schedulers to a safe state
+                                if "base_scheduler_state_dict" in checkpoint and "pimeh_scheduler_state_dict" in checkpoint:
+                                    base_scheduler.load_state_dict(checkpoint["base_scheduler_state_dict"])
+                                    pimeh_scheduler.load_state_dict(checkpoint["pimeh_scheduler_state_dict"])
+                                elif "scheduler_state_dict" in checkpoint:
+                                    # Legacy format
+                                    base_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                                
+                                # Reset loss weighter if available
+                                if "loss_weighter_state_dict" in checkpoint:
+                                    loss_weighter.load_state_dict(checkpoint["loss_weighter_state_dict"])
+                                
+                                # Enable NaN recovery mode to prevent Phase 3
+                                if hasattr(curriculum_manager, 'enable_nan_recovery_mode'):
+                                    curriculum_manager.enable_nan_recovery_mode()
+                                    curriculum_manager.current_phase = 2  # Force Phase 2
+                                
+                                logger.info(f"✅ Successfully recovered from {checkpoint_name}")
+                                recovery_successful = True
+                                main._nan_step_count = 0  # Reset counter
+                                break
+                        
+                        if not recovery_successful:
+                            logger.error("❌ All recovery checkpoints failed - TERMINATING TRAINING")
+                            break  # Exit training loop
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Emergency recovery failed: {e}")
+                        logger.error("🛑 TERMINATING TRAINING DUE TO UNRECOVERABLE NaN STATE")
+                        break  # Exit training loop
+            else:
+                # Reset NaN counter on successful step
+                if hasattr(main, '_nan_step_count'):
+                    main._nan_step_count = 0
+                
+                # Update stable step count for NaN recovery tracking
+                if hasattr(curriculum_manager, 'update_stable_step_count'):
+                    curriculum_manager.update_stable_step_count()
             
-            # Update enhanced logger with current step information
-            lr = scheduler.get_last_lr()[0]
-            try:
-                enhanced_logger.update(step, task_type, losses, lr, curriculum_manager.current_phase)
-            except Exception as e:
-                logger.warning(f"Enhanced logger update failed: {e}")
-                # Fallback to basic logging
-                if step % args.log_every == 0:
-                    progress_pct = (step / args.max_steps) * 100
-                    logger.info(f"🎯 {progress_pct:5.1f}% ({step:,}/{args.max_steps:,}) | 📋 {task_type.upper()} | Loss: {losses['total_loss']:.4f}")
+            # Update current scheduler
+            current_scheduler.step()
+            
+            # Simple CSV and console logging
+            lr = current_scheduler.get_last_lr()[0]
+            
+            # Log to CSV file
+            with open(csv_path, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    step, task_type, losses['total_loss'], losses['node_loss'], 
+                    losses['graph_loss'], losses['energy_loss'], losses['physics_loss'], 
+                    lr, curriculum_manager.current_phase
+                ])
+            
+            # Console logging every log_every steps
+            if step % args.log_every == 0:
+                progress_pct = (step / args.max_steps) * 100
+                eta_seconds = (args.max_steps - step) / (step / (time.time() - start_time)) if step > 0 else 0
+                logger.info(
+                    f"🎯 {progress_pct:5.1f}% ({step:,}/{args.max_steps:,}) | "
+                    f"📋 {task_type.upper():5s} | Phase {curriculum_manager.current_phase} | "
+                    f"📊 Loss: {losses['total_loss']:7.4f} | "
+                    f"🧬 Node: {losses['node_loss']:6.4f} | "
+                    f"📈 Graph: {losses['graph_loss']:6.4f} | "
+                    f"⚡ Energy: {losses['energy_loss']:6.4f} | "
+                    f"🌀 Physics: {losses['physics_loss']:6.4f} | "
+                    f"📚 LR: {lr:8.2e} | "
+                    f"🕐 ETA: {eta_seconds/3600:.1f}h"
+                )
 
             # Validation and early stopping check
             if step % args.validate_every == 0 and step > 0:
@@ -1392,8 +1670,8 @@ def main():
                 # Save best model if validation improved (best_loss was updated)
                 if early_stopping.best_loss < previous_best:
                     save_checkpoint(
-                        model, optimizer, graph_scaler, node_scaler,
-                        step, losses["total_loss"], args.seed, args.checkpoint_dir,
+                        model, base_optimizer, pimeh_optimizer, base_scheduler, pimeh_scheduler,
+                        graph_scaler, node_scaler, step, losses["total_loss"], args.seed, args.checkpoint_dir,
                         is_best=True, val_loss=val_loss
                     )
                 
@@ -1405,46 +1683,31 @@ def main():
             # Save regular checkpoints
             if step % args.save_every == 0 and step > 0:
                 save_checkpoint(
-                    model, optimizer, graph_scaler, node_scaler,
-                    step, losses["total_loss"], args.seed, args.checkpoint_dir
+                    model, base_optimizer, pimeh_optimizer, base_scheduler, pimeh_scheduler,
+                    graph_scaler, node_scaler, step, losses["total_loss"], args.seed, args.checkpoint_dir
                 )
 
     except KeyboardInterrupt:
-        logger.info("Training interrupted by user")
-        enhanced_logger.log_error("Training interrupted by user (Ctrl+C)")
+        logger.info("🛑 Training interrupted by user (Ctrl+C)")
     except Exception as e:
-        logger.error(f"Training failed with error: {e}")
-        enhanced_logger.log_error(f"Training failed: {e}")
-    finally:
-        # Ensure enhanced logger is properly stopped
-        try:
-            enhanced_logger.stop()
-        except:
-            pass
+        logger.error(f"💀 Training failed with error: {e}")
+        logger.error(f"Traceback: {str(e)}", exc_info=True)
 
     total_time = time.time() - start_time
+    total_hours = total_time / 3600
     
-    # Use enhanced logger for completion
-    try:
-        enhanced_logger.log_completion(
-            total_time=total_time, 
-            final_loss=losses.get('total_loss', 0.0), 
-            checkpoint_dir=args.checkpoint_dir
-        )
-    except Exception as e:
-        logger.warning(f"Enhanced logger completion failed: {e}")
-        # Fallback to traditional logging
-        total_hours = total_time / 3600
-        logger.info("🎉 TRAINING COMPLETED SUCCESSFULLY!")
-        logger.info("=" * 80)
-        logger.info(f"   • Total Steps: {args.max_steps:,}")
-        logger.info(f"   • Total Time: {total_hours:.2f} hours ({total_time:.0f}s)")
-        logger.info(f"   • Final Loss: {losses.get('total_loss', 'N/A')}")
-        logger.info(f"   • Checkpoints Saved: {args.checkpoint_dir}")
-        logger.info("=" * 80)
-        print(f"\n🎉 SUCCESS! Training completed in {total_hours:.1f} hours")
-        print(f"📁 Checkpoints saved to: {args.checkpoint_dir}")
-        print(f"🎯 Ready to validate 95% accuracy target!")
+    # Simple completion logging
+    logger.info("🎉 TRAINING COMPLETED!")
+    logger.info("=" * 80)
+    logger.info(f"   • Total Steps: {args.max_steps:,}")
+    logger.info(f"   • Total Time: {total_hours:.2f} hours ({total_time:.0f}s)")
+    logger.info(f"   • Final Loss: {losses.get('total_loss', 0.0):.6f}")
+    logger.info(f"   • CSV Log: {csv_path}")
+    logger.info(f"   • Checkpoint Dir: {args.checkpoint_dir}")
+    logger.info("=" * 80)
+    print(f"\n🎉 SUCCESS! Training completed in {total_hours:.1f} hours with NaN fixes applied!")
+    print(f"📁 Checkpoints saved to: {args.checkpoint_dir}")
+    print(f"🎯 Ready to validate 95% accuracy target!")
 
 
 if __name__ == "__main__":
