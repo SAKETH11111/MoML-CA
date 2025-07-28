@@ -1,2 +1,0 @@
-step,timestamp,phase,phase_count_node,phase_count_graph,avg_loss_last_10,best_loss_so_far,time_in_phase,curriculum_phase
-0,1753493758.2372222,node,1,0,0.0,0.0,0.0,1

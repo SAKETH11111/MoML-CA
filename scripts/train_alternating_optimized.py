@@ -40,7 +40,8 @@ from moml.models.mgnn.djmgnn import DJMGNN
 DEFAULT_NODE_FEATURE_DIM = 33  # Updated: 29 (original) + 4 (positional features)
 LOG_FILE_NAME = "alternating_training_optimized.log"
 
-# 4-Phase Curriculum Constants (Project Apollo)
+# 3-Phase Curriculum Constants
+# PROJECT APOLLO: 4-Phase Sequential Training Constants
 PHASE_0_END_STEP = 8000   # Backbone pre-training (freeze PIMEH)
 PHASE_1_END_STEP = 10000  # PIMEH adaptation (freeze backbone)
 PHASE_2_END_STEP = 10200  # Stability check (freeze everything)
@@ -105,80 +106,78 @@ class EarlyStopping:
 
 class SimpleCurriculumManager:
     """
-    Project Apollo 4-Phase Sequential Training Curriculum Manager.
+    Simplified curriculum manager without fancy display - FIXES NaN ISSUES.
     
-    Phase 0 (0-8000 steps): Backbone pre-training (freeze PIMEH & adapter)
-    Phase 1 (8000-10000 steps): PIMEH adaptation (freeze backbone, unfreeze PIMEH & adapter)
-    Phase 2 (10000-10200 steps): Stability check (freeze everything)
-    Phase 3 (10200+ steps): Joint polishing (unfreeze everything)
+    Phase 1 (0-2000 steps): Train only PIMEH, freeze base DJMGNN
+    Phase 2 (2000-6000 steps): Train base DJMGNN, freeze PIMEH  
+    Phase 3 (6000+ steps): Joint training with REDUCED learning rate
     """
     
     def __init__(self, model: DJMGNN):
         self.model = model
         self.current_phase = None  # Initialize to None so first update always triggers change
-        
-        # New 4-phase weight configuration for Project Apollo
         self.phase_weights = {
-            0: {'physics': 0.0, 'others': 1.0},    # Phase 0: No physics, focus on backbone
-            1: {'physics': 1.0, 'others': 0.0},    # Phase 1: Only physics, PIMEH adaptation
-            2: {'physics': 0.0, 'others': 0.0},    # Phase 2: Inference only, stability check
-            3: {'physics': 1.0, 'others': 1.0}     # Phase 3: Balanced joint polishing
+            0: {'physics': 0.0, 'others': 1.0},    # Phase 0: Backbone pre-training (freeze PIMEH)
+            1: {'physics': 1.0, 'others': 0.0},    # Phase 1: PIMEH adaptation (freeze backbone)
+            2: {'physics': 0.0, 'others': 0.0},    # Phase 2: Stability check (freeze everything)
+            3: {'physics': 1.0, 'others': 1.0}     # Phase 3: Joint polishing (balanced via GradNorm)
         }
+        
+        # NaN recovery safety mechanism
+        self.nan_recovery_mode = False  # Prevents Phase 3 after NaN recovery
+        self.stable_steps_required = 1000  # Steps in Phase 2 before allowing Phase 3
+        self.stable_step_count = 0  # Counter for stable steps since recovery
         
         # Track parameter counts for logging
         self._count_parameters()
         
     def _count_parameters(self):
-        """Count parameters in different model components including the new adapter."""
-        pimeh_count = sum(p.numel() for p in self.model.pimeh_head.parameters())
-        
-        # Count adapter parameters if it exists
-        adapter_count = 0
-        if hasattr(self.model, 'pimeh_adapter'):
-            adapter_count = sum(p.numel() for p in self.model.pimeh_adapter.parameters())
-        
-        total_count = sum(p.numel() for p in self.model.parameters())
-        base_count = total_count - pimeh_count - adapter_count
-        
+        """Count parameters in different model components."""
         self.param_counts = {
-            'pimeh': pimeh_count,
-            'adapter': adapter_count,
-            'base': base_count,
-            'total': total_count
+            'pimeh': sum(p.numel() for p in self.model.pimeh_head.parameters()),
+            'base': sum(p.numel() for p in self.model.parameters()) - sum(p.numel() for p in self.model.pimeh_head.parameters()),
+            'total': sum(p.numel() for p in self.model.parameters())
         }
         
     def get_current_phase(self, step: int) -> int:
-        """Determine current curriculum phase based on step (0-indexed phases for Project Apollo)."""
+        """Determine current curriculum phase based on step with NaN recovery safety."""
         if step < PHASE_0_END_STEP:
-            return 0  # Backbone pre-training
+            return 0  # Phase 0: Backbone pre-training (freeze PIMEH)
         elif step < PHASE_1_END_STEP:
-            return 1  # PIMEH adaptation
+            return 1  # Phase 1: PIMEH adaptation (freeze backbone)  
         elif step < PHASE_2_END_STEP:
-            return 2  # Stability check
+            return 2  # Phase 2: Stability check (freeze everything)
         else:
-            return 3  # Joint polishing
-    
-    def freeze_pimeh_and_adapter(self):
-        """Freeze PIMEH head and adapter parameters (Phase 0: Backbone pre-training)."""
-        frozen_count = 0
-        active_count = 0
-        
-        for name, param in self.model.named_parameters():
-            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
-                param.requires_grad = False
-                frozen_count += param.numel()
+            # NaN RECOVERY SAFETY: Prevent Phase 3 if in recovery mode
+            if self.nan_recovery_mode:
+                # Only allow Phase 3 after sufficient stable steps in Phase 2
+                if self.stable_step_count >= self.stable_steps_required:
+                    logger.info(f"🔓 NaN recovery mode disabled after {self.stable_step_count} stable steps")
+                    self.nan_recovery_mode = False
+                    self.stable_step_count = 0
+                    return 3
+                else:
+                    # Stay in Phase 2 for safety
+                    logger.debug(f"🛡️ NaN recovery: staying in Phase 2 ({self.stable_step_count}/{self.stable_steps_required} stable steps)")
+                    return 2
             else:
-                param.requires_grad = True
-                active_count += param.numel()
-        
-        logger.info(f"Phase 0: Frozen PIMEH+Adapter ({frozen_count:,}), active backbone ({active_count:,})")
-        return frozen_count, active_count
+                return 3  # Phase 3: Joint polishing (unfreeze everything)
     
-    def freeze_backbone(self):
-        """Freeze backbone, unfreeze PIMEH and adapter (Phase 1: PIMEH adaptation)."""
+    def enable_nan_recovery_mode(self):
+        """Enable NaN recovery mode to prevent Phase 3 transitions."""
+        self.nan_recovery_mode = True
+        self.stable_step_count = 0
+        logger.info("🛡️ NaN recovery mode ENABLED - Phase 3 blocked until stable")
+    
+    def update_stable_step_count(self):
+        """Update stable step counter when in NaN recovery mode."""
+        if self.nan_recovery_mode and self.current_phase == 2:
+            self.stable_step_count += 1
+    
+    def freeze_base_model(self):
+        """Freeze base model, keep PIMEH head and adapter active (Phase 1: PIMEH adaptation)."""
         frozen_count = 0
         active_count = 0
-        
         for name, param in self.model.named_parameters():
             if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
                 param.requires_grad = True
@@ -190,10 +189,22 @@ class SimpleCurriculumManager:
         logger.info(f"Phase 1: Frozen backbone ({frozen_count:,}), active PIMEH+Adapter ({active_count:,})")
         return frozen_count, active_count
     
-    def freeze_all(self):
-        """Freeze all parameters (Phase 2: Stability check)."""
+    def freeze_pimeh(self):
+        """Freeze PIMEH head and adapter parameters (Phase 0: backbone pre-training)."""
         frozen_count = 0
+        for name, param in self.model.named_parameters():
+            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
+                param.requires_grad = False
+                frozen_count += param.numel()
+            else:
+                param.requires_grad = True
         
+        logger.info(f"Phase 0: Frozen PIMEH+Adapter ({frozen_count:,}), active backbone ({self.param_counts['total'] - frozen_count:,})")
+        return frozen_count, self.param_counts['total'] - frozen_count
+    
+    def freeze_all(self):
+        """Freeze all parameters for stability check (Phase 2)."""
+        frozen_count = 0
         for param in self.model.parameters():
             param.requires_grad = False
             frozen_count += param.numel()
@@ -202,19 +213,16 @@ class SimpleCurriculumManager:
         return frozen_count, 0
     
     def unfreeze_all(self):
-        """Unfreeze all parameters (Phase 3: Joint polishing)."""
-        active_count = 0
-        
+        """Unfreeze all parameters (Phase 3)."""
         for param in self.model.parameters():
             param.requires_grad = True
-            active_count += param.numel()
         
-        logger.info(f"Phase 3: All parameters unfrozen ({active_count:,}) - joint polishing")
-        return 0, active_count
+        logger.info(f"Phase 3: All parameters unfrozen ({self.param_counts['total']:,}) - joint polishing")
+        return 0, self.param_counts['total']
     
     def update_phase(self, step: int, optimizer: optim.Optimizer) -> bool:
         """
-        Update training phase based on current step using Project Apollo 4-phase schedule.
+        Update training phase based on current step.
         
         Returns:
             bool: True if phase changed, False otherwise
@@ -227,11 +235,11 @@ class SimpleCurriculumManager:
             
             # Apply parameter freezing based on new phase
             if new_phase == 0:
-                frozen, active = self.freeze_pimeh_and_adapter()
+                frozen, active = self.freeze_pimeh()
                 phase_desc = "Backbone Pre-training"
                 reason = f"Step {step} < {PHASE_0_END_STEP} (Phase 0 threshold)"
             elif new_phase == 1:
-                frozen, active = self.freeze_backbone()
+                frozen, active = self.freeze_base_model()
                 phase_desc = "PIMEH Adaptation"
                 reason = f"Step {step} >= {PHASE_0_END_STEP} and < {PHASE_1_END_STEP} (Phase 1 threshold)"
             elif new_phase == 2:
@@ -246,20 +254,18 @@ class SimpleCurriculumManager:
             # Update optimizer parameter groups (important for momentum/adam states)
             self._update_optimizer_groups(optimizer)
             
-            # Log phase transition with Project Apollo context
+            # Log phase transition (simplified - no enhanced logger)
             physics_weight = self.phase_weights[new_phase]['physics']
-            others_weight = self.phase_weights[new_phase]['others']
             
             # Console notification
-            logger.info("=" * 90)
-            logger.info(f"🚀 PROJECT APOLLO PHASE TRANSITION: {old_phase} -> {new_phase}")
+            logger.info("=" * 80)
+            logger.info(f"CURRICULUM PHASE TRANSITION: {old_phase} -> {new_phase}")
             logger.info(f"   Description: {phase_desc}")
             logger.info(f"   Frozen Parameters: {frozen:,}")
             logger.info(f"   Active Parameters: {active:,}")
             logger.info(f"   Physics Loss Weight: {physics_weight:.1f}")
-            logger.info(f"   Other Loss Weight: {others_weight:.1f}")
             logger.info(f"   Reason: {reason}")
-            logger.info("=" * 90)
+            logger.info("=" * 80)
             
             return True
         
@@ -275,8 +281,7 @@ class SimpleCurriculumManager:
                 active_params.append(param)
         
         # Update optimizer's param_groups
-        if len(optimizer.param_groups) > 0:
-            optimizer.param_groups[0]['params'] = active_params
+        optimizer.param_groups[0]['params'] = active_params
         
         # Clear state for parameters that are no longer active
         # In PyTorch optimizers, state keys are the actual parameter tensors
@@ -289,7 +294,7 @@ class SimpleCurriculumManager:
             del optimizer.state[param_tensor]
     
     def get_loss_weights(self, step: int) -> Dict[str, float]:
-        """Get phase-specific loss weights for Project Apollo schedule."""
+        """Get phase-specific loss weights."""
         phase = self.get_current_phase(step)
         weights = self.phase_weights[phase]
         
@@ -302,14 +307,105 @@ class SimpleCurriculumManager:
     
     def should_skip_gradnorm(self, step: int) -> bool:
         """Determine if GradNorm should be skipped for this phase."""
-        # Skip GradNorm in phases 0, 1, and 2, only use in phase 3 (joint polishing)
+        # Skip GradNorm in phases 1 and 2, only use in phase 3
         return self.get_current_phase(step) < 3
     
-    def is_inference_only_phase(self, step: int) -> bool:
-        """Check if current phase is inference-only (Phase 2: Stability check)."""
-        return self.get_current_phase(step) == 2
+    def get_current_phase(self, step: int) -> int:
+        """Determine current curriculum phase based on step."""
+        if step < PHASE_0_END_STEP:
+            return 0  # Phase 0: Backbone pre-training (freeze PIMEH)
+        elif step < PHASE_1_END_STEP:
+            return 1  # Phase 1: PIMEH adaptation (freeze backbone)
+        elif step < PHASE_2_END_STEP:
+            return 2  # Phase 2: Stability check (freeze everything)
+        else:
+            return 3  # Phase 3: Joint polishing (unfreeze everything)
     
+    def freeze_base_model(self):
+        """Freeze base model, keep PIMEH head and adapter active (Phase 1: PIMEH adaptation)."""
+        frozen_count = 0
+        active_count = 0
+        for name, param in self.model.named_parameters():
+            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
+                param.requires_grad = True
+                active_count += param.numel()
+            else:
+                param.requires_grad = False
+                frozen_count += param.numel()
+        
+        logger.info(f"Phase 1: Frozen backbone ({frozen_count:,}), active PIMEH+Adapter ({active_count:,})")
+        return frozen_count, active_count
     
+    def freeze_pimeh(self):
+        """Freeze PIMEH head and adapter parameters (Phase 0: backbone pre-training)."""
+        frozen_count = 0
+        active_count = 0
+        for name, param in self.model.named_parameters():
+            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
+                param.requires_grad = False
+                frozen_count += param.numel()
+            else:
+                param.requires_grad = True
+                active_count += param.numel()
+        
+        logger.info(f"Phase 0: Frozen PIMEH+Adapter ({frozen_count:,}), active backbone ({active_count:,})")
+        return frozen_count, active_count
+    
+    def unfreeze_all(self):
+        """Unfreeze all parameters (Phase 3)."""
+        total_count = 0
+        for param in self.model.parameters():
+            param.requires_grad = True
+            total_count += param.numel()
+        
+        logger.info(f"Phase 3: All parameters unfrozen ({total_count:,})")
+        return 0, total_count
+    
+    def update_phase(self, step: int, optimizer) -> bool:
+        """Update training phase based on current step."""
+        new_phase = self.get_current_phase(step)
+        
+        if new_phase != self.current_phase:
+            old_phase = self.current_phase
+            self.current_phase = new_phase
+            
+            # Apply parameter freezing based on new phase
+            if new_phase == 0:
+                frozen, active = self.freeze_pimeh()
+                phase_desc = "Backbone Pre-training"
+                reason = f"Step {step} < {PHASE_0_END_STEP} (Phase 0 threshold)"
+            elif new_phase == 1:
+                frozen, active = self.freeze_base_model()
+                phase_desc = "PIMEH Adaptation"
+                reason = f"Step {step} >= {PHASE_0_END_STEP} and < {PHASE_1_END_STEP} (Phase 1 threshold)"
+            elif new_phase == 2:
+                frozen, active = self.freeze_all()
+                phase_desc = "Stability Check"
+                reason = f"Step {step} >= {PHASE_1_END_STEP} and < {PHASE_2_END_STEP} (Phase 2 threshold)"
+            else:  # Phase 3
+                frozen, active = self.unfreeze_all()
+                phase_desc = "Joint Polishing"
+                reason = f"Step {step} >= {PHASE_2_END_STEP} (Phase 3 threshold)"
+            
+            # Update optimizer parameter groups (important for momentum/adam states)
+            self._update_optimizer_groups(optimizer)
+            
+            # Log phase transition (simplified - no enhanced logger)
+            physics_weight = self.phase_weights[new_phase]['physics']
+            
+            # Console notification
+            logger.info("=" * 80)
+            logger.info(f"CURRICULUM PHASE TRANSITION: {old_phase} -> {new_phase}")
+            logger.info(f"   Description: {phase_desc}")
+            logger.info(f"   Frozen Parameters: {frozen:,}")
+            logger.info(f"   Active Parameters: {active:,}")
+            logger.info(f"   Physics Loss Weight: {physics_weight:.1f}")
+            logger.info(f"   Reason: {reason}")
+            logger.info("=" * 80)
+            
+            return True
+        
+        return False
 
 
 def setup_logging():
@@ -960,6 +1056,9 @@ def compute_losses(
                 
                 physics_loss_raw = nn.MSELoss()(pred_rotational_clamped, target_rotational_clamped)
                 losses["physics_loss"] = sanitize_loss(physics_loss_raw, fallback=0.01, loss_name="physics_loss")
+                
+                # Apply very gentle scaling for rotational constants (they're extremely sensitive)
+                losses["physics_loss"] = losses["physics_loss"] * 0.01  # Even more reduced impact
 
     # Graph-level energy prediction loss (e.g., for SPICE)
     if task_type == "node" and "energy_pred" in out and hasattr(batch, "y_graph"):
@@ -1134,10 +1233,7 @@ def train_step(
 
 def save_checkpoint(
     model: nn.Module, 
-    base_optimizer: optim.Optimizer,
-    pimeh_optimizer: optim.Optimizer,
-    base_scheduler: optim.lr_scheduler.LRScheduler,
-    pimeh_scheduler: optim.lr_scheduler.LRScheduler,
+    optimizer: optim.Optimizer, 
     scaler_graph: StandardizeTargets,
     scaler_node: Optional[StandardizeTargets],
     step: int, 
@@ -1147,7 +1243,7 @@ def save_checkpoint(
     is_best: bool = False,
     val_loss: Optional[float] = None
 ):
-    """Save a training checkpoint with multiple optimizers, schedulers, scalers and metadata."""
+    """Save a training checkpoint with scalers and metadata."""
     os.makedirs(ckpt_dir, exist_ok=True)
     
     if is_best:
@@ -1173,10 +1269,7 @@ def save_checkpoint(
     
     checkpoint_data = {
         "model_state_dict": model.state_dict(),
-        "base_optimizer_state_dict": base_optimizer.state_dict(),
-        "pimeh_optimizer_state_dict": pimeh_optimizer.state_dict(),
-        "base_scheduler_state_dict": base_scheduler.state_dict(),
-        "pimeh_scheduler_state_dict": pimeh_scheduler.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
         "scaler_state": scaler_state,
         "step": step,
         "loss": loss,
@@ -1365,46 +1458,16 @@ def main():
     model = model.to(device)
     logger.info("✅ Model moved to device successfully")
     
-    # PROJECT APOLLO: Create multiple optimizers for different phases
-    logger.info("⚙️ Creating base optimizer (Phase 0 & 3)...")
-    # Base optimizer: Used for Phase 0 (backbone pre-training) and Phase 3 (joint polishing)
-    base_optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    logger.info("✅ Base optimizer created successfully")
+    # AdamW optimizer with cosine annealing
+    logger.info("⚙️ Creating optimizer...")
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    logger.info("✅ Optimizer created successfully")
     
-    logger.info("⚙️ Creating PIMEH optimizer (Phase 1)...")
-    # PIMEH optimizer: High learning rate optimizer for PIMEH head and adapter fine-tuning
-    pimeh_params = list(model.pimeh_head.parameters()) + list(model.pimeh_adapter.parameters())
-    pimeh_optimizer = optim.AdamW(pimeh_params, lr=1e-3, weight_decay=1e-5)  # Higher LR for fine-tuning
-    logger.info(f"✅ PIMEH optimizer created successfully ({len(pimeh_params)} parameter groups)")
-    
-    # Create optimizer mapping for phase-based switching
-    optimizers = {
-        0: base_optimizer,   # Phase 0: Backbone pre-training
-        1: pimeh_optimizer,  # Phase 1: PIMEH adaptation
-        2: base_optimizer,   # Phase 2: Stability check (no training, but need valid optimizer)
-        3: base_optimizer    # Phase 3: Joint polishing
-    }
-    
-    logger.info("📅 Creating schedulers...")
-    # Create schedulers for both optimizers
-    base_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        base_optimizer, T_max=args.max_steps, eta_min=5e-6
+    logger.info("📅 Creating scheduler...")
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.max_steps, eta_min=5e-6
     )
-    pimeh_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        pimeh_optimizer, T_max=2000, eta_min=1e-5  # Shorter schedule for Phase 1
-    )
-    
-    schedulers = {
-        0: base_scheduler,
-        1: pimeh_scheduler,
-        2: base_scheduler,  # Phase 2: No training, but need valid scheduler
-        3: base_scheduler
-    }
-    logger.info("✅ Schedulers created successfully")
-    
-    # Set current optimizer and scheduler (will be updated by curriculum manager)
-    current_optimizer = base_optimizer
-    current_scheduler = base_scheduler
+    logger.info("✅ Scheduler created successfully")
     
     # Get shared parameter for GradNorm (backbone parameter from last block)
     logger.info("🔗 Getting backbone parameter for GradNorm...")
@@ -1436,35 +1499,7 @@ def main():
             if checkpoints:
                 ckpt_path = checkpoints[0]
         if ckpt_path and os.path.exists(ckpt_path):
-            # Load checkpoint - try to load both optimizers if available
-            logger.info(f"📂 Loading checkpoint from {ckpt_path}...")
-            checkpoint = torch.load(ckpt_path, map_location=device)
-            
-            # Load model state
-            model.load_state_dict(checkpoint["model_state_dict"])
-            start_step = checkpoint.get("step", 0)
-            
-            # Load optimizer states - handle both legacy single optimizer and new dual optimizer format
-            if "base_optimizer_state_dict" in checkpoint and "pimeh_optimizer_state_dict" in checkpoint:
-                # New format with multiple optimizers
-                base_optimizer.load_state_dict(checkpoint["base_optimizer_state_dict"])
-                pimeh_optimizer.load_state_dict(checkpoint["pimeh_optimizer_state_dict"])
-                logger.info("✅ Loaded both base and PIMEH optimizer states")
-            elif "optimizer_state_dict" in checkpoint:
-                # Legacy format - load into base optimizer only
-                base_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-                logger.info("✅ Loaded legacy optimizer state into base optimizer")
-            
-            # Load scheduler states if available
-            if "base_scheduler_state_dict" in checkpoint and "pimeh_scheduler_state_dict" in checkpoint:
-                base_scheduler.load_state_dict(checkpoint["base_scheduler_state_dict"])
-                pimeh_scheduler.load_state_dict(checkpoint["pimeh_scheduler_state_dict"])
-                logger.info("✅ Loaded both scheduler states")
-            elif "scheduler_state_dict" in checkpoint:
-                base_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-                logger.info("✅ Loaded legacy scheduler state")
-                
-            logger.info(f"📍 Resuming from step {start_step}")
+            start_step, _ = load_checkpoint(model, optimizer, str(ckpt_path))
     logger.info("✅ Checkpoint check completed")
 
     # Training Loop
@@ -1482,13 +1517,10 @@ def main():
     curriculum_manager = SimpleCurriculumManager(model)
     logger.info("✅ Curriculum manager initialized")
     
-    # Set initial phase and select appropriate optimizer
+    # Set initial phase (Phase 1: PIMEH only)
     logger.info("⚡ Setting initial curriculum phase...")
-    initial_phase = curriculum_manager.get_current_phase(start_step)
-    current_optimizer = optimizers[initial_phase]
-    current_scheduler = schedulers[initial_phase]
-    curriculum_manager.update_phase(start_step, current_optimizer)
-    logger.info(f"✅ Initial curriculum phase set: Phase {initial_phase} with appropriate optimizer")
+    curriculum_manager.update_phase(start_step, optimizer)
+    logger.info("✅ Initial curriculum phase set")
     
     # Initialize early stopping
     early_stopping = EarlyStopping(
@@ -1533,21 +1565,12 @@ def main():
                 logger.error("Data iterator exhausted")
                 break
 
-            # Update curriculum phase and optimizer if needed
-            current_phase = curriculum_manager.get_current_phase(step)
-            
-            # Check if we need to switch optimizer
-            if current_optimizer != optimizers[current_phase]:
-                current_optimizer = optimizers[current_phase]
-                current_scheduler = schedulers[current_phase]
-                logger.info(f"🔄 Switched to {'PIMEH' if current_phase == 1 else 'base'} optimizer for Phase {current_phase}")
-            
-            # Update curriculum phase with current optimizer
-            phase_changed = curriculum_manager.update_phase(step, current_optimizer)
+            # Update curriculum phase if needed
+            phase_changed = curriculum_manager.update_phase(step, optimizer)
             
             # Perform training step with curriculum management
             losses = train_step(
-                model, current_optimizer, loss_weighter, batch, device, task_type,
+                model, optimizer, loss_weighter, batch, device, task_type,
                 curriculum_manager=curriculum_manager, step=step
             )
             
@@ -1577,22 +1600,10 @@ def main():
                                 
                                 # COMPREHENSIVE STATE RESTORATION
                                 model.load_state_dict(checkpoint["model_state_dict"])
+                                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
                                 
-                                # Load optimizer states
-                                if "base_optimizer_state_dict" in checkpoint and "pimeh_optimizer_state_dict" in checkpoint:
-                                    base_optimizer.load_state_dict(checkpoint["base_optimizer_state_dict"])
-                                    pimeh_optimizer.load_state_dict(checkpoint["pimeh_optimizer_state_dict"])
-                                elif "optimizer_state_dict" in checkpoint:
-                                    # Legacy format
-                                    base_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-                                
-                                # Reset schedulers to a safe state
-                                if "base_scheduler_state_dict" in checkpoint and "pimeh_scheduler_state_dict" in checkpoint:
-                                    base_scheduler.load_state_dict(checkpoint["base_scheduler_state_dict"])
-                                    pimeh_scheduler.load_state_dict(checkpoint["pimeh_scheduler_state_dict"])
-                                elif "scheduler_state_dict" in checkpoint:
-                                    # Legacy format
-                                    base_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                                # Reset scheduler to a safe state
+                                scheduler.load_state_dict(checkpoint.get("scheduler_state_dict", scheduler.state_dict()))
                                 
                                 # Reset loss weighter if available
                                 if "loss_weighter_state_dict" in checkpoint:
@@ -1625,11 +1636,11 @@ def main():
                 if hasattr(curriculum_manager, 'update_stable_step_count'):
                     curriculum_manager.update_stable_step_count()
             
-            # Update current scheduler
-            current_scheduler.step()
+            # Update scheduler
+            scheduler.step()
             
             # Simple CSV and console logging
-            lr = current_scheduler.get_last_lr()[0]
+            lr = scheduler.get_last_lr()[0]
             
             # Log to CSV file
             with open(csv_path, 'a', newline='') as f:
@@ -1670,8 +1681,8 @@ def main():
                 # Save best model if validation improved (best_loss was updated)
                 if early_stopping.best_loss < previous_best:
                     save_checkpoint(
-                        model, base_optimizer, pimeh_optimizer, base_scheduler, pimeh_scheduler,
-                        graph_scaler, node_scaler, step, losses["total_loss"], args.seed, args.checkpoint_dir,
+                        model, optimizer, graph_scaler, node_scaler,
+                        step, losses["total_loss"], args.seed, args.checkpoint_dir,
                         is_best=True, val_loss=val_loss
                     )
                 
@@ -1683,8 +1694,8 @@ def main():
             # Save regular checkpoints
             if step % args.save_every == 0 and step > 0:
                 save_checkpoint(
-                    model, base_optimizer, pimeh_optimizer, base_scheduler, pimeh_scheduler,
-                    graph_scaler, node_scaler, step, losses["total_loss"], args.seed, args.checkpoint_dir
+                    model, optimizer, graph_scaler, node_scaler,
+                    step, losses["total_loss"], args.seed, args.checkpoint_dir
                 )
 
     except KeyboardInterrupt:

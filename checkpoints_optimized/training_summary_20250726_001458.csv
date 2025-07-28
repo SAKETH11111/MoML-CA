@@ -1,9 +1,0 @@
-metric,value
-total_time_hours,0.0022816162639194065
-final_loss,69.14817810058594
-node_steps,3
-graph_steps,7
-best_loss,0.1838228404521942
-checkpoint_dir,checkpoints_optimized
-metrics_csv,checkpoints_optimized/training_metrics_20250726_001450.csv
-phase_csv,checkpoints_optimized/phase_summary_20250726_001450.csv

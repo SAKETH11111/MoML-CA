@@ -65,6 +65,40 @@ DEFAULT_RBF_MAX = 10.0
 logger = logging.getLogger(__name__)
 
 
+class GNNSequential(nn.Module):
+    """
+    Custom sequential module for GNN layers that can handle multiple arguments.
+    
+    Unlike nn.Sequential which only accepts a single input, this module can pass
+    (x, edge_index, edge_attr) through a sequence of GNN layers and activations.
+    """
+    
+    def __init__(self, *modules):
+        super().__init__()
+        self.modules_list = nn.ModuleList(modules)
+    
+    def forward(self, x, edge_index, edge_attr):
+        """
+        Forward pass through the sequence of modules.
+        
+        Args:
+            x: Node features [num_nodes, feature_dim]
+            edge_index: Edge connectivity [2, num_edges]  
+            edge_attr: Edge attributes [num_edges, edge_attr_dim]
+            
+        Returns:
+            Updated node features after passing through all modules
+        """
+        for module in self.modules_list:
+            # Check if the module is a GraphConvLayer (GNN layer)
+            if 'GraphConvLayer' in str(type(module)):
+                x = module(x, edge_index, edge_attr)
+            else:
+                # Standard layers like SiLU, ReLU, etc. only take node features
+                x = module(x)
+        return x
+
+
 # Helper functions
 def rbf_encode_dist(
     dists: torch.Tensor, 
@@ -430,11 +464,12 @@ class DJMGNN(nn.Module):
         self.pimeh_head = PhysicsInformedMinimalEquivariantHead(hidden_dim)
         
         # Add PIMEH adapter for refining embeddings from the frozen backbone
-        self.pimeh_adapter = nn.Sequential(
+        self.pimeh_adapter = GNNSequential(
             GraphConvLayer(hidden_dim, hidden_dim // 2, self.processed_edge_attr_dim),
             nn.SiLU(),
             GraphConvLayer(hidden_dim // 2, hidden_dim, self.processed_edge_attr_dim),
         )
+        
         self.head_energy = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -614,28 +649,8 @@ class DJMGNN(nn.Module):
                     if original_batch.size(0) > x.size(0):
                         original_batch = original_batch[:x.size(0)]
                     
-                    # Detach the embeddings to prevent gradients from flowing back to the frozen backbone during PIMEH fine-tuning
-                    node_embeddings_detached = node_emb_for_head.detach()
-                    
-                    # Reconstruct original edge attributes for adapter (before supernode addition)
-                    original_edge_attr_for_adapter = None
-                    if original_feat_part is not None and rbf_feat_part is not None:
-                        original_edge_attr_for_adapter = torch.cat([original_feat_part, rbf_feat_part], dim=1)
-                    elif original_feat_part is not None:
-                        original_edge_attr_for_adapter = original_feat_part
-                    elif rbf_feat_part is not None:
-                        original_edge_attr_for_adapter = rbf_feat_part
-                    
-                    # Pass the detached embeddings through the adapter to create a specialized representation
-                    adapted_embeddings = self.pimeh_adapter(
-                        node_embeddings_detached, 
-                        edge_index,  # Use original edge structure
-                        original_edge_attr_for_adapter
-                    )
-                    
-                    # Pass the adapted embeddings to the PIMEH head
                     rotational_constants = self.pimeh_head(
-                        h=adapted_embeddings,  # Use the adapted embeddings
+                        h=node_emb_for_head,
                         pos=pos,
                         batch=original_batch
                     )  # [batch_size, 3]
