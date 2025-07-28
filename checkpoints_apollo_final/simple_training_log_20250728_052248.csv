@@ -1,0 +1,2 @@
+step,task_type,total_loss,node_loss,graph_loss,energy_loss,physics_loss,lr,phase
+10000,node,0.0,0.0004863516369368881,0.0,0.39814484119415283,0.0,0.00019999999879714197,2

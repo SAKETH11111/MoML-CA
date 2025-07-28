@@ -65,40 +65,6 @@ DEFAULT_RBF_MAX = 10.0
 logger = logging.getLogger(__name__)
 
 
-class GNNSequential(nn.Module):
-    """
-    Custom sequential module for GNN layers that can handle multiple arguments.
-    
-    Unlike nn.Sequential which only accepts a single input, this module can pass
-    (x, edge_index, edge_attr) through a sequence of GNN layers and activations.
-    """
-    
-    def __init__(self, *modules):
-        super().__init__()
-        self.modules_list = nn.ModuleList(modules)
-    
-    def forward(self, x, edge_index, edge_attr):
-        """
-        Forward pass through the sequence of modules.
-        
-        Args:
-            x: Node features [num_nodes, feature_dim]
-            edge_index: Edge connectivity [2, num_edges]  
-            edge_attr: Edge attributes [num_edges, edge_attr_dim]
-            
-        Returns:
-            Updated node features after passing through all modules
-        """
-        for module in self.modules_list:
-            # Check if the module is a GraphConvLayer (GNN layer)
-            if 'GraphConvLayer' in str(type(module)):
-                x = module(x, edge_index, edge_attr)
-            else:
-                # Standard layers like SiLU, ReLU, etc. only take node features
-                x = module(x)
-        return x
-
-
 # Helper functions
 def rbf_encode_dist(
     dists: torch.Tensor, 
@@ -462,14 +428,6 @@ class DJMGNN(nn.Module):
         
         # Add PIMEH head for rotational constants
         self.pimeh_head = PhysicsInformedMinimalEquivariantHead(hidden_dim)
-        
-        # Add PIMEH adapter for refining embeddings from the frozen backbone
-        self.pimeh_adapter = GNNSequential(
-            GraphConvLayer(hidden_dim, hidden_dim // 2, self.processed_edge_attr_dim),
-            nn.SiLU(),
-            GraphConvLayer(hidden_dim // 2, hidden_dim, self.processed_edge_attr_dim),
-        )
-        
         self.head_energy = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),

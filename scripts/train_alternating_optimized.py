@@ -41,11 +41,9 @@ DEFAULT_NODE_FEATURE_DIM = 33  # Updated: 29 (original) + 4 (positional features
 LOG_FILE_NAME = "alternating_training_optimized.log"
 
 # 3-Phase Curriculum Constants
-# PROJECT APOLLO: 4-Phase Sequential Training Constants
-PHASE_0_END_STEP = 8000   # Backbone pre-training (freeze PIMEH)
-PHASE_1_END_STEP = 10000  # PIMEH adaptation (freeze backbone)
-PHASE_2_END_STEP = 10200  # Stability check (freeze everything)
-# Phase 3 starts at PHASE_2_END_STEP and continues until max_steps (joint polishing)
+PHASE_1_END_STEP = 2000   # Train only PIMEH
+PHASE_2_END_STEP = 6000   # Train base DJMGNN
+# Phase 3 starts at PHASE_2_END_STEP and continues until max_steps (joint training)
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +115,9 @@ class SimpleCurriculumManager:
         self.model = model
         self.current_phase = None  # Initialize to None so first update always triggers change
         self.phase_weights = {
-            0: {'physics': 0.0, 'others': 1.0},    # Phase 0: Backbone pre-training (freeze PIMEH)
-            1: {'physics': 1.0, 'others': 0.0},    # Phase 1: PIMEH adaptation (freeze backbone)
-            2: {'physics': 0.0, 'others': 0.0},    # Phase 2: Stability check (freeze everything)
-            3: {'physics': 1.0, 'others': 1.0}     # Phase 3: Joint polishing (balanced via GradNorm)
+            1: {'physics': 2.0, 'others': 0.1},    # Phase 1: Focus on physics loss
+            2: {'physics': 0.1, 'others': 1.0},    # Phase 2: Focus on other losses
+            3: {'physics': 1.0, 'others': 1.0}     # Phase 3: Balanced via GradNorm
         }
         
         # NaN recovery safety mechanism
@@ -141,12 +138,10 @@ class SimpleCurriculumManager:
         
     def get_current_phase(self, step: int) -> int:
         """Determine current curriculum phase based on step with NaN recovery safety."""
-        if step < PHASE_0_END_STEP:
-            return 0  # Phase 0: Backbone pre-training (freeze PIMEH)
-        elif step < PHASE_1_END_STEP:
-            return 1  # Phase 1: PIMEH adaptation (freeze backbone)  
+        if step < PHASE_1_END_STEP:
+            return 1
         elif step < PHASE_2_END_STEP:
-            return 2  # Phase 2: Stability check (freeze everything)
+            return 2
         else:
             # NaN RECOVERY SAFETY: Prevent Phase 3 if in recovery mode
             if self.nan_recovery_mode:
@@ -161,7 +156,7 @@ class SimpleCurriculumManager:
                     logger.debug(f"🛡️ NaN recovery: staying in Phase 2 ({self.stable_step_count}/{self.stable_steps_required} stable steps)")
                     return 2
             else:
-                return 3  # Phase 3: Joint polishing (unfreeze everything)
+                return 3
     
     def enable_nan_recovery_mode(self):
         """Enable NaN recovery mode to prevent Phase 3 transitions."""
@@ -175,49 +170,37 @@ class SimpleCurriculumManager:
             self.stable_step_count += 1
     
     def freeze_base_model(self):
-        """Freeze base model, keep PIMEH head and adapter active (Phase 1: PIMEH adaptation)."""
+        """Freeze all DJMGNN parameters except PIMEH (Phase 1)."""
         frozen_count = 0
-        active_count = 0
         for name, param in self.model.named_parameters():
-            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
-                param.requires_grad = True
-                active_count += param.numel()
-            else:
+            if not name.startswith('pimeh_head'):
                 param.requires_grad = False
                 frozen_count += param.numel()
+            else:
+                param.requires_grad = True
         
-        logger.info(f"Phase 1: Frozen backbone ({frozen_count:,}), active PIMEH+Adapter ({active_count:,})")
-        return frozen_count, active_count
+        logger.info(f"Phase 1: Frozen base model parameters ({frozen_count:,}), active PIMEH ({self.param_counts['pimeh']:,})")
+        return frozen_count, self.param_counts['pimeh']
     
     def freeze_pimeh(self):
-        """Freeze PIMEH head and adapter parameters (Phase 0: backbone pre-training)."""
+        """Freeze only PIMEH parameters (Phase 2)."""
         frozen_count = 0
         for name, param in self.model.named_parameters():
-            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
+            if name.startswith('pimeh_head'):
                 param.requires_grad = False
                 frozen_count += param.numel()
             else:
                 param.requires_grad = True
         
-        logger.info(f"Phase 0: Frozen PIMEH+Adapter ({frozen_count:,}), active backbone ({self.param_counts['total'] - frozen_count:,})")
-        return frozen_count, self.param_counts['total'] - frozen_count
-    
-    def freeze_all(self):
-        """Freeze all parameters for stability check (Phase 2)."""
-        frozen_count = 0
-        for param in self.model.parameters():
-            param.requires_grad = False
-            frozen_count += param.numel()
-        
-        logger.info(f"Phase 2: All parameters frozen ({frozen_count:,}) - inference only")
-        return frozen_count, 0
+        logger.info(f"Phase 2: Frozen PIMEH parameters ({frozen_count:,}), active base model ({self.param_counts['base']:,})")
+        return frozen_count, self.param_counts['base']
     
     def unfreeze_all(self):
         """Unfreeze all parameters (Phase 3)."""
         for param in self.model.parameters():
             param.requires_grad = True
         
-        logger.info(f"Phase 3: All parameters unfrozen ({self.param_counts['total']:,}) - joint polishing")
+        logger.info(f"Phase 3: All parameters unfrozen ({self.param_counts['total']:,})")
         return 0, self.param_counts['total']
     
     def update_phase(self, step: int, optimizer: optim.Optimizer) -> bool:
@@ -234,21 +217,17 @@ class SimpleCurriculumManager:
             self.current_phase = new_phase
             
             # Apply parameter freezing based on new phase
-            if new_phase == 0:
-                frozen, active = self.freeze_pimeh()
-                phase_desc = "Backbone Pre-training"
-                reason = f"Step {step} < {PHASE_0_END_STEP} (Phase 0 threshold)"
-            elif new_phase == 1:
+            if new_phase == 1:
                 frozen, active = self.freeze_base_model()
-                phase_desc = "PIMEH Adaptation"
-                reason = f"Step {step} >= {PHASE_0_END_STEP} and < {PHASE_1_END_STEP} (Phase 1 threshold)"
+                phase_desc = "PIMEH Only Training"
+                reason = f"Step {step} < {PHASE_1_END_STEP} (Phase 1 threshold)"
             elif new_phase == 2:
-                frozen, active = self.freeze_all()
-                phase_desc = "Stability Check"
+                frozen, active = self.freeze_pimeh()
+                phase_desc = "Base DJMGNN Training"
                 reason = f"Step {step} >= {PHASE_1_END_STEP} and < {PHASE_2_END_STEP} (Phase 2 threshold)"
             else:  # Phase 3
                 frozen, active = self.unfreeze_all()
-                phase_desc = "Joint Polishing"
+                phase_desc = "Joint Training"
                 reason = f"Step {step} >= {PHASE_2_END_STEP} (Phase 3 threshold)"
             
             # Update optimizer parameter groups (important for momentum/adam states)
@@ -312,44 +291,41 @@ class SimpleCurriculumManager:
     
     def get_current_phase(self, step: int) -> int:
         """Determine current curriculum phase based on step."""
-        if step < PHASE_0_END_STEP:
-            return 0  # Phase 0: Backbone pre-training (freeze PIMEH)
-        elif step < PHASE_1_END_STEP:
-            return 1  # Phase 1: PIMEH adaptation (freeze backbone)
+        if step < PHASE_1_END_STEP:
+            return 1
         elif step < PHASE_2_END_STEP:
-            return 2  # Phase 2: Stability check (freeze everything)
+            return 2
         else:
-            return 3  # Phase 3: Joint polishing (unfreeze everything)
+            return 3
     
     def freeze_base_model(self):
-        """Freeze base model, keep PIMEH head and adapter active (Phase 1: PIMEH adaptation)."""
+        """Freeze all DJMGNN parameters except PIMEH (Phase 1)."""
         frozen_count = 0
-        active_count = 0
         for name, param in self.model.named_parameters():
-            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
-                param.requires_grad = True
-                active_count += param.numel()
-            else:
+            if not name.startswith('pimeh_head'):
                 param.requires_grad = False
                 frozen_count += param.numel()
+            else:
+                param.requires_grad = True
         
-        logger.info(f"Phase 1: Frozen backbone ({frozen_count:,}), active PIMEH+Adapter ({active_count:,})")
-        return frozen_count, active_count
+        pimeh_count = sum(p.numel() for name, p in self.model.named_parameters() if name.startswith('pimeh_head'))
+        logger.info(f"Phase 1: Frozen base model parameters ({frozen_count:,}), active PIMEH ({pimeh_count:,})")
+        return frozen_count, pimeh_count
     
     def freeze_pimeh(self):
-        """Freeze PIMEH head and adapter parameters (Phase 0: backbone pre-training)."""
+        """Freeze only PIMEH parameters (Phase 2)."""
         frozen_count = 0
-        active_count = 0
+        base_count = 0
         for name, param in self.model.named_parameters():
-            if name.startswith('pimeh_head') or name.startswith('pimeh_adapter'):
+            if name.startswith('pimeh_head'):
                 param.requires_grad = False
                 frozen_count += param.numel()
             else:
                 param.requires_grad = True
-                active_count += param.numel()
+                base_count += param.numel()
         
-        logger.info(f"Phase 0: Frozen PIMEH+Adapter ({frozen_count:,}), active backbone ({active_count:,})")
-        return frozen_count, active_count
+        logger.info(f"Phase 2: Frozen PIMEH parameters ({frozen_count:,}), active base model ({base_count:,})")
+        return frozen_count, base_count
     
     def unfreeze_all(self):
         """Unfreeze all parameters (Phase 3)."""
@@ -370,21 +346,17 @@ class SimpleCurriculumManager:
             self.current_phase = new_phase
             
             # Apply parameter freezing based on new phase
-            if new_phase == 0:
-                frozen, active = self.freeze_pimeh()
-                phase_desc = "Backbone Pre-training"
-                reason = f"Step {step} < {PHASE_0_END_STEP} (Phase 0 threshold)"
-            elif new_phase == 1:
+            if new_phase == 1:
                 frozen, active = self.freeze_base_model()
-                phase_desc = "PIMEH Adaptation"
-                reason = f"Step {step} >= {PHASE_0_END_STEP} and < {PHASE_1_END_STEP} (Phase 1 threshold)"
+                phase_desc = "PIMEH Only Training"
+                reason = f"Step {step} < {PHASE_1_END_STEP} (Phase 1 threshold)"
             elif new_phase == 2:
-                frozen, active = self.freeze_all()
-                phase_desc = "Stability Check"
+                frozen, active = self.freeze_pimeh()
+                phase_desc = "Base DJMGNN Training"
                 reason = f"Step {step} >= {PHASE_1_END_STEP} and < {PHASE_2_END_STEP} (Phase 2 threshold)"
             else:  # Phase 3
                 frozen, active = self.unfreeze_all()
-                phase_desc = "Joint Polishing"
+                phase_desc = "Joint Training"
                 reason = f"Step {step} >= {PHASE_2_END_STEP} (Phase 3 threshold)"
             
             # Update optimizer parameter groups (important for momentum/adam states)
